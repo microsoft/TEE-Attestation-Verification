@@ -966,6 +966,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "tee-attestation-verification-lib"
+version = "0.1.0"
+dependencies = [
+ "asn1-rs",
+ "base64 0.13.1",
+ "bitfield",
+ "console_error_panic_hook",
+ "curl",
+ "ecdsa",
+ "getrandom",
+ "hex",
+ "js-sys",
+ "log",
+ "openssl",
+ "p384",
+ "pem",
+ "rsa",
+ "serde",
+ "serde-big-array",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "wasm-logger",
+ "x509-cert",
+ "zerocopy",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1044,37 +1075,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "verification-lib"
-version = "0.1.0"
-dependencies = [
- "asn1-rs",
- "base64 0.13.1",
- "bitfield",
- "console_error_panic_hook",
- "curl",
- "ecdsa",
- "getrandom",
- "hex",
- "js-sys",
- "log",
- "openssl",
- "p384",
- "pem",
- "rsa",
- "serde",
- "serde-big-array",
- "serde_json",
- "sha2",
- "tokio",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "wasm-logger",
- "x509-cert",
- "zerocopy",
-]
 
 [[package]]
 name = "version_check"

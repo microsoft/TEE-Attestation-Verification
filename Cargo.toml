@@ -1,11 +1,12 @@
 [package]
-name = "verification-lib"
+name = "tee-attestation-verification-lib"
 version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/camelron/verification-lib"
+repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["confidentiality", "sev-snp", "tpm"]
 description = "WASM-compatible library for SEV-SNP verification and related types"
 authors = ["Cameron Baird"]
+license = "MIT"
 
 
 [lib]
