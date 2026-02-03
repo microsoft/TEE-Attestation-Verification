@@ -1,12 +1,12 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::env;
 #[cfg(not(target_arch = "wasm32"))]
-use verification_lib::{AttestationReport, SevVerifier};
+use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn verify(
     hex_input: &String,
-) -> Result<verification_lib::SevVerificationResult, Box<dyn std::error::Error>> {
+) -> Result<tee_attestation_verification_lib::SevVerificationResult, Box<dyn std::error::Error>> {
     use zerocopy::FromBytes;
 
     let bytes = hex::decode(hex_input).map_err(|e| format!("Serialisation error: {}", e))?;
