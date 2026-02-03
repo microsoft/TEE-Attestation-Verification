@@ -1,0 +1,76 @@
+name: "Continuous Integration"
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  
+jobs:
+  format:
+    name: Format check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Check formatting
+        run: |
+          cargo fmt -- --check
+
+  wasm-build:
+    name: WASM build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Check build wasm
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli
+          cargo install wasm-pack
+          cargo build --target wasm32-unknown-unknown
+          wasm-pack test --node
+
+  native-openssl:
+    name: Native openssl
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Check build with openssl
+        run: |
+          cargo build --no-default-features --features "crypto_openssl"
+          cargo test --no-default-features --features "crypto_openssl"
+
+  native-pure-rust:
+    name: Native pure-rust
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Check build with pure_rust crypto
+        run: |
+          cargo build --no-default-features --features "crypto_pure_rust"
+          cargo test --no-default-features --features "crypto_pure_rust"
