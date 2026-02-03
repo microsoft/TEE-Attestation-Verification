@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! WASM-compatible helper crate for Patty
 //!
 //! This crate will host SEV-SNP verification code that can be compiled for both

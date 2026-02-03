@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use crate::crypto::{Certificate, Crypto, CryptoBackend};
 use crate::snp;
 use crate::{certificate_chain::CertificateFetcher, AttestationReport};

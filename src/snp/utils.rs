@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #[cfg(feature = "serde")]
 pub mod serde_wrappers {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

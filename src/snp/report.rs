@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use zerocopy::{byteorder::little_endian as le, *};
 
 #[cfg(feature = "serde")]

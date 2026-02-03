@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! WASM-only AMD SEV-SNP Attestation Verification
 //!
 //! This implementation is designed to be compiled only for wasm32 and uses
