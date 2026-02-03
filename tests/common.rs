@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use verification_lib::{AttestationReport, SevVerificationResult, SevVerifier};
 use zerocopy::FromBytes;
 

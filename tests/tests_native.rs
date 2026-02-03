@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![cfg(not(target_arch = "wasm32"))]
 
 mod common;

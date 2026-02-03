@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Cryptographic backend for certificate and attestation verification.
 //!
 //! Supports two backends via feature flags:

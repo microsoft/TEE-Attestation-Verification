@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use p384::ecdsa::VerifyingKey as EcdsaVerifyingKey;
 use rsa::{
     pss::{Signature as PssSignature, VerifyingKey as PssVerifyingKey},

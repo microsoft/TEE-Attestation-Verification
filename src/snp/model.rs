@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! CPUID parsing for AMD SEV-SNP processors.
 
 /// Little-endian 4-byte CPUID representation.
