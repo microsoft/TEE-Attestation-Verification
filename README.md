@@ -6,6 +6,7 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 
 - **AMD SEV-SNP Attestation Verification**: Validates attestation reports from AMD EPYC processors
 - **WASM-Compatible**: Built for `wasm32-unknown-unknown` target with no external dependencies
+- **Azure Linux 3.0 compatible**: Built for Azure Linux 3.0, with `rust-openssl` as the sole dependency.
 
 ## Usage
 
