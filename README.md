@@ -1,6 +1,6 @@
 # TEE-Attestation-Verification
 
-A minimal-external-dependencies, portable and safe library for verifying an attestation and its endorsements, and returning to the caller the authenticated claims.
+A minimal-external-dependencies, portable and safe library for verifying a TEE attestation and its collateral, and returning to the caller the authenticated claims.
 
 ## Features
 
