@@ -7,7 +7,7 @@ use crate::{certificate_chain::CertificateFetcher, AttestationReport};
 use hex;
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Promise, Uint8Array};
-use log::info;
+use log::{debug, info};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -66,6 +66,9 @@ impl CertificateFetcher for KdsFetcher {
         }
         let ark_der = pems[1].contents().to_vec();
         let ask_der = pems[0].contents().to_vec();
+
+        debug!("Using {} ark pem:\n{}", model, pem::encode(&pems[1]));
+        debug!("Using {} ask pem:\n{}", model, pem::encode(&pems[0]));
 
         let ark = Crypto::from_der(&ark_der)
             .map_err(|e| format!("Failed to parse ARK certificate: {}", e))?;
