@@ -154,7 +154,11 @@ impl CertificateFetcher for KdsFetcher {
         let vcek_bytes = fetch_url_bytes(&vcek_url).await?;
 
         let vcek_pem = pem::Pem::new("CERTIFICATE", vcek_bytes.clone());
-        debug!("Using {} vcek pem:\n{}", processor_model, pem::encode(&vcek_pem));
+        debug!(
+            "Using {} vcek pem:\n{}",
+            processor_model,
+            pem::encode(&vcek_pem)
+        );
 
         let vcek = Crypto::from_der(&vcek_bytes)
             .map_err(|e| format!("Failed to parse VCEK certificate: {}", e))?;
