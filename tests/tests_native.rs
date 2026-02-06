@@ -55,8 +55,8 @@ mod offline {
 
     #[test]
     fn test_verify_milan_attestation() {
-        let result = common::verify_milan_attestation_offline()
-            .expect("Offline verification call failed");
+        let result =
+            common::verify_milan_attestation_offline().expect("Offline verification call failed");
 
         assert!(
             result.is_valid,
@@ -67,8 +67,8 @@ mod offline {
 
     #[test]
     fn test_verify_genoa_attestation() {
-        let result = common::verify_genoa_attestation_offline()
-            .expect("Offline verification call failed");
+        let result =
+            common::verify_genoa_attestation_offline().expect("Offline verification call failed");
 
         assert!(
             result.is_valid,
@@ -79,8 +79,8 @@ mod offline {
 
     #[test]
     fn test_verify_turin_attestation() {
-        let result = common::verify_turin_attestation_offline()
-            .expect("Offline verification call failed");
+        let result =
+            common::verify_turin_attestation_offline().expect("Offline verification call failed");
 
         assert!(
             result.is_valid,

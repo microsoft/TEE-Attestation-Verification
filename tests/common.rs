@@ -56,8 +56,8 @@ fn verify_offline(
     let attestation_report = AttestationReport::read_from_bytes(attestation_bytes)
         .map_err(|e| format!("Failed to parse attestation report: {:?}", e))?;
 
-    let ask = Crypto::from_pem(ask_pem)
-        .map_err(|e| format!("Failed to parse ASK certificate: {}", e))?;
+    let ask =
+        Crypto::from_pem(ask_pem).map_err(|e| format!("Failed to parse ASK certificate: {}", e))?;
     let vcek = Crypto::from_pem(vcek_pem)
         .map_err(|e| format!("Failed to parse VCEK certificate: {}", e))?;
 

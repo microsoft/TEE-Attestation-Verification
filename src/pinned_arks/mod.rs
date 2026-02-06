@@ -20,7 +20,13 @@ pub fn get_ark(generation: Generation) -> Result<Certificate, Box<dyn std::error
         Generation::Genoa => GENOA_ARK_PEM,
         Generation::Turin => TURIN_ARK_PEM,
         #[allow(unreachable_patterns)]
-        _ => return Err(format!("No pinned ARK available for processor generation: {}", generation).into()),
+        _ => {
+            return Err(format!(
+                "No pinned ARK available for processor generation: {}",
+                generation
+            )
+            .into())
+        }
     };
     Crypto::from_pem(pem_bytes)
         .map_err(|e| format!("Failed to parse {} ARK certificate: {}", generation, e).into())
