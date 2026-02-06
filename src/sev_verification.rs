@@ -107,37 +107,13 @@ impl SevVerifier {
         &mut self,
         attestation_report: &AttestationReport,
     ) -> Result<SevVerificationResult, Box<dyn std::error::Error>> {
-        let mut result = SevVerificationResult {
-            is_valid: false,
-            details: SevVerificationDetails {
-                processor_identified: false,
-                certificates_fetched: false,
-                certificate_chain_valid: false,
-                signature_valid: false,
-                tcb_valid: false,
-                processor_model: None,
-            },
-            errors: Vec::new(),
-        };
+        let mut result = Self::new_result();
 
         // Step 1: Identify processor model
-        let processor_model = snp::model::Generation::from_family_and_model(
-            attestation_report.cpuid_fam_id,
-            attestation_report.cpuid_mod_id,
-        );
-        if processor_model.is_err() {
-            let error = format!(
-                "Unsupported processor family/model: {} / {}",
-                attestation_report.cpuid_fam_id, attestation_report.cpuid_mod_id
-            );
-            result.errors.push(error.clone());
-            error!("{}", error);
-            return Ok(result);
-        }
-
-        let processor_model = processor_model.unwrap();
-        result.details.processor_identified = true;
-        result.details.processor_model = Some(processor_model.to_string());
+        let processor_model = match Self::identify_processor(attestation_report, &mut result) {
+            Some(model) => model,
+            None => return Ok(result),
+        };
 
         // Step 2: Get VCEK certificate for this processor (includes chain verification)
         let vcek = match self
@@ -159,31 +135,144 @@ impl SevVerifier {
             }
         };
 
-        // Step 3: Verify attestation signature
-        if let Err(e) = Self::verify_attestation_signature(attestation_report, &vcek) {
+        // Step 3: Verify signature and TCB
+        Self::verify_signature_and_tcb(attestation_report, vcek, &mut result)?;
+
+        Ok(result)
+    }
+
+    /// Verify an attestation report using caller-provided certificates (synchronous).
+    ///
+    /// This method performs offline verification without network access:
+    /// 1. Selects the pinned ARK based on the processor model in the report
+    /// 2. Verifies the certificate chain: ARK -> ASK -> VCEK
+    /// 3. Verifies that the attestation report signature is valid against the VCEK
+    /// 4. Verifies TCB values match certificate extensions
+    ///
+    /// # Arguments
+    /// * `attestation_report` - The attestation report to verify
+    /// * `ask` - The AMD SEV Key certificate (ASK)
+    /// * `vcek` - The Versioned Chip Endorsement Key certificate (VCEK)
+    ///
+    /// # Returns
+    /// A `SevVerificationResult` containing the verification outcome and details.
+    pub fn verify_attestation_with_certs(
+        attestation_report: &AttestationReport,
+        ask: Certificate,
+        vcek: Certificate,
+    ) -> Result<SevVerificationResult, Box<dyn std::error::Error>> {
+        let mut result = Self::new_result();
+
+        // Step 1: Identify processor model
+        let processor_model = match Self::identify_processor(attestation_report, &mut result) {
+            Some(model) => model,
+            None => return Ok(result),
+        };
+
+        // Step 2: Create AmdCertificates from provided certs (verifies chain)
+        let amd_certificates = match AmdCertificates::from_certs(attestation_report, ask, vcek) {
+            Ok(certs) => {
+                result.details.certificates_fetched = true;
+                result.details.certificate_chain_valid = true;
+                info!("Certificate chain verified successfully (offline mode)");
+                certs
+            }
+            Err(e) => {
+                let msg = format!("Certificate chain verification failed: {}", e);
+                result.errors.push(msg.clone());
+                error!("{}", msg);
+                return Ok(result);
+            }
+        };
+
+        // Step 3: Get the VCEK from the cache
+        let vcek = match amd_certificates.get_vcek_sync(processor_model, attestation_report) {
+            Ok(cert) => cert,
+            Err(e) => {
+                let msg = format!("Failed to retrieve VCEK: {}", e);
+                result.errors.push(msg.clone());
+                error!("{}", msg);
+                return Ok(result);
+            }
+        };
+
+        // Step 4: Verify signature and TCB
+        Self::verify_signature_and_tcb(attestation_report, vcek, &mut result)?;
+
+        Ok(result)
+    }
+
+    /// Create a new verification result with all fields initialized to false/empty.
+    fn new_result() -> SevVerificationResult {
+        SevVerificationResult {
+            is_valid: false,
+            details: SevVerificationDetails {
+                processor_identified: false,
+                certificates_fetched: false,
+                certificate_chain_valid: false,
+                signature_valid: false,
+                tcb_valid: false,
+                processor_model: None,
+            },
+            errors: Vec::new(),
+        }
+    }
+
+    /// Identify processor model from attestation report.
+    /// Returns Some(Generation) on success, None on failure (with error added to result).
+    fn identify_processor(
+        attestation_report: &AttestationReport,
+        result: &mut SevVerificationResult,
+    ) -> Option<snp::model::Generation> {
+        match snp::model::Generation::from_family_and_model(
+            attestation_report.cpuid_fam_id,
+            attestation_report.cpuid_mod_id,
+        ) {
+            Ok(processor_model) => {
+                result.details.processor_identified = true;
+                result.details.processor_model = Some(processor_model.to_string());
+                Some(processor_model)
+            }
+            Err(_) => {
+                let error = format!(
+                    "Unsupported processor family/model: {} / {}",
+                    attestation_report.cpuid_fam_id, attestation_report.cpuid_mod_id
+                );
+                result.errors.push(error.clone());
+                error!("{}", error);
+                None
+            }
+        }
+    }
+
+    /// Verify attestation signature and TCB values.
+    /// Updates result fields and logs appropriately.
+    fn verify_signature_and_tcb(
+        attestation_report: &AttestationReport,
+        vcek: &Certificate,
+        result: &mut SevVerificationResult,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Verify attestation signature
+        if let Err(e) = Self::verify_attestation_signature(attestation_report, vcek) {
             let msg = format!("Signature verification failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
-            return Ok(result);
+            return Ok(());
         }
         result.details.signature_valid = true;
 
-        // Step 4: Verify TCB values
-        if let Err(e) = Self::verify_tcb_values(&vcek, attestation_report) {
+        // Verify TCB values
+        if let Err(e) = Self::verify_tcb_values(vcek, attestation_report) {
             let msg = format!("TCB verification failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
-            return Ok(result);
+            return Ok(());
         }
         result.details.tcb_valid = true;
 
         result.is_valid = true;
-        if result.is_valid {
-            info!("AMD SEV-SNP verification PASSED");
-        } else {
-            error!("AMD SEV-SNP verification FAILED: {:?}", result.errors);
-        }
-        Ok(result)
+        info!("AMD SEV-SNP verification PASSED");
+        Ok(())
     }
 
     fn verify_attestation_signature(

@@ -8,6 +8,7 @@
 //! the `sev_verification` module which contains the verification engine.
 
 pub mod crypto;
+pub mod pinned_arks;
 pub mod sev_verification;
 pub mod snp;
 

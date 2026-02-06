@@ -3,6 +3,7 @@
 
 use crate::crypto::{Certificate, Verifier};
 use crate::kds::KdsFetcher;
+use crate::pinned_arks;
 use crate::{snp, AttestationReport};
 use log::info;
 use std::collections::HashMap;
@@ -44,6 +45,84 @@ impl AmdCertificates {
             vcek_cache: HashMap::new(),
             fetcher,
         })
+    }
+
+    /// Create a new AmdCertificates for offline verification using pinned ARKs.
+    ///
+    /// This constructor verifies the certificate chain upon instantiation:
+    /// - Selects the ARK from pinned certificates based on the processor model in the report
+    /// - Verifies that the ASK is signed by the ARK
+    /// - Verifies that the VCEK is signed by the ASK
+    ///
+    /// # Arguments
+    /// * `attestation_report` - The attestation report (used to determine processor model)
+    /// * `ask` - The AMD SEV Key certificate (ASK)
+    /// * `vcek` - The Versioned Chip Endorsement Key certificate (VCEK)
+    ///
+    /// # Returns
+    /// A verified `AmdCertificates` instance, or an error if chain verification fails.
+    pub fn from_certs(
+        attestation_report: &AttestationReport,
+        ask: Certificate,
+        vcek: Certificate,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Determine processor generation from attestation report
+        let processor_model = snp::model::Generation::from_family_and_model(
+            attestation_report.cpuid_fam_id,
+            attestation_report.cpuid_mod_id,
+        )?;
+
+        // Get pinned ARK for this processor generation
+        let ark = pinned_arks::get_ark(processor_model)?;
+
+        // Verify chain: ARK signs ASK
+        ark.verify(&ask)
+            .map_err(|e| format!("Failed to verify ASK signature against pinned ARK: {}", e))?;
+
+        // Verify chain: ASK signs VCEK
+        ask.verify(&vcek)
+            .map_err(|e| format!("Failed to verify VCEK signature against ASK: {}", e))?;
+
+        info!(
+            "Certificate chain verified successfully for {} (using pinned ARK)",
+            processor_model
+        );
+
+        // Build cache key from processor model and chip_id
+        let cache_key = format!(
+            "{}_{:02x?}",
+            processor_model,
+            &attestation_report.chip_id[..8]
+        );
+
+        let chain = Chain { ark, ask };
+        let mut vcek_cache = HashMap::new();
+        vcek_cache.insert(cache_key, vcek);
+
+        Ok(Self {
+            chains_cache: vec![(processor_model, chain)],
+            vcek_cache,
+            fetcher: KdsFetcher::new(),
+        })
+    }
+
+    /// Get the VCEK certificate that was provided during construction (for offline verification).
+    ///
+    /// This method is intended for use with instances created via `from_certs`.
+    pub fn get_vcek_sync(
+        &self,
+        processor_model: snp::model::Generation,
+        attestation_report: &AttestationReport,
+    ) -> Result<&Certificate, Box<dyn std::error::Error>> {
+        let cache_key = format!(
+            "{}_{:02x?}",
+            processor_model,
+            &attestation_report.chip_id[..8]
+        );
+
+        self.vcek_cache
+            .get(&cache_key)
+            .ok_or_else(|| format!("VCEK not found for cache key: {}", cache_key).into())
     }
 
     async fn get_chain(
