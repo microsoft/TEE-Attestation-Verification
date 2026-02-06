@@ -32,12 +32,12 @@ cargo build --target wasm32-unknown-unknown --release
 
 Use the low TCB variant in another project:
 ```toml
-verification-lib = { default-features = false, features = ["crypto_openssl"], ...}
+tee-attestation-verification = { default-features = false, features = ["crypto_openssl"], ...}
 ```
 
 ## SEV-SNP Verification Process
 
-- **Certificate Validation**: Verifies the certificate chain from the ARK through the ASK to the VCEK
+- **Certificate Validation**: Verifies the certificate chain from the ARK through the ASK to the VCEK, and the ARK against a root-of-trust
 - **Signature Validation**: Validates the attestation report signature was signed by the VCEK
 - **TCB Verification**: Confirm that the TCB values in the attestation report match the VCEK's x509v3 extensions.
 
