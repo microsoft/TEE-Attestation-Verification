@@ -23,7 +23,6 @@ pub use snp::report::AttestationReport;
 pub use certificate_chain::AmdCertificates;
 pub use sev_verification::{SevVerificationDetails, SevVerificationResult, SevVerifier};
 
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
