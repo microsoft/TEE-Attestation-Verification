@@ -11,6 +11,7 @@ pub mod crypto;
 pub mod pinned_arks;
 pub mod sev_verification;
 pub mod snp;
+pub mod utils;
 
 mod certificate_chain;
 mod kds;
@@ -21,6 +22,7 @@ pub use snp::report::AttestationReport;
 // Re-export the main types at crate root for convenient use (wasm only)
 pub use certificate_chain::AmdCertificates;
 pub use sev_verification::{SevVerificationDetails, SevVerificationResult, SevVerifier};
+
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

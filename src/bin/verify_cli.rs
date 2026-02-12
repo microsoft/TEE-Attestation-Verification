@@ -12,7 +12,8 @@ async fn verify(
 ) -> Result<tee_attestation_verification_lib::SevVerificationResult, Box<dyn std::error::Error>> {
     use zerocopy::FromBytes;
 
-    let bytes = hex::decode(hex_input).map_err(|e| format!("Serialisation error: {}", e))?;
+    let bytes = tee_attestation_verification_lib::utils::from_hex(hex_input)
+        .map_err(|e| format!("Serialisation error: {}", e))?;
     // Parse the bytes as an AttestationReport
     let attestation_report = AttestationReport::read_from_bytes(&bytes)
         .map_err(|e| format!("Failed to parse attestation report from bytes: {:?}", e))?;

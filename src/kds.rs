@@ -4,7 +4,6 @@
 use crate::crypto::{Certificate, Crypto, CryptoBackend};
 use crate::snp;
 use crate::{certificate_chain::CertificateFetcher, AttestationReport};
-use hex;
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Promise, Uint8Array};
 use log::{debug, info};
@@ -114,11 +113,11 @@ impl CertificateFetcher for KdsFetcher {
             match processor_model {
                 snp::model::Generation::Milan | snp::model::Generation::Genoa => {
                     // Milan and Genoa use full chip_id
-                    hex::encode(&attestation_report.chip_id.as_ref()).to_uppercase()
+                    crate::utils::to_hex(&attestation_report.chip_id).to_uppercase()
                 }
                 snp::model::Generation::Turin => {
                     // Turin uses only first 8 bytes of chip_id
-                    hex::encode(&attestation_report.chip_id[0..8]).to_uppercase()
+                    crate::utils::to_hex(&attestation_report.chip_id[0..8]).to_uppercase()
                 }
             }
         };
