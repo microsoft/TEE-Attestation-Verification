@@ -18,7 +18,7 @@ name = "verify-attestation"
 path = "src/bin/verify_cli.rs"
 
 [features]
-default = ["crypto_openssl"]
+default = ["crypto_pure_rust", "serde"]
 # If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
 crypto_openssl = ["dep:openssl"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
