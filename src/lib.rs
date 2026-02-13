@@ -11,6 +11,7 @@ pub mod crypto;
 pub mod pinned_arks;
 pub mod sev_verification;
 pub mod snp;
+pub mod utils;
 
 mod certificate_chain;
 mod kds;

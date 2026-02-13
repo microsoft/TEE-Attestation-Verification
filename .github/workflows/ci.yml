@@ -44,14 +44,14 @@ jobs:
           cargo install wasm-pack
 
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown
+        run: cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_pure_rust,serde"
 
       - name: Test WASM offline
-        run: wasm-pack test --node -- -- offline --nocapture
+        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,serde" -- offline
 
       - name: Test WASM online (optional - may fail due to KDS rate limiting)
         continue-on-error: true
-        run: wasm-pack test --node -- -- online --nocapture
+        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,serde" -- online
 
   native-openssl:
     name: Native openssl

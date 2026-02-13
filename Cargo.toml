@@ -21,7 +21,7 @@ path = "src/bin/verify_cli.rs"
 default = ["crypto_pure_rust", "serde"]
 # If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
 crypto_openssl = ["dep:openssl"]
-crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa"]
+crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
 serde = ["dep:serde", "dep:serde-big-array", "dep:serde_json"]
 
 [dev-dependencies]
@@ -32,16 +32,13 @@ env_logger = "0.11"
 # Shared
 x509-cert = "0.2"
 asn1-rs = "0.6"
-hex = "0.4"
-sha2 = "0.10"
-base64 = "0.13"
-bitfield = "0.14"
 
 # Crypto
 openssl = { version = "0.10", optional = true }
 ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
 p384 = { version = "0.13", features = ["ecdsa"], optional = true}
 rsa = { version = "0.9", optional = true }
+sha2 = {version = "0.10", optional = true}
 
 # Logging / panic hooks for wasm
 log = "0.4"
