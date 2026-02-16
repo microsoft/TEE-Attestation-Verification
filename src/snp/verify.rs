@@ -4,7 +4,8 @@ use crate::{snp, AttestationReport};
 use std::collections::HashMap;
 
 pub enum SevVerificationError {
-    UnsupportedProcessor,
+    UnsupportedProcessor(String),
+    InvalidRootCertificate(String),
     CertificateChainError(String),
     SignatureVerificationError(String),
     TcbVerificationError(String),
@@ -16,6 +17,16 @@ pub fn verify_attestation(
     ask: Certificate,
     vcek: Certificate,
 ) -> Result<AttestationReport, SevVerificationError> {
+    let generation = snp::model::Generation::from_family_and_model(
+        attestation_report.cpuid_fam_id,
+        attestation_report.cpuid_mod_id,
+    )
+    .map_err(|e| SevVerificationError::UnsupportedProcessor(format!("{:?}", e)))?;
+
+    // Verify that the root cert matches a pinned ARK
+    ark_matches_pinned(generation, &ark)
+        .map_err(|e| SevVerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+
     // Verify the certificate chain: ARK -> ASK -> VCEK
     Crypto::verify_chain(&[ark], &[ask], &vcek)
         .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
@@ -29,6 +40,19 @@ pub fn verify_attestation(
         .map_err(|e| SevVerificationError::TcbVerificationError(format!("{:?}", e)))?;
 
     Ok(attestation_report)
+}
+
+pub(crate) fn ark_matches_pinned(
+    generation: snp::model::Generation,
+    ark: &Certificate,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pinned_ark = super::root_certs::get_ark(generation)?;
+    let pinned_key = Crypto::get_public_key(&pinned_ark)?;
+    let provided_key = Crypto::get_public_key(ark)?;
+    if pinned_key != provided_key {
+        return Err(format!("Provided ARK does not match pinned ARK for {}", generation).into());
+    }
+    Ok(())
 }
 
 pub(crate) fn verify_tcb_values(
