@@ -70,6 +70,7 @@ mod test {
     const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
     const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
     const MILAN_REPORT: &[u8] = include_bytes!("test_data/milan_attestation_report.bin");
+    const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 
     fn cert(pem: &[u8]) -> Certificate {
         Crypto::from_pem(pem).unwrap()
@@ -135,5 +136,46 @@ mod test {
 
         vcek.verify(&report)
             .expect_err("Corrupted report should not verify");
+    }
+
+    #[test]
+    fn corrupt_signature_fails() {
+        let vcek = cert(MILAN_VCEK);
+        let mut report: AttestationReport = AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Failed to parse attestation report")
+            .clone();
+
+        // Flip a byte in the ECDSA r component
+        report.signature.r[0] ^= 0xFF;
+
+        vcek.verify(&report)
+            .expect_err("Corrupt signature should not verify");
+    }
+
+    #[test]
+    fn zeroed_signature_fails() {
+        let vcek = cert(MILAN_VCEK);
+        let mut report: AttestationReport = AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Failed to parse attestation report")
+            .clone();
+
+        // Zero out both r and s
+        report.signature.r.fill(0);
+        report.signature.s.fill(0);
+
+        vcek.verify(&report)
+            .expect_err("Zeroed signature should not verify");
+    }
+
+    #[test]
+    fn wrong_cert_rejects_signature() {
+        // Genoa VCEK is not the correct signer for the Milan report
+        let vcek = cert(GENOA_VCEK);
+        let report: AttestationReport = AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Failed to parse attestation report")
+            .clone();
+
+        vcek.verify(&report)
+            .expect_err("Wrong cert should not verify report");
     }
 }
