@@ -76,7 +76,7 @@ impl AmdCertificates {
         )?;
 
         // Get pinned ARK for this processor generation
-        let ark = root_certs::get_ark(processor_model)?;
+        let ark = root_certs::get_ark(&processor_model);
 
         // Verify chain: ARK signs ASK
         ark.verify(&ask)

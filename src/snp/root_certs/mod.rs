@@ -14,20 +14,12 @@ pub const GENOA_ARK: &[u8] = include_bytes!("genoa_ark.pem");
 pub const TURIN_ARK: &[u8] = include_bytes!("turin_ark.pem");
 
 /// Get the pinned ARK certificate for a given processor generation.
-pub fn get_ark(generation: Generation) -> Result<Certificate, Box<dyn std::error::Error>> {
+pub fn get_ark(generation: &Generation) -> Certificate {
     let pem_bytes = match generation {
         Generation::Milan => MILAN_ARK,
         Generation::Genoa => GENOA_ARK,
         Generation::Turin => TURIN_ARK,
-        #[allow(unreachable_patterns)]
-        _ => {
-            return Err(format!(
-                "No pinned ARK available for processor generation: {}",
-                generation
-            )
-            .into())
-        }
     };
-    Crypto::from_pem(pem_bytes)
-        .map_err(|e| format!("Failed to parse {} ARK certificate: {}", generation, e).into())
+    // As we vendor the ARKs as PEM files, they are guaranteed to be valid
+    Crypto::from_pem(pem_bytes).unwrap()
 }

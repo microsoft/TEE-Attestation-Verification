@@ -68,7 +68,9 @@ impl From<SevVerificationError> for TAVError {
             SevVerificationError::UnsupportedProcessor(_) => TAVErrorCode::UnsupportedProcessor,
             SevVerificationError::InvalidRootCertificate(_) => TAVErrorCode::InvalidRootCertificate,
             SevVerificationError::CertificateChainError(_) => TAVErrorCode::CertificateChainError,
-            SevVerificationError::SignatureVerificationError(_) => TAVErrorCode::SignatureVerificationError,
+            SevVerificationError::SignatureVerificationError(_) => {
+                TAVErrorCode::SignatureVerificationError
+            }
             SevVerificationError::TcbVerificationError(_) => TAVErrorCode::TcbVerificationError,
         };
         Self::new(code, e.to_string())
@@ -97,9 +99,8 @@ unsafe fn parse_report(ptr: *const u8, len: usize) -> Result<&'static Attestatio
 }
 
 fn parse_pem(name: &str, pem: &[u8]) -> Result<Certificate, TAVError> {
-    Crypto::from_pem(pem).map_err(|e| {
-        TAVError::invalid_argument(format!("Failed to parse {name} PEM: {e}"))
-    })
+    Crypto::from_pem(pem)
+        .map_err(|e| TAVError::invalid_argument(format!("Failed to parse {name} PEM: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +139,8 @@ pub unsafe extern "C" fn tav_verify_attestation(
         let ark = parse_pem("ARK", slice::from_raw_parts(ark_pem_ptr, ark_pem_len))?;
         let ask = parse_pem("ASK", slice::from_raw_parts(ask_pem_ptr, ask_pem_len))?;
         let vcek = parse_pem("VCEK", slice::from_raw_parts(vcek_pem_ptr, vcek_pem_len))?;
-        verify::verify_attestation(report, &ark, &ask, &vcek).map_err(TAVError::from)?;
+        verify::verify_attestation(report, &vcek, Some(&ask), Some(&ark))
+            .map_err(TAVError::from)?;
         Ok(report)
     };
 
