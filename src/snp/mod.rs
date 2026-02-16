@@ -3,5 +3,6 @@
 
 pub(crate) mod model;
 pub mod report;
+pub mod root_certs;
 mod utils;
 pub mod verify;
