@@ -107,3 +107,40 @@ mod offline {
         );
     }
 }
+
+/// Direct verification tests for snp::verify::verify_attestation (sync, fixture-based)
+mod snp_verify {
+    use super::*;
+
+    #[test]
+    fn test_verify_milan_attestation() {
+        init_logger();
+        common::verify_milan_attestation_with_snp_verify()
+            .expect("snp::verify::verify_attestation should pass for Milan fixtures");
+    }
+
+    #[test]
+    fn test_verify_genoa_attestation() {
+        init_logger();
+        common::verify_genoa_attestation_with_snp_verify()
+            .expect("snp::verify::verify_attestation should pass for Genoa fixtures");
+    }
+
+    #[test]
+    fn test_verify_turin_attestation() {
+        init_logger();
+        common::verify_turin_attestation_with_snp_verify()
+            .expect("snp::verify::verify_attestation should pass for Turin fixtures");
+    }
+
+    #[test]
+    fn test_verify_milan_attestation_rejects_wrong_generation_certs() {
+        init_logger();
+        let result = common::verify_milan_attestation_with_wrong_genoa_certs();
+
+        assert!(
+            result.is_err(),
+            "snp::verify::verify_attestation should fail with mismatched ASK/VCEK certs"
+        );
+    }
+}
