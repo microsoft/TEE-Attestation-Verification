@@ -55,7 +55,7 @@ impl CryptoBackend for Crypto {
 
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
         let pub_key = cert.public_key()?;
-        pub_key.public_key_to_der()
+        Ok(pub_key.public_key_to_der()?)
     }
 }
 
