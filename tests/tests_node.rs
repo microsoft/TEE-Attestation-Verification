@@ -76,23 +76,8 @@ mod offline {
     use super::*;
 
     #[wasm_bindgen_test]
-    fn test_verify_milan_attestation() {
+    fn test_suite() {
         init_logger();
-        common::verify_with_snp_verify(common::MILAN_ATTESTATION, common::MILAN_ASK, common::MILAN_VCEK)
-            .expect("snp::verify::verify_attestation should pass for Milan fixtures");
-    }
-
-    #[wasm_bindgen_test]
-    fn test_verify_genoa_attestation() {
-        init_logger();
-        common::verify_with_snp_verify(common::GENOA_ATTESTATION, common::GENOA_ASK, common::GENOA_VCEK)
-            .expect("snp::verify::verify_attestation should pass for Genoa fixtures");
-    }
-
-    #[wasm_bindgen_test]
-    fn test_verify_turin_attestation() {
-        init_logger();
-        common::verify_with_snp_verify(common::TURIN_ATTESTATION, common::TURIN_ASK, common::TURIN_VCEK)
-            .expect("snp::verify::verify_attestation should pass for Turin fixtures");
+        common::verify_attestation_suite();
     }
 }

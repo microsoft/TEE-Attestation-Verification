@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use tee_attestation_verification_lib::crypto::{Crypto, CryptoBackend};
-use tee_attestation_verification_lib::snp::verify::SevVerificationError;
 use tee_attestation_verification_lib::{AttestationReport, SevVerificationResult, SevVerifier};
 use zerocopy::FromBytes;
 
@@ -21,25 +20,91 @@ pub const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 pub const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 pub const TURIN_VCEK: &[u8] = include_bytes!("test_data/turin_vcek.pem");
 
-pub fn verify_with_snp_verify(
-    attestation_bytes: &[u8],
-    ask_pem: &[u8],
-    vcek_pem: &[u8],
-) -> Result<(), SevVerificationError> {
-    let attestation_report = AttestationReport::read_from_bytes(attestation_bytes)
-        .map_err(|e| SevVerificationError::SignatureVerificationError(format!("{:?}", e)))?;
+pub fn test_verify_attestation_suite() {
+    let tampered_milan_attestation = {
+        let mut tampered = MILAN_ATTESTATION.to_vec();
+        // Flip some bits in the attestation report to cause signature verification to fail
+        tampered[100] ^= 0xFF;
+        tampered
+    };
 
-    let ask = Crypto::from_pem(ask_pem)
-        .map_err(|e| SevVerificationError::CertificateChainError(e.to_string()))?;
-    let vcek = Crypto::from_pem(vcek_pem)
-        .map_err(|e| SevVerificationError::CertificateChainError(e.to_string()))?;
+    let tests = [
+        (
+            "genoa_ok_pinned",
+            GENOA_ATTESTATION,
+            GENOA_VCEK,
+            Some(GENOA_ASK),
+            None,
+            Ok(()),
+        ),
+        (
+            "turin_ok_pinned",
+            TURIN_ATTESTATION,
+            TURIN_VCEK,
+            Some(TURIN_ASK),
+            None,
+            Ok(()),
+        ),
+        (
+            "milan_ok_pinned",
+            MILAN_ATTESTATION,
+            MILAN_VCEK,
+            Some(MILAN_ASK),
+            None,
+            Ok(()),
+        ),
+        (
+            "milan_invalid_root_certificate",
+            MILAN_ATTESTATION,
+            MILAN_VCEK,
+            Some(MILAN_ASK),
+            Some(MILAN_ASK),
+            Err("Invalid root certificate"),
+        ),
+        (
+            "milan_genoa_ask",
+            MILAN_ATTESTATION,
+            MILAN_VCEK,
+            Some(GENOA_ASK),
+            None,
+            Err("Certificate chain error"),
+        ),
+        (
+            "tampered_attestation",
+            &tampered_milan_attestation,
+            MILAN_VCEK,
+            None,
+            None,
+            Err("Signature verification error"),
+        ),
+    ];
 
-    tee_attestation_verification_lib::snp::verify::verify_attestation(
-        &attestation_report,
-        &vcek,
-        Some(&ask),
-        None,
-    )
+    for (tag, att, vcek, ask_opt, ark_opt, expected) in tests {
+        let report = AttestationReport::read_from_bytes(att).unwrap();
+        let vcek = Crypto::from_pem(vcek).unwrap();
+        let ask = ask_opt.map(|ask| Crypto::from_pem(ask).unwrap());
+        let ark = ark_opt.map(|ark| Crypto::from_pem(ark).unwrap());
+
+        let result = tee_attestation_verification_lib::snp::verify::verify_attestation(
+            &report,
+            &vcek,
+            ask.as_ref(),
+            ark.as_ref(),
+        );
+
+        if let Err(e_str) = expected {
+            let err = result.expect_err(&format!("{}: Expected to fail with {}", tag, e_str));
+            assert!(
+                err.to_string().contains(e_str),
+                "{}: Expected error to contain '{}', got: {:?}",
+                tag,
+                e_str,
+                err
+            );
+        } else {
+            result.expect(&format!("{}: Expected verification to succeed", tag))
+        };
+    }
 }
 
 pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<SevVerificationResult, String> {
