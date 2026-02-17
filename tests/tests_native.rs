@@ -67,80 +67,44 @@ mod online {
 /// Offline verification tests (sync, uses pinned ARKs)
 mod offline {
     use super::*;
+    use tee_attestation_verification_lib::snp::verify::SevVerificationError;
 
     #[test]
     fn test_verify_milan_attestation() {
         init_logger();
-        let result =
-            common::verify_milan_attestation_offline().expect("Offline verification call failed");
-
-        assert!(
-            result.is_valid,
-            "Offline verification should pass: {:?}",
-            result.errors
-        );
-    }
-
-    #[test]
-    fn test_verify_genoa_attestation() {
-        init_logger();
-        let result =
-            common::verify_genoa_attestation_offline().expect("Offline verification call failed");
-
-        assert!(
-            result.is_valid,
-            "Offline verification should pass: {:?}",
-            result.errors
-        );
-    }
-
-    #[test]
-    fn test_verify_turin_attestation() {
-        init_logger();
-        let result =
-            common::verify_turin_attestation_offline().expect("Offline verification call failed");
-
-        assert!(
-            result.is_valid,
-            "Offline verification should pass: {:?}",
-            result.errors
-        );
-    }
-}
-
-/// Direct verification tests for snp::verify::verify_attestation (sync, fixture-based)
-mod snp_verify {
-    use super::*;
-
-    #[test]
-    fn test_verify_milan_attestation() {
-        init_logger();
-        common::verify_milan_attestation_with_snp_verify()
+        common::verify_with_snp_verify(common::MILAN_ATTESTATION, common::MILAN_ASK, common::MILAN_VCEK)
             .expect("snp::verify::verify_attestation should pass for Milan fixtures");
     }
 
     #[test]
     fn test_verify_genoa_attestation() {
         init_logger();
-        common::verify_genoa_attestation_with_snp_verify()
+        common::verify_with_snp_verify(common::GENOA_ATTESTATION, common::GENOA_ASK, common::GENOA_VCEK)
             .expect("snp::verify::verify_attestation should pass for Genoa fixtures");
     }
 
     #[test]
     fn test_verify_turin_attestation() {
         init_logger();
-        common::verify_turin_attestation_with_snp_verify()
+        common::verify_with_snp_verify(common::TURIN_ATTESTATION, common::TURIN_ASK, common::TURIN_VCEK)
             .expect("snp::verify::verify_attestation should pass for Turin fixtures");
     }
 
     #[test]
     fn test_verify_milan_attestation_rejects_wrong_generation_certs() {
         init_logger();
-        let result = common::verify_milan_attestation_with_wrong_genoa_certs();
+        let result = common::verify_with_snp_verify(
+            common::MILAN_ATTESTATION,
+            common::GENOA_ASK,
+            common::GENOA_VCEK,
+        );
 
-        assert!(
-            result.is_err(),
-            "snp::verify::verify_attestation should fail with mismatched ASK/VCEK certs"
+        assert!(matches!(
+            &result,
+            Err(SevVerificationError::CertificateChainError(_))
+        ),
+        "Expected CertificateChainError for mismatched ASK/VCEK certs, got: {:?}",
+        result
         );
     }
 }
