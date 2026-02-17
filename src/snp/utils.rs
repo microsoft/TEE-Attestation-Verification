@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use asn1_rs::{Oid as OidRs, oid};
+use asn1_rs::{oid, Oid as OidRs};
 
 #[cfg(feature = "serde")]
 pub mod serde_wrappers {
