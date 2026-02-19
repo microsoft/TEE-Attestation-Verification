@@ -31,7 +31,9 @@ impl std::error::Error for SevVerificationError {}
 
 pub enum ChainVerification<'a> {
     Skip,
-    WithPinnedArk { ask: &'a Certificate },
+    WithPinnedArk {
+        ask: &'a Certificate,
+    },
     WithProvidedArk {
         ask: &'a Certificate,
         ark: &'a Certificate,

@@ -85,7 +85,10 @@ impl SevVerifier {
     ) {
         use snp::verify::SevVerificationError::*;
         if let Err(e @ UnsupportedProcessor(_)) = verif_result {
-            let msg = format!("Processor identification failed during attestation verification: {}", e);
+            let msg = format!(
+                "Processor identification failed during attestation verification: {}",
+                e
+            );
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
