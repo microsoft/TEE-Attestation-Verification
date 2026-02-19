@@ -172,7 +172,11 @@ impl SevVerifier {
         Self::update_verification_result_from_snp_verify_result(
             &mut result,
             // Skip redundant certificate chain verification since we already verified the VCEK chain
-            snp::verify::verify_attestation(attestation_report, vcek, None, None),
+            snp::verify::verify_attestation(
+                attestation_report,
+                vcek,
+                snp::verify::ChainVerification::Skip,
+            ),
             false,
         );
 
@@ -209,7 +213,11 @@ impl SevVerifier {
         Self::update_verification_result_from_snp_verify_result(
             &mut result,
             // Use the pinned ark
-            snp::verify::verify_attestation(attestation_report, &vcek, Some(&ask), None),
+            snp::verify::verify_attestation(
+                attestation_report,
+                &vcek,
+                snp::verify::ChainVerification::WithPinnedArk { ask: &ask },
+            ),
             false,
         );
 

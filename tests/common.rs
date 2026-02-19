@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use tee_attestation_verification_lib::crypto::{Crypto, CryptoBackend};
+use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
 use tee_attestation_verification_lib::{AttestationReport, SevVerificationResult, SevVerifier};
 use zerocopy::FromBytes;
 
@@ -27,70 +28,62 @@ pub fn test_verify_attestation_suite() {
         tampered[100] ^= 0xFF;
         tampered
     };
+    let milan_ask = Crypto::from_pem(MILAN_ASK).unwrap();
+    let genoa_ask = Crypto::from_pem(GENOA_ASK).unwrap();
+    let turin_ask = Crypto::from_pem(TURIN_ASK).unwrap();
 
     let tests = [
         (
             "genoa_ok_pinned",
             GENOA_ATTESTATION,
             GENOA_VCEK,
-            Some(GENOA_ASK),
-            None,
+            ChainVerification::WithPinnedArk { ask: &genoa_ask },
             Ok(()),
         ),
         (
             "turin_ok_pinned",
             TURIN_ATTESTATION,
             TURIN_VCEK,
-            Some(TURIN_ASK),
-            None,
+            ChainVerification::WithPinnedArk { ask: &turin_ask },
             Ok(()),
         ),
         (
             "milan_ok_pinned",
             MILAN_ATTESTATION,
             MILAN_VCEK,
-            Some(MILAN_ASK),
-            None,
+            ChainVerification::WithPinnedArk { ask: &milan_ask },
             Ok(()),
         ),
         (
             "milan_invalid_root_certificate",
             MILAN_ATTESTATION,
             MILAN_VCEK,
-            Some(MILAN_ASK),
-            Some(MILAN_ASK),
+            ChainVerification::WithProvidedArk {
+                ask: &milan_ask,
+                ark: &milan_ask,
+            },
             Err("Invalid root certificate"),
         ),
         (
             "milan_genoa_ask",
             MILAN_ATTESTATION,
             MILAN_VCEK,
-            Some(GENOA_ASK),
-            None,
+            ChainVerification::WithPinnedArk { ask: &genoa_ask },
             Err("Certificate chain error"),
         ),
         (
             "tampered_attestation",
             &tampered_milan_attestation,
             MILAN_VCEK,
-            None,
-            None,
+            ChainVerification::Skip,
             Err("Signature verification error"),
         ),
     ];
 
-    for (tag, att, vcek, ask_opt, ark_opt, expected) in tests {
+    for (tag, att, vcek, chain, expected) in tests {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = Crypto::from_pem(vcek).unwrap();
-        let ask = ask_opt.map(|ask| Crypto::from_pem(ask).unwrap());
-        let ark = ark_opt.map(|ark| Crypto::from_pem(ark).unwrap());
-
-        let result = tee_attestation_verification_lib::snp::verify::verify_attestation(
-            &report,
-            &vcek,
-            ask.as_ref(),
-            ark.as_ref(),
-        );
+        let result = verify::verify_attestation(&report, &vcek, chain);
 
         if let Err(e_str) = expected {
             let err = result.expect_err(&format!("{}: Expected to fail with {}", tag, e_str));

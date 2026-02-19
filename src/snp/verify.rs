@@ -29,16 +29,24 @@ impl std::fmt::Display for SevVerificationError {
 
 impl std::error::Error for SevVerificationError {}
 
+pub enum ChainVerification<'a> {
+    Skip,
+    WithPinnedArk { ask: &'a Certificate },
+    WithProvidedArk {
+        ask: &'a Certificate,
+        ark: &'a Certificate,
+    },
+}
+
 // Verifies the attestation report using the provided ARK, ASK, and VCEK certificates.
 // If verification is successful, returns Ok(()). Otherwise, returns a SevVerificationError with details of the step which failed.
-// - If ask_opt is None, the chain verification step is skipped and only the report signature and TCB values are verified using the provided VCEK.
-// - If ark_opt is None the pinned ARK for the processor model will be used for chain verification otherwise the provided ARK will be used
-//   after verifying it matches the pinned ARK for the processor model.
+// - Use ChainVerification::Skip to skip chain verification and only verify report signature + TCB using VCEK.
+// - Use ChainVerification::WithPinnedArk to verify chain with pinned ARK for the processor model.
+// - Use ChainVerification::WithProvidedArk to verify chain with caller-provided ARK after validating its' public key matches pinned ARK.
 pub fn verify_attestation(
     attestation_report: &AttestationReport,
     vcek: &Certificate,
-    ask_opt: Option<&Certificate>,
-    ark_opt: Option<&Certificate>,
+    chain_verification: ChainVerification<'_>,
 ) -> Result<(), SevVerificationError> {
     let generation = snp::model::Generation::from_family_and_model(
         attestation_report.cpuid_fam_id,
@@ -46,9 +54,8 @@ pub fn verify_attestation(
     )
     .map_err(|e| SevVerificationError::UnsupportedProcessor(format!("{:?}", e)))?;
 
-    // Only validate the chain if we are provided an ask
-    if let Some(ask) = ask_opt {
-        if let Some(ark) = ark_opt {
+    match chain_verification {
+        ChainVerification::WithProvidedArk { ask, ark } => {
             // If ARK is provided, verify it matches the pinned ARK for this generation
             ark_matches_pinned(generation, ark)
                 .map_err(|e| SevVerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
@@ -56,15 +63,18 @@ pub fn verify_attestation(
             // Verify the certificate chain: ARK -> ASK -> VCEK
             Crypto::verify_chain(vec![ark.clone()], vec![ask.clone()], vcek.clone())
                 .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
-        } else {
+        }
+        ChainVerification::WithPinnedArk { ask } => {
             // No ARK provided, use pinned ARK for chain verification
-            let pinned_ark = super::super::pinned_arks::get_ark(generation).map_err(|e|
-                SevVerificationError::InvalidRootCertificate(format!("{:?}", e))
-            )?;
+            let pinned_ark = super::super::pinned_arks::get_ark(generation)
+                .map_err(|e| SevVerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
             Crypto::verify_chain(vec![pinned_ark], vec![ask.clone()], vcek.clone())
                 .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
         }
-    }
+        ChainVerification::Skip => {
+            // No ASK provided, skip chain verification
+        }
+    };
 
     // Verify the attestation report signature using the VCEK
     vcek.verify(attestation_report)
