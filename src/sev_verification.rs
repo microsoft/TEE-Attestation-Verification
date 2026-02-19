@@ -81,10 +81,11 @@ impl SevVerifier {
     fn update_verification_result_from_snp_verify_result(
         result: &mut SevVerificationResult,
         verif_result: Result<(), snp::verify::SevVerificationError>,
+        chain_passed: bool,
     ) {
         use snp::verify::SevVerificationError::*;
         if let Err(e @ UnsupportedProcessor(_)) = verif_result {
-            let msg = format!("Certificate chain verification failed: {}", e);
+            let msg = format!("Processor identification failed during attestation verification: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
@@ -93,24 +94,24 @@ impl SevVerifier {
         }
 
         if let Err(e @ InvalidRootCertificate(_)) = verif_result {
-            let msg = format!("Certificate chain verification failed: {}", e);
+            let msg = format!("Root certificate validation failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
         }
 
         if let Err(e @ CertificateChainError(_)) = verif_result {
-            let msg = format!("Certificate chain verification failed: {}", e);
+            let msg = format!("Certificate chain validation failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
-        } else {
+        } else if chain_passed {
             result.details.certificate_chain_valid = true;
             info!("Certificate chain verified successfully (offline mode)");
         }
 
         if let Err(e @ SignatureVerificationError(_)) = verif_result {
-            let msg = format!("Signature verification failed: {}", e);
+            let msg = format!("Attestation signature verification failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
@@ -120,7 +121,7 @@ impl SevVerifier {
         }
 
         if let Err(e @ TcbVerificationError(_)) = verif_result {
-            let msg = format!("TCB verification failed: {}", e);
+            let msg = format!("Attestation TCB verification failed: {}", e);
             result.errors.push(msg.clone());
             error!("{}", msg);
             return;
@@ -172,6 +173,7 @@ impl SevVerifier {
             &mut result,
             // Skip redundant certificate chain verification since we already verified the VCEK chain
             snp::verify::verify_attestation(attestation_report, vcek, None, None),
+            false,
         );
 
         Ok(result)
@@ -208,6 +210,7 @@ impl SevVerifier {
             &mut result,
             // Use the pinned ark
             snp::verify::verify_attestation(attestation_report, &vcek, Some(&ask), None),
+            false,
         );
 
         Ok(result)

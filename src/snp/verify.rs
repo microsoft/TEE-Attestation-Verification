@@ -58,8 +58,9 @@ pub fn verify_attestation(
                 .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
         } else {
             // No ARK provided, use pinned ARK for chain verification
-            // ARK is guaranteed not to error on lookup
-            let pinned_ark = super::super::pinned_arks::get_ark(generation).unwrap();
+            let pinned_ark = super::super::pinned_arks::get_ark(generation).map_err(|e|
+                SevVerificationError::InvalidRootCertificate(format!("{:?}", e))
+            )?;
             Crypto::verify_chain(vec![pinned_ark], vec![ask.clone()], vcek.clone())
                 .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
         }
