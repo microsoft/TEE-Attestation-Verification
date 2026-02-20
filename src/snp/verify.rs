@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use super::utils::Oid;
 use crate::crypto::{Certificate, Crypto, CryptoBackend, Verifier};
-use crate::{snp, AttestationReport};
+use crate::{snp, snp::utils::Oid, AttestationReport};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -68,7 +67,7 @@ pub fn verify_attestation(
         }
         ChainVerification::WithPinnedArk { ask } => {
             // No ARK provided, use pinned ARK for chain verification
-            let pinned_ark = super::super::pinned_arks::get_ark(generation)
+            let pinned_ark = crate::pinned_arks::get_ark(generation)
                 .map_err(|e| SevVerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
             Crypto::verify_chain(vec![pinned_ark], vec![ask.clone()], vcek.clone())
                 .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
@@ -93,7 +92,7 @@ pub(crate) fn ark_matches_pinned(
     generation: snp::model::Generation,
     ark: &Certificate,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let pinned_ark = super::super::pinned_arks::get_ark(generation)?;
+    let pinned_ark = crate::pinned_arks::get_ark(generation)?;
     let pinned_key = Crypto::get_public_key(&pinned_ark)?;
     let provided_key = Crypto::get_public_key(ark)?;
     if pinned_key != provided_key {
