@@ -7,9 +7,7 @@ use std::env;
 use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn verify(
-    hex_input: &String,
-) -> Result<(), String> {
+async fn verify(hex_input: &String) -> Result<(), String> {
     use zerocopy::FromBytes;
 
     let bytes = tee_attestation_verification_lib::utils::from_hex(hex_input)
@@ -23,7 +21,10 @@ async fn verify(
         .await
         .map_err(|e| format!("Failed to initialize verifier: {}", e))?;
 
-    verifier.verify_attestation(&attestation_report).await.map_err(|e| format!("Verification call failed: {:?}", e))
+    verifier
+        .verify_attestation(&attestation_report)
+        .await
+        .map_err(|e| format!("Verification call failed: {:?}", e))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
