@@ -21,7 +21,7 @@ pub use snp::report::AttestationReport;
 
 // Re-export the main types at crate root for convenient use (wasm only)
 pub use certificate_chain::AmdCertificates;
-pub use sev_verification::{SevVerificationDetails, SevVerificationResult, SevVerifier};
+pub use sev_verification::SevVerifier;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -37,33 +37,12 @@ pub fn init() {
 /// JavaScript-facing verification function
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn verify_attestation_report(attestation_report_json: &str) -> Result<String, String> {
+pub async fn verify_attestation_report(attestation_report_json: &str) -> Result<(), String> {
     let attestation_report: AttestationReport = serde_json::from_str(attestation_report_json)
         .map_err(|e| format!("Failed to parse attestation report: {}", e))?;
 
     let mut verifier = SevVerifier::new()
         .await
         .map_err(|e| format!("Failed to initialize verifier: {}", e))?;
-    match verifier.verify_attestation(&attestation_report).await {
-        Ok(result) => {
-            serde_json::to_string(&result).map_err(|e| format!("Failed to serialize result: {}", e))
-        }
-        Err(e) => {
-            // Create an error result
-            let error_result = SevVerificationResult {
-                is_valid: false,
-                details: SevVerificationDetails {
-                    processor_identified: false,
-                    certificates_fetched: false,
-                    certificate_chain_valid: false,
-                    signature_valid: false,
-                    tcb_valid: false,
-                    processor_model: None,
-                },
-                errors: vec![format!("{}", e)],
-            };
-            serde_json::to_string(&error_result)
-                .map_err(|e| format!("Failed to serialize error result: {}", e))
-        }
-    }
+    verifier.verify_attestation(&attestation_report).await.map_err(|e| format!("Verification failed: {:?}", e)) 
 }

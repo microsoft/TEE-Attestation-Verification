@@ -3,9 +3,7 @@
 
 use tee_attestation_verification_lib::crypto::{Crypto, CryptoBackend};
 use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
-use tee_attestation_verification_lib::{
-    snp, AttestationReport, SevVerificationResult, SevVerifier,
-};
+use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
 use zerocopy::FromBytes;
 
 // Attestation reports

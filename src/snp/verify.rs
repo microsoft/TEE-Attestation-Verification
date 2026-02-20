@@ -40,7 +40,7 @@ pub enum ChainVerification<'a> {
 }
 
 // Verifies the attestation report using the provided ARK, ASK, and VCEK certificates.
-// If verification is successful, returns Ok(()). Otherwise, returns a SevVerificationError with details of the step which failed.
+// If verification is successful, returns Ok(()). Otherwise, returns a VerificationError with details of the step which failed.
 // - Use ChainVerification::Skip to skip chain verification and only verify report signature + TCB using VCEK.
 // - Use ChainVerification::WithPinnedArk to verify chain with pinned ARK for the processor model.
 // - Use ChainVerification::WithProvidedArk to verify chain with caller-provided ARK after validating its' public key matches pinned ARK.

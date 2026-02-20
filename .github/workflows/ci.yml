@@ -44,7 +44,10 @@ jobs:
           cargo install wasm-pack
 
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_pure_rust,serde"
+        run: |
+          cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_pure_rust,serde"
+          wasm-pack build --no-default-features --features "crypto_pure_rust,serde"
+
 
       - name: Test WASM offline
         run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,serde" -- offline
