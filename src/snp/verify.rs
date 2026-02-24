@@ -63,14 +63,14 @@ pub fn verify_attestation(
 
             // Verify the certificate chain: ARK -> ASK -> VCEK
             Crypto::verify_chain(&[ark], &[ask], vcek)
-                .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
+                .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
         }
         ChainVerification::WithPinnedArk { ask } => {
             // No ARK provided, use pinned ARK for chain verification
             let pinned_ark = crate::pinned_arks::get_ark(generation)
-                .map_err(|e| SevVerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+                .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
             Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
-                .map_err(|e| SevVerificationError::CertificateChainError(format!("{:?}", e)))?;
+                .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
         }
         ChainVerification::Skip => {
             // No ASK provided, skip chain verification
