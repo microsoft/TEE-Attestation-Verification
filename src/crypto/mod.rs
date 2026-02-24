@@ -39,9 +39,9 @@ pub trait CryptoBackend {
 
     /// Verify a certificate chain from `trusted_certs` through `untrusted_chain` to `leaf`.
     fn verify_chain(
-        trusted_certs: Vec<Self::Certificate>,
-        untrusted_chain: Vec<Self::Certificate>,
-        leaf: Self::Certificate,
+        trusted_certs: &[&Self::Certificate],
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
     ) -> Result<()>;
 
     /// Extract the SubjectPublicKeyInfo (DER-encoded) from the certificate.
@@ -81,29 +81,24 @@ mod test {
 
     #[test]
     fn full_chain_verifies() {
-        Crypto::verify_chain(
-            vec![cert(MILAN_ARK)],
-            vec![cert(MILAN_ASK)],
-            cert(MILAN_VCEK),
-        )
-        .unwrap();
+        Crypto::verify_chain(&[&cert(MILAN_ARK)], &[&cert(MILAN_ASK)], &cert(MILAN_VCEK)).unwrap();
     }
 
     #[test]
     fn empty_trust_store_fails() {
-        Crypto::verify_chain(vec![], vec![], cert(MILAN_VCEK))
+        Crypto::verify_chain(&[], &[], &cert(MILAN_VCEK))
             .expect_err("Should fail with no trusted certs");
     }
 
     #[test]
     fn untrusted_intermediates_are_required() {
-        Crypto::verify_chain(vec![cert(MILAN_ARK)], vec![], cert(MILAN_VCEK))
+        Crypto::verify_chain(&[&cert(MILAN_ARK)], &[], &cert(MILAN_VCEK))
             .expect_err("VCEK should not verify without ASK intermediate");
     }
 
     #[test]
     fn self_signed_certificates() {
-        Crypto::verify_chain(vec![cert(MILAN_ARK)], vec![], cert(MILAN_ARK)).unwrap();
+        Crypto::verify_chain(&[&cert(MILAN_ARK)], &[], &cert(MILAN_ARK)).unwrap();
     }
 
     #[test]

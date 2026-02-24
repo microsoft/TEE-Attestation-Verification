@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::vec;
-
 use openssl::ecdsa::EcdsaSig;
 use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
@@ -31,22 +29,22 @@ impl CryptoBackend for Crypto {
     }
 
     fn verify_chain(
-        trusted_certs: Vec<Certificate>,
-        untrusted_chain: Vec<Certificate>,
-        leaf: Certificate,
+        trusted_certs: &[&Certificate],
+        untrusted_chain: &[&Certificate],
+        leaf: &Certificate,
     ) -> Result<()> {
         let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
         for cert in trusted_certs {
-            store_builder.add_cert(cert)?;
+            store_builder.add_cert((*cert).to_owned())?;
         }
         store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
         let store = store_builder.build();
         let mut ctx = openssl::x509::X509StoreContext::new()?;
-        let mut chain = Stack::new()?;
-        for cert in untrusted_chain.iter() {
-            chain.push(cert.to_owned())?;
+        let mut chain = Stack::<Certificate>::new()?;
+        for cert in untrusted_chain {
+            chain.push((*cert).to_owned())?;
         }
-        match ctx.init(&store, &leaf.to_owned(), &chain, |c| c.verify_cert()) {
+        match ctx.init(&store, leaf, &chain, |c| c.verify_cert()) {
             Ok(true) => Ok(()),
             Ok(false) => Err("Certificate verification failed".into()),
             Err(e) => Err(Box::new(e)),
@@ -61,7 +59,7 @@ impl CryptoBackend for Crypto {
 
 impl Verifier<Certificate> for Certificate {
     fn verify(&self, other: &Certificate) -> Result<()> {
-        Crypto::verify_chain(vec![self.to_owned()], vec![], other.to_owned())
+        Crypto::verify_chain(&[self], &[], other)
     }
 }
 
