@@ -15,7 +15,7 @@ use zerocopy::FromBytes;
 
 use crate::crypto::{Certificate, Crypto, CryptoBackend};
 use crate::snp::report::AttestationReport;
-use crate::snp::verify::{self, ChainVerification, SevVerificationError};
+use crate::snp::verify::{self, ChainVerification, VerificationError};
 
 // ---------------------------------------------------------------------------
 // Error code enum
@@ -62,16 +62,16 @@ impl TAVError {
     }
 }
 
-impl From<SevVerificationError> for TAVError {
-    fn from(e: SevVerificationError) -> Self {
+impl From<VerificationError> for TAVError {
+    fn from(e: VerificationError) -> Self {
         let code = match &e {
-            SevVerificationError::UnsupportedProcessor(_) => TAVErrorCode::UnsupportedProcessor,
-            SevVerificationError::InvalidRootCertificate(_) => TAVErrorCode::InvalidRootCertificate,
-            SevVerificationError::CertificateChainError(_) => TAVErrorCode::CertificateChainError,
-            SevVerificationError::SignatureVerificationError(_) => {
+            VerificationError::UnsupportedProcessor(_) => TAVErrorCode::UnsupportedProcessor,
+            VerificationError::InvalidRootCertificate(_) => TAVErrorCode::InvalidRootCertificate,
+            VerificationError::CertificateChainError(_) => TAVErrorCode::CertificateChainError,
+            VerificationError::SignatureVerificationError(_) => {
                 TAVErrorCode::SignatureVerificationError
             }
-            SevVerificationError::TcbVerificationError(_) => TAVErrorCode::TcbVerificationError,
+            VerificationError::TcbVerificationError(_) => TAVErrorCode::TcbVerificationError,
         };
         Self::new(code, e.to_string())
     }
