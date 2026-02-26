@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(feature = "online"))]
+compile_error!("certificate_chain module requires the 'online' feature");
+
 use crate::crypto::{Certificate, Verifier};
 use crate::kds::KdsFetcher;
 use crate::pinned_arks;

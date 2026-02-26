@@ -9,18 +9,21 @@
 
 pub mod crypto;
 pub mod pinned_arks;
-pub mod sev_verification;
 pub mod snp;
 pub mod utils;
-
-mod certificate_chain;
-mod kds;
 
 pub use crypto::Certificate;
 pub use snp::report::AttestationReport;
 
-// Re-export the main types at crate root for convenient use (wasm only)
+#[cfg(feature = "online")]
+mod certificate_chain;
+#[cfg(feature = "online")]
+mod kds;
+#[cfg(feature = "online")]
+pub mod sev_verification;
+#[cfg(feature = "online")]
 pub use certificate_chain::AmdCertificates;
+#[cfg(feature = "online")]
 pub use sev_verification::SevVerifier;
 
 #[cfg(target_arch = "wasm32")]
