@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(not(feature = "online"))]
-compile_error!("certificate_chain module requires the 'online' feature");
+#[cfg(not(any(feature = "online", target_arch = "wasm32")))]
+compile_error!("certificate_chain module requires either the 'online' feature or wasm32 target");
 
 use crate::crypto::{Certificate, Verifier};
 use crate::kds::KdsFetcher;

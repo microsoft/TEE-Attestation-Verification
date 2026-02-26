@@ -15,15 +15,15 @@ pub mod utils;
 pub use crypto::Certificate;
 pub use snp::report::AttestationReport;
 
-#[cfg(feature = "online")]
+#[cfg(any(feature = "online", target_arch = "wasm32"))]
 mod certificate_chain;
-#[cfg(feature = "online")]
+#[cfg(any(feature = "online", target_arch = "wasm32"))]
 mod kds;
-#[cfg(feature = "online")]
+#[cfg(any(feature = "online", target_arch = "wasm32"))]
 pub mod sev_verification;
-#[cfg(feature = "online")]
+#[cfg(any(feature = "online", target_arch = "wasm32"))]
 pub use certificate_chain::AmdCertificates;
-#[cfg(feature = "online")]
+#[cfg(any(feature = "online", target_arch = "wasm32"))]
 pub use sev_verification::SevVerifier;
 
 #[cfg(target_arch = "wasm32")]

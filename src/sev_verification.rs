@@ -6,8 +6,8 @@
 //! This implementation is designed to be compiled only for wasm32 and uses
 //! wasm-bindgen for fetching KDS artifacts via an extension-provided JS bridge.
 
-#[cfg(not(feature = "online"))]
-compile_error!("kds module requires the 'online' feature");
+#[cfg(not(any(feature = "online", target_arch = "wasm32")))]
+compile_error!("sev_verification module requires either the 'online' feature or wasm32 target");
 
 use crate::certificate_chain::AmdCertificates;
 use crate::{snp, AttestationReport};

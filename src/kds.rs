@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(not(feature = "online"))]
-compile_error!("kds module requires the 'online' feature");
+#[cfg(not(any(feature = "online", target_arch = "wasm32")))]
+compile_error!("kds module requires either the 'online' feature or wasm32 target");
 
 use crate::crypto::{Certificate, Crypto, CryptoBackend};
 use crate::snp;
