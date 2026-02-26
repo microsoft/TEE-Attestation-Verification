@@ -13,17 +13,19 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
-[[bin]]
-name = "verify-attestation"
-path = "src/bin/verify_cli.rs"
-
 [features]
 default = ["crypto_pure_rust", "serde", "online"]
 # If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
 crypto_openssl = ["dep:openssl"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
 serde = ["dep:serde", "dep:serde-big-array", "dep:serde_json"]
-online = ["dep:log", "dep:curl", "dep:tokio"]
+online = ["dep:curl", "dep:tokio"]
+
+
+[[bin]]
+name = "verify-attestation"
+path = "src/bin/verify_cli.rs"
+required-features = ["online"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -50,7 +52,7 @@ serde_json = { version = "1.0", optional = true }
 serde-big-array = { version = "0.5.1", optional = true }
 
 # Online dependencies
-log = { version = "0.4", optional = true }
+log = { version = "0.4" }
 
 # WASM deps
 [target.'cfg(target_arch = "wasm32")'.dependencies]
