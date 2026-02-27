@@ -74,7 +74,7 @@ jobs:
 
       - name: Test online with openssl (optional - may fail due to KDS rate limiting)
         continue-on-error: true
-        run: cargo test --no-default-features --features "crypto_openssl" --test tests_native online -- --nocapture
+        run: cargo test --no-default-features --features "crypto_openssl,online" --test tests_native online -- --nocapture
 
   native-pure-rust:
     name: Native pure-rust
@@ -94,4 +94,4 @@ jobs:
 
       - name: Test online with pure_rust crypto (optional - may fail due to KDS rate limiting)
         continue-on-error: true
-        run: cargo test --no-default-features --features "crypto_pure_rust" --test tests_native online -- --nocapture
+        run: cargo test --no-default-features --features "crypto_pure_rust,online" --test tests_native online -- --nocapture

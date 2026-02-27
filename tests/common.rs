@@ -3,7 +3,9 @@
 
 use tee_attestation_verification_lib::crypto::{Crypto, CryptoBackend};
 use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
-use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
+use tee_attestation_verification_lib::AttestationReport;
+#[cfg(any(target_family = "wasm", feature = "online"))]
+use tee_attestation_verification_lib::SevVerifier;
 use zerocopy::FromBytes;
 
 // Attestation reports
@@ -100,6 +102,7 @@ pub fn test_verify_attestation_suite() {
     }
 }
 
+#[cfg(any(target_family = "wasm", feature = "online"))]
 pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<(), String> {
     let attestation_report = AttestationReport::read_from_bytes(bytes)
         .map_err(|e| format!("Failed to read attestation report: {:?}", e))?;
@@ -114,14 +117,17 @@ pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("Verification call failed: {:?}", e))
 }
 
+#[cfg(any(target_family = "wasm", feature = "online"))]
 pub async fn verify_milan_attestation() -> Result<(), String> {
     verify_attestation_bytes(MILAN_ATTESTATION).await
 }
 
+#[cfg(any(target_family = "wasm", feature = "online"))]
 pub async fn verify_genoa_attestation() -> Result<(), String> {
     verify_attestation_bytes(GENOA_ATTESTATION).await
 }
 
+#[cfg(any(target_family = "wasm", feature = "online"))]
 pub async fn verify_turin_attestation() -> Result<(), String> {
     verify_attestation_bytes(TURIN_ATTESTATION).await
 }

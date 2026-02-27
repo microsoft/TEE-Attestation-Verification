@@ -13,16 +13,19 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
-[[bin]]
-name = "verify-attestation"
-path = "src/bin/verify_cli.rs"
-
 [features]
-default = ["crypto_pure_rust", "serde"]
+default = ["crypto_pure_rust", "serde", "online"]
 # If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
 crypto_openssl = ["dep:openssl"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
 serde = ["dep:serde", "dep:serde-big-array", "dep:serde_json"]
+online = ["dep:curl", "dep:tokio"]
+
+
+[[bin]]
+name = "verify-attestation"
+path = "src/bin/verify_cli.rs"
+required-features = ["online"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -39,11 +42,6 @@ ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
 p384 = { version = "0.13", features = ["ecdsa"], optional = true}
 rsa = { version = "0.9", optional = true }
 sha2 = {version = "0.10", optional = true}
-
-# Logging / panic hooks for wasm
-log = "0.4"
-wasm-logger = "0.2"
-console_error_panic_hook = "0.1"
 pem = "3.0.6"
 
 zerocopy = {version = "0.8.31", features = ["derive"]}
@@ -53,14 +51,19 @@ serde = { version = "1.0", features = ["derive", "std", "alloc"], optional = tru
 serde_json = { version = "1.0", optional = true }
 serde-big-array = { version = "0.5.1", optional = true }
 
+# Online dependencies
+log = { version = "0.4" }
+
 # WASM deps
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
+console_error_panic_hook = "0.1"
+wasm-logger = "0.2"
 
 # Native CLI deps
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-curl = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true}
+curl = { version = "0.4", optional = true }
