@@ -95,3 +95,36 @@ jobs:
       - name: Test online with pure_rust crypto (optional - may fail due to KDS rate limiting)
         continue-on-error: true
         run: cargo test --no-default-features --features "crypto_pure_rust,online" --test tests_native online -- --nocapture
+
+  ffi-cpp-example:
+    name: FFI C++ example
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Build C++ example
+        run: |
+          cd c/examples/cpp
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . -j
+
+      - name: Verify Milan report (correct ARK — should succeed)
+        run: |
+          c/examples/cpp/build/verify_example \
+            tests/test_data/milan_attestation_report.bin \
+            tests/test_data/milan_vcek.pem \
+            tests/test_data/milan_ask.pem \
+            src/pinned_arks/milan_ark.pem
+
+      - name: Verify Milan report with wrong ARK (should fail)
+        run: |
+          ! c/examples/cpp/build/verify_example \
+            tests/test_data/milan_attestation_report.bin \
+            tests/test_data/milan_vcek.pem \
+            tests/test_data/milan_ask.pem \
+            src/pinned_arks/turin_ark.pem

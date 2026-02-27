@@ -23,6 +23,11 @@ pub const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 pub const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 pub const TURIN_VCEK: &[u8] = include_bytes!("test_data/turin_vcek.pem");
 
+// ARK certificates (for FFI-style caller-provided chain verification)
+pub const MILAN_ARK: &[u8] = include_bytes!("../src/pinned_arks/milan_ark.pem");
+pub const GENOA_ARK: &[u8] = include_bytes!("../src/pinned_arks/genoa_ark.pem");
+pub const TURIN_ARK: &[u8] = include_bytes!("../src/pinned_arks/turin_ark.pem");
+
 pub fn test_verify_attestation_suite() {
     let tampered_milan_attestation = {
         let mut tampered = MILAN_ATTESTATION.to_vec();
@@ -54,6 +59,36 @@ pub fn test_verify_attestation_suite() {
             MILAN_ATTESTATION,
             MILAN_VCEK,
             ChainVerification::WithPinnedArk { ask: &milan_ask },
+            Ok(()),
+        ),
+        (
+            "milan_ark",
+            MILAN_ATTESTATION,
+            MILAN_VCEK,
+            ChainVerification::WithProvidedArk {
+                ask: &milan_ask,
+                ark: &Crypto::from_pem(MILAN_ARK).unwrap(),
+            },
+            Ok(()),
+        ),
+        (
+            "genoa_ark",
+            GENOA_ATTESTATION,
+            GENOA_VCEK,
+            ChainVerification::WithProvidedArk {
+                ask: &genoa_ask,
+                ark: &Crypto::from_pem(GENOA_ARK).unwrap(),
+            },
+            Ok(()),
+        ),
+        (
+            "turin_ark",
+            TURIN_ATTESTATION,
+            TURIN_VCEK,
+            ChainVerification::WithProvidedArk {
+                ask: &turin_ask,
+                ark: &Crypto::from_pem(TURIN_ARK).unwrap(),
+            },
             Ok(()),
         ),
         (

@@ -47,7 +47,7 @@ impl TcbVersionRaw {
     }
 }
 
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable)]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct Signature {
@@ -62,7 +62,7 @@ pub struct Signature {
 /// SNP Attestation Report (0x4A0 = 1184 bytes).
 ///
 /// See AMD SEV-SNP ABI Specification, Table 23: ATTESTATION_REPORT Structure.
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable)]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct AttestationReport {
