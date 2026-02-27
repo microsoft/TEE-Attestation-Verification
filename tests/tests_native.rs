@@ -17,7 +17,7 @@ pub fn init_logger() {
     });
 }
 
-/// Online verification tests (async, fetches certs from AMD KDS)
+#[cfg(feature = "online")]
 mod online {
     use super::*;
 
