@@ -53,10 +53,10 @@ mod crypto_openssl;
 #[cfg(feature = "crypto_pure_rust")]
 mod crypto_pure_rust;
 
-// If both are enabled, prefer pure rust
-#[cfg(all(feature = "crypto_openssl", not(feature = "crypto_pure_rust")))]
+// If both are enabled, prefer openssl
+#[cfg(feature = "crypto_openssl")]
 pub use crypto_openssl::Crypto;
-#[cfg(feature = "crypto_pure_rust")]
+#[cfg(all(feature = "crypto_pure_rust", not(feature = "crypto_openssl")))]
 pub use crypto_pure_rust::Crypto;
 
 /// The certificate type for the active crypto backend.

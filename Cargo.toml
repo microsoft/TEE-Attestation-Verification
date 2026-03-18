@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["crypto_pure_rust", "serde", "online"]
+default = ["crypto_openssl"]
 # If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
 crypto_openssl = ["dep:openssl"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
