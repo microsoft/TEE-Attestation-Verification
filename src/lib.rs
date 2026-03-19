@@ -7,13 +7,30 @@
 //! native service usage and for browser/WASM relying parties. For now it re-exports
 //! the `sev_verification` module which contains the verification engine.
 
-pub mod crypto;
+pub(crate) mod crypto;
 pub mod pinned_arks;
 pub mod snp;
 pub mod utils;
 
+use crypto::{Crypto, CryptoBackend};
+
 pub use crypto::Certificate;
 pub use snp::report::AttestationReport;
+
+pub fn certificate_from_pem(pem: &[u8]) -> Result<Certificate, Box<dyn std::error::Error>> {
+    Crypto::from_pem(pem)
+}
+
+pub fn certificate_from_der(der: &[u8]) -> Result<Certificate, Box<dyn std::error::Error>> {
+    Crypto::from_der(der)
+}
+
+pub fn certificate_extension_value_by_oid(
+    cert: &Certificate,
+    oid: &str,
+) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    Crypto::get_extension_value_by_oid(cert, oid)
+}
 
 #[cfg(any(feature = "online", target_arch = "wasm32"))]
 mod certificate_chain;

@@ -46,6 +46,9 @@ pub trait CryptoBackend {
 
     /// Extract the SubjectPublicKeyInfo (DER-encoded) from the certificate.
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
+    /// Extract an extension value by dotted-decimal OID.
+    fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
 }
 
 #[cfg(feature = "crypto_openssl")]

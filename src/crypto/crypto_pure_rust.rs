@@ -7,7 +7,7 @@ use rsa::{
     RsaPublicKey,
 };
 use sha2::Sha384;
-use x509_cert::der::{referenced::OwnedToRef, Encode};
+use x509_cert::der::{oid::ObjectIdentifier, referenced::OwnedToRef, Encode};
 
 use super::{CryptoBackend, Result, Verifier};
 use crate::snp::report::{AttestationReport, Signature};
@@ -106,6 +106,21 @@ impl CryptoBackend for Crypto {
             .subject_public_key_info
             .to_der()
             .map_err(|e| format!("Failed to encode SubjectPublicKeyInfo: {:?}", e).into())
+    }
+
+    fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
+        let oid = ObjectIdentifier::new(oid)
+            .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
+
+        let extensions = match cert.tbs_certificate.extensions.as_ref() {
+            Some(extensions) => extensions,
+            None => return Ok(None),
+        };
+
+        Ok(extensions
+            .iter()
+            .find(|extension| extension.extn_id == oid)
+            .map(|extension| extension.extn_value.as_bytes().to_vec()))
     }
 }
 

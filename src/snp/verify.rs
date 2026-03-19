@@ -3,7 +3,6 @@
 
 use crate::crypto::{Certificate, Crypto, CryptoBackend, Verifier};
 use crate::{snp, snp::utils::Oid, AttestationReport};
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum VerificationError {
@@ -105,26 +104,6 @@ pub(crate) fn verify_tcb_values(
     vcek: &Certificate,
     attestation_report: &AttestationReport,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use x509_cert::der::Decode;
-
-    let vcek_der = Crypto::to_der(vcek)?;
-    let vcek = x509_cert::Certificate::from_der(&vcek_der)
-        .map_err(|e| format!("Failed to parse VCEK as x509-cert: {}", e))?;
-
-    // Get extensions from VCEK certificate
-    let extensions = vcek
-        .tbs_certificate
-        .extensions
-        .as_ref()
-        .ok_or("VCEK certificate has no extensions")?;
-
-    // Build a HashMap of OID -> extension value for easy lookup
-    let mut ext_map: HashMap<String, &[u8]> = HashMap::new();
-    for ext in extensions.iter() {
-        let oid_str = ext.extn_id.to_string();
-        ext_map.insert(oid_str, ext.extn_value.as_bytes());
-    }
-
     // Helper to check extension value (handles different ASN.1 wrapping)
     let check_ext = |ext_value: &[u8], expected: &[u8]| -> bool {
         // Try direct match
@@ -154,15 +133,15 @@ pub(crate) fn verify_tcb_values(
     };
 
     let check_u8_ext = |oid: &str, expected: u8| -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(&ext_value) = ext_map.get(oid) {
+        if let Some(ext_value) = Crypto::get_extension_value_by_oid(vcek, oid)? {
             let expected = [expected];
-            if check_ext(ext_value, &expected) {
+            if check_ext(&ext_value, &expected) {
                 return Ok(());
             }
             return Err(format!(
                 "Mismatched value OID {} : {} != {}",
                 oid,
-                crate::utils::to_hex(ext_value),
+                crate::utils::to_hex(&ext_value),
                 crate::utils::to_hex(&expected)
             )
             .into());
@@ -218,8 +197,8 @@ pub(crate) fn verify_tcb_values(
     }
 
     let hwid_oid = Oid::HwId.as_str();
-    if let Some(&cert_hwid) = ext_map.get(hwid_oid) {
-        if !check_ext(cert_hwid, attestation_report.chip_id.as_slice()) {
+    if let Some(cert_hwid) = Crypto::get_extension_value_by_oid(vcek, hwid_oid)? {
+        if !check_ext(&cert_hwid, attestation_report.chip_id.as_slice()) {
             return Err("Report TCB ID and Certificate ID mismatch".into());
         }
     }
