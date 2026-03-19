@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["crypto_openssl"]
-# If both enabled, defaults to crypto_pure_rust but expose the crypto_openssl module
+# By default, the build uses crypto_openssl; enable crypto_pure_rust to use the pure Rust backend instead.
 crypto_openssl = ["dep:openssl"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2"]
 serde = ["dep:serde", "dep:serde-big-array", "dep:serde_json"]
