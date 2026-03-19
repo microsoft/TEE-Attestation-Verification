@@ -179,4 +179,51 @@ mod test {
         vcek.verify(&report)
             .expect_err("Wrong cert should not verify report");
     }
+
+    #[test]
+    fn extension_lookup_returns_expected_bootloader_value() {
+        let vcek = cert(MILAN_VCEK);
+        let report: AttestationReport = AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Failed to parse attestation report")
+            .clone();
+        let tcb = report.reported_tcb.as_milan_genoa();
+
+        let bootloader = Crypto::get_extension_value_by_oid(&vcek, "1.3.6.1.4.1.3704.1.3.1")
+            .expect("BootLoader OID lookup should succeed")
+            .expect("BootLoader OID should be present in Milan VCEK");
+
+        assert_eq!(bootloader, vec![0x02, 0x01, tcb.boot_loader]);
+    }
+
+    #[test]
+    fn extension_lookup_returns_expected_hwid_value() {
+        let vcek = cert(MILAN_VCEK);
+        let report: AttestationReport = AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Failed to parse attestation report")
+            .clone();
+
+        let hwid = Crypto::get_extension_value_by_oid(&vcek, "1.3.6.1.4.1.3704.1.4")
+            .expect("HWID OID lookup should succeed")
+            .expect("HWID OID should be present in Milan VCEK");
+
+        assert_eq!(hwid, report.chip_id.as_slice());
+    }
+
+    #[test]
+    fn extension_lookup_returns_none_for_missing_oid() {
+        let vcek = cert(MILAN_VCEK);
+
+        let missing = Crypto::get_extension_value_by_oid(&vcek, "1.2.3.4.5.6.7.8.9")
+            .expect("Missing OID lookup should not fail");
+
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn extension_lookup_rejects_malformed_oid() {
+        let vcek = cert(MILAN_VCEK);
+
+        Crypto::get_extension_value_by_oid(&vcek, "not-an-oid")
+            .expect_err("Malformed OID should fail");
+    }
 }

@@ -25,13 +25,6 @@ pub fn certificate_from_der(der: &[u8]) -> Result<Certificate, Box<dyn std::erro
     Crypto::from_der(der)
 }
 
-pub fn certificate_extension_value_by_oid(
-    cert: &Certificate,
-    oid: &str,
-) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-    Crypto::get_extension_value_by_oid(cert, oid)
-}
-
 #[cfg(any(feature = "online", target_arch = "wasm32"))]
 mod certificate_chain;
 #[cfg(any(feature = "online", target_arch = "wasm32"))]
