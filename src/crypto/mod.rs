@@ -7,7 +7,7 @@
 //! - `crypto_openssl` - OpenSSL-based (not available on WASM)
 //! - `crypto_pure_rust` - Pure Rust (required for WASM)
 //!
-//! If both are enabled, `crypto_pure_rust` takes precedence.
+//! If both are enabled, `crypto_openssl` takes precedence.
 
 #[cfg(not(any(feature = "crypto_openssl", feature = "crypto_pure_rust")))]
 compile_error!("Either `crypto_openssl` or `crypto_pure_rust` feature must be enabled.");
