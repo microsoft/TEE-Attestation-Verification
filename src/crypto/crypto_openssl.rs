@@ -25,6 +25,11 @@ impl CryptoBackend for Crypto {
         openssl::x509::X509::from_pem(pem).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
+    fn from_pem_chain(pem: &[u8]) -> Result<Vec<Self::Certificate>> {
+        openssl::x509::X509::stack_from_pem(pem)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
     fn from_der(der: &[u8]) -> Result<Self::Certificate> {
         openssl::x509::X509::from_der(der).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
@@ -32,6 +37,13 @@ impl CryptoBackend for Crypto {
     fn to_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
         cert.to_der()
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+
+    fn to_pem(cert: &Self::Certificate) -> Result<String> {
+        let pem = cert
+            .to_pem()
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        String::from_utf8(pem).map_err(|e| format!("Failed to decode PEM as UTF-8: {:?}", e).into())
     }
 
     fn verify_chain(

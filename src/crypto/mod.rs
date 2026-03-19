@@ -31,11 +31,17 @@ pub trait CryptoBackend {
     /// Parse a certificate from PEM-encoded data.
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate>;
 
+    /// Parse a bundle of PEM-encoded certificates, preserving input order.
+    fn from_pem_chain(pem: &[u8]) -> Result<Vec<Self::Certificate>>;
+
     /// Parse a certificate from DER-encoded data.
     fn from_der(der: &[u8]) -> Result<Self::Certificate>;
 
     /// Encode a certificate as DER.
     fn to_der(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
+    /// Encode a certificate as PEM for debug logging.
+    fn to_pem(cert: &Self::Certificate) -> Result<String>;
 
     /// Verify a certificate chain from `trusted_certs` through `untrusted_chain` to `leaf`.
     fn verify_chain(
@@ -225,5 +231,37 @@ mod test {
 
         Crypto::get_extension_value_by_oid(&vcek, "not-an-oid")
             .expect_err("Malformed OID should fail");
+    }
+
+    #[test]
+    fn pem_chain_parsing_preserves_input_order() {
+        let mut pem_chain = Vec::new();
+        pem_chain.extend_from_slice(MILAN_ASK);
+        pem_chain.push(b'\n');
+        pem_chain.extend_from_slice(MILAN_ARK);
+
+        let chain = Crypto::from_pem_chain(&pem_chain).expect("PEM chain should parse");
+
+        assert_eq!(chain.len(), 2);
+        assert_eq!(
+            Crypto::to_der(&chain[0]).expect("ASK DER should encode"),
+            Crypto::to_der(&cert(MILAN_ASK)).expect("ASK fixture DER should encode")
+        );
+        assert_eq!(
+            Crypto::to_der(&chain[1]).expect("ARK DER should encode"),
+            Crypto::to_der(&cert(MILAN_ARK)).expect("ARK fixture DER should encode")
+        );
+    }
+
+    #[test]
+    fn pem_encoding_round_trips_through_from_pem() {
+        let cert = cert(MILAN_VCEK);
+        let pem = Crypto::to_pem(&cert).expect("PEM encoding should succeed");
+        let reparsed = Crypto::from_pem(pem.as_bytes()).expect("PEM should parse");
+
+        assert_eq!(
+            Crypto::to_der(&reparsed).expect("Reparsed DER should encode"),
+            Crypto::to_der(&cert).expect("Original DER should encode")
+        );
     }
 }

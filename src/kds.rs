@@ -61,21 +61,24 @@ impl CertificateFetcher for KdsFetcher {
 
         let cert_chain_url = format!("https://kdsintf.amd.com/vcek/v1/{}/cert_chain", model);
         let pem_bytes = fetch_url_bytes(&cert_chain_url).await?;
-        let pems = pem::parse_many(&pem_bytes)
-            .map_err(|e| format!("Failed to parse PEM certificates: {}", e))?;
-        if pems.len() < 2 {
-            return Err("Certificate chain must contain at least 2 certificates".into());
+        let certs = Crypto::from_pem_chain(&pem_bytes)
+            .map_err(|e| format!("Failed to parse PEM certificate chain: {}", e))?;
+        if certs.len() != 2 {
+            return Err("Certificate chain must contain exactly 2 certificates".into());
         }
-        let ark_der = pems[1].contents().to_vec();
-        let ask_der = pems[0].contents().to_vec();
+        let ark = certs[1].clone();
+        let ask = certs[0].clone();
 
-        debug!("Using {} ark pem:\n{}", model, pem::encode(&pems[1]));
-        debug!("Using {} ask pem:\n{}", model, pem::encode(&pems[0]));
-
-        let ark = Crypto::from_der(&ark_der)
-            .map_err(|e| format!("Failed to parse ARK certificate: {}", e))?;
-        let ask = Crypto::from_der(&ask_der)
-            .map_err(|e| format!("Failed to parse ASK certificate: {}", e))?;
+        debug!(
+            "Using {} ark pem:\n{}",
+            model,
+            Crypto::to_pem(&ark).map_err(|e| format!("Failed to encode ARK certificate: {}", e))?
+        );
+        debug!(
+            "Using {} ask pem:\n{}",
+            model,
+            Crypto::to_pem(&ask).map_err(|e| format!("Failed to encode ASK certificate: {}", e))?
+        );
 
         // Store in cache if requested
         if self.use_cache {
@@ -155,15 +158,15 @@ impl CertificateFetcher for KdsFetcher {
 
         let vcek_bytes = fetch_url_bytes(&vcek_url).await?;
 
-        let vcek_pem = pem::Pem::new("CERTIFICATE", vcek_bytes.clone());
+        let vcek = Crypto::from_der(&vcek_bytes)
+            .map_err(|e| format!("Failed to parse VCEK certificate: {}", e))?;
+
         debug!(
             "Using {} vcek pem:\n{}",
             processor_model,
-            pem::encode(&vcek_pem)
+            Crypto::to_pem(&vcek)
+                .map_err(|e| format!("Failed to encode VCEK certificate: {}", e))?
         );
-
-        let vcek = Crypto::from_der(&vcek_bytes)
-            .map_err(|e| format!("Failed to parse VCEK certificate: {}", e))?;
 
         // Store into cache if requested
         if self.use_cache {
