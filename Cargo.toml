@@ -31,7 +31,7 @@ required-features = ["online"]
 wasm-bindgen-test = "0.3"
 env_logger = "0.11"
 
-
+[dependencies]
 # Crypto
 foreign-types = { version = "0.3", optional = true }
 openssl = { version = "0.10", optional = true }
