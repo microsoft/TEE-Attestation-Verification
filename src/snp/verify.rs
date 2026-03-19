@@ -153,8 +153,8 @@ pub(crate) fn verify_tcb_values(
         false
     };
 
-    let check_u8_ext = |oid: String, expected: u8| -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(&ext_value) = ext_map.get(&oid.to_string()) {
+    let check_u8_ext = |oid: &str, expected: u8| -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(&ext_value) = ext_map.get(oid) {
             let expected = [expected];
             if check_ext(ext_value, &expected) {
                 return Ok(());
@@ -177,48 +177,48 @@ pub(crate) fn verify_tcb_values(
     match gen {
         snp::model::Generation::Milan | snp::model::Generation::Genoa => {
             let tcb = attestation_report.reported_tcb.as_milan_genoa();
-            let bl_oid = Oid::BootLoader.oid().to_string();
+            let bl_oid = Oid::BootLoader.as_str();
             check_u8_ext(bl_oid, tcb.boot_loader)
                 .map_err(|e| format!("Error verifying TCB boot loader: {}", e))?;
 
-            let tee_oid = Oid::Tee.oid().to_string();
+            let tee_oid = Oid::Tee.as_str();
             check_u8_ext(tee_oid, tcb.tee)
                 .map_err(|e| format!("Error verifying TCB TEE: {}", e))?;
 
-            let snp_oid = Oid::Snp.oid().to_string();
+            let snp_oid = Oid::Snp.as_str();
             check_u8_ext(snp_oid, tcb.snp)
                 .map_err(|e| format!("Error verifying TCB SNP: {}", e))?;
 
-            let ucode_oid = Oid::Ucode.oid().to_string();
+            let ucode_oid = Oid::Ucode.as_str();
             check_u8_ext(ucode_oid, tcb.microcode)
                 .map_err(|e| format!("Error verifying TCB microcode: {}", e))?;
         }
         snp::model::Generation::Turin => {
             let tcb = attestation_report.reported_tcb.as_turin();
-            let bl_oid = Oid::BootLoader.oid().to_string();
+            let bl_oid = Oid::BootLoader.as_str();
             check_u8_ext(bl_oid, tcb.boot_loader)
                 .map_err(|e| format!("Error verifying TCB boot loader: {}", e))?;
 
-            let tee_oid = Oid::Tee.oid().to_string();
+            let tee_oid = Oid::Tee.as_str();
             check_u8_ext(tee_oid, tcb.tee)
                 .map_err(|e| format!("Error verifying TCB TEE: {}", e))?;
 
-            let snp_oid = Oid::Snp.oid().to_string();
+            let snp_oid = Oid::Snp.as_str();
             check_u8_ext(snp_oid, tcb.snp)
                 .map_err(|e| format!("Error verifying TCB SNP: {}", e))?;
 
-            let ucode_oid = Oid::Ucode.oid().to_string();
+            let ucode_oid = Oid::Ucode.as_str();
             check_u8_ext(ucode_oid, tcb.microcode)
                 .map_err(|e| format!("Error verifying TCB microcode: {}", e))?;
 
-            let fmc_oid = Oid::Fmc.oid().to_string();
+            let fmc_oid = Oid::Fmc.as_str();
             check_u8_ext(fmc_oid, tcb.fmc)
                 .map_err(|e| format!("Error verifying TCB FMC: {}", e))?;
         }
     }
 
-    let hwid_oid = Oid::HwId.oid().to_string();
-    if let Some(&cert_hwid) = ext_map.get(&hwid_oid) {
+    let hwid_oid = Oid::HwId.as_str();
+    if let Some(&cert_hwid) = ext_map.get(hwid_oid) {
         if !check_ext(cert_hwid, attestation_report.chip_id.as_slice()) {
             return Err("Report TCB ID and Certificate ID mismatch".into());
         }

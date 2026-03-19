@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use asn1_rs::{oid, Oid as OidRs};
-
 #[cfg(feature = "serde")]
 pub mod serde_wrappers {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -41,14 +39,14 @@ pub(crate) enum Oid {
 }
 
 impl Oid {
-    pub fn oid(&self) -> OidRs<'_> {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Oid::BootLoader => oid!(1.3.6 .1 .4 .1 .3704 .1 .3 .1),
-            Oid::Tee => oid!(1.3.6 .1 .4 .1 .3704 .1 .3 .2),
-            Oid::Snp => oid!(1.3.6 .1 .4 .1 .3704 .1 .3 .3),
-            Oid::Ucode => oid!(1.3.6 .1 .4 .1 .3704 .1 .3 .8),
-            Oid::HwId => oid!(1.3.6 .1 .4 .1 .3704 .1 .4),
-            Oid::Fmc => oid!(1.3.6 .1 .4 .1 .3704 .1 .3 .9),
+            Oid::BootLoader => "1.3.6.1.4.1.3704.1.3.1",
+            Oid::Tee => "1.3.6.1.4.1.3704.1.3.2",
+            Oid::Snp => "1.3.6.1.4.1.3704.1.3.3",
+            Oid::Ucode => "1.3.6.1.4.1.3704.1.3.8",
+            Oid::HwId => "1.3.6.1.4.1.3704.1.4",
+            Oid::Fmc => "1.3.6.1.4.1.3704.1.3.9",
         }
     }
 }
