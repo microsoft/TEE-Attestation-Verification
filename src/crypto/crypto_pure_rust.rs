@@ -3,60 +3,42 @@
 
 use p384::ecdsa::VerifyingKey as EcdsaVerifyingKey;
 use rsa::{
+    pkcs8::DecodePublicKey,
     pss::{Signature as PssSignature, VerifyingKey as PssVerifyingKey},
     RsaPublicKey,
 };
 use sha2::Sha384;
-use x509_cert::der::{
-    oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode, DecodePem, Encode,
-    EncodePem,
-};
 
+use super::x509_certificate::{Certificate, SignatureAlgorithm};
 use super::{CryptoBackend, Result, Verifier};
 use crate::snp::report::{AttestationReport, Signature};
 
 pub struct Crypto;
 
-type Certificate = x509_cert::Certificate;
-
-mod oid {
-    use x509_cert::der::oid::ObjectIdentifier;
-
-    // RSA-PSS (1.2.840.113549.1.1.10)
-    pub const RSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.10");
-}
-
 impl Verifier<Certificate> for Certificate {
     fn verify(&self, subject: &Certificate) -> Result<()> {
-        // Encode the TBS (to-be-signed) portion of the subject certificate
-        let tbs_bytes = subject
-            .tbs_certificate
-            .to_der()
-            .map_err(|e| format!("Failed to encode TBS certificate: {:?}", e))?;
+        let tbs_bytes = subject.tbs_certificate_der()?;
+        let sig_bytes = subject.signature_bytes();
+        let issuer_spki = self.public_key_spki_der()?;
 
-        let sig_bytes = subject.signature.raw_bytes();
-        let sig_algo_oid = &subject.signature_algorithm.oid;
-        let issuer_spki = &self.tbs_certificate.subject_public_key_info;
+        match subject.signature_algorithm()? {
+            SignatureAlgorithm::RsaPss => {
+                use rsa::signature::Verifier;
 
-        if *sig_algo_oid == oid::RSA_PSS {
-            // RSA-PSS with SHA-384
-            use rsa::signature::Verifier;
+                let rsa_pub = RsaPublicKey::from_public_key_der(&issuer_spki)
+                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
 
-            let rsa_pub = RsaPublicKey::try_from(issuer_spki.owned_to_ref())
-                .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
+                let verifying_key = PssVerifyingKey::<Sha384>::new(rsa_pub);
 
-            let verifying_key = PssVerifyingKey::<Sha384>::new(rsa_pub);
+                let sig = PssSignature::try_from(sig_bytes)
+                    .map_err(|e| format!("Failed to parse RSA-PSS signature: {:?}", e))?;
 
-            let sig = PssSignature::try_from(sig_bytes)
-                .map_err(|e| format!("Failed to parse RSA-PSS signature: {:?}", e))?;
+                verifying_key
+                    .verify(&tbs_bytes, &sig)
+                    .map_err(|e| format!("RSA-PSS signature verification failed: {:?}", e))?;
 
-            verifying_key
-                .verify(&tbs_bytes, &sig)
-                .map_err(|e| format!("RSA-PSS signature verification failed: {:?}", e))?;
-
-            Ok(())
-        } else {
-            Err(format!("Unsupported signature algorithm OID: {}", sig_algo_oid).into())
+                Ok(())
+            }
         }
     }
 }
@@ -65,30 +47,23 @@ impl CryptoBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
-        let pem_str =
-            std::str::from_utf8(pem).map_err(|e| format!("Invalid UTF-8 in PEM data: {:?}", e))?;
-        Certificate::from_pem(pem_str)
-            .map_err(|e| format!("Failed to parse PEM certificate: {:?}", e).into())
+        Certificate::from_pem(pem)
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Self::Certificate>> {
-        Certificate::load_pem_chain(pem)
-            .map_err(|e| format!("Failed to parse PEM certificate chain: {:?}", e).into())
+        Certificate::from_pem_chain(pem)
     }
 
     fn from_der(der: &[u8]) -> Result<Self::Certificate> {
         Certificate::from_der(der)
-            .map_err(|e| format!("Failed to parse DER certificate: {:?}", e).into())
     }
 
     fn to_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
         cert.to_der()
-            .map_err(|e| format!("Failed to encode certificate as DER: {:?}", e).into())
     }
 
     fn to_pem(cert: &Self::Certificate) -> Result<String> {
-        cert.to_pem(LineEnding::LF)
-            .map_err(|e| format!("Failed to encode certificate as PEM: {:?}", e).into())
+        cert.to_pem()
     }
 
     fn verify_chain(
@@ -97,7 +72,7 @@ impl CryptoBackend for Crypto {
         leaf: &Certificate,
     ) -> Result<()> {
         let untrusted_chain = untrusted_chain.iter().chain(std::iter::once(&leaf));
-        let mut prev: Option<&x509_cert::certificate::CertificateInner> = None;
+        let mut prev: Option<&Certificate> = None;
         for cert in untrusted_chain {
             if let Some(issuer) = prev {
                 issuer.verify(*cert)?;
@@ -113,25 +88,11 @@ impl CryptoBackend for Crypto {
     }
 
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
-        cert.tbs_certificate
-            .subject_public_key_info
-            .to_der()
-            .map_err(|e| format!("Failed to encode SubjectPublicKeyInfo: {:?}", e).into())
+        cert.public_key_spki_der()
     }
 
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
-        let oid = ObjectIdentifier::new(oid)
-            .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
-
-        let extensions = match cert.tbs_certificate.extensions.as_ref() {
-            Some(extensions) => extensions,
-            None => return Ok(None),
-        };
-
-        Ok(extensions
-            .iter()
-            .find(|extension| extension.extn_id == oid)
-            .map(|extension| extension.extn_value.as_bytes().to_vec()))
+        cert.get_extension_value_by_oid(oid)
     }
 }
 
@@ -140,20 +101,25 @@ fn verify_report_sig_ecdsa_p384_sha384(
     signed_bytes: &[u8],
     signature: Signature,
 ) -> Result<()> {
-    let vcek_pub = vcek
-        .tbs_certificate
-        .subject_public_key_info
-        .subject_public_key
-        .raw_bytes();
+    let vcek_pub = vcek.subject_public_key_bytes();
 
     let vk = EcdsaVerifyingKey::from_sec1_bytes(vcek_pub)
         .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
 
-    // P-384 scalars are 48 bytes each, extract from the 72-byte arrays
+    if signature.r[48..].iter().any(|byte| *byte != 0) {
+        return Err(
+            "Invalid r scalar padding: upper 24 bytes must be zero for P-384 signatures".into(),
+        );
+    }
     let mut r_bytes: [u8; 48] = signature.r[..48]
         .try_into()
         .map_err(|_| "Invalid r scalar length")?;
     r_bytes.reverse();
+    if signature.s[48..].iter().any(|byte| *byte != 0) {
+        return Err(
+            "Invalid s scalar padding: upper 24 bytes must be zero for P-384 signatures".into(),
+        );
+    }
     let mut s_bytes: [u8; 48] = signature.s[..48]
         .try_into()
         .map_err(|_| "Invalid s scalar length")?;
