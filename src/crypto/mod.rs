@@ -9,7 +9,7 @@
 //!
 //! If both are enabled, `crypto_openssl` takes precedence.
 
-#[cfg(not(any(feature = "crypto_openssl", feature = "crypto_pure_rust")))]
+#[cfg(not(sync_crypto))]
 compile_error!("Either `crypto_openssl` or `crypto_pure_rust` feature must be enabled.");
 #[cfg(all(target_arch = "wasm32", feature = "crypto_openssl"))]
 compile_error!(
@@ -25,6 +25,20 @@ pub mod verifier {
     /// Verifies that data was signed by the implementor's private key.
     pub(crate) trait Sync<T> {
         fn verify(&self, data: &T) -> Result<()>;
+    }
+
+    /// Asynchronously verifies that data was signed by the implementor's private key.
+    pub(crate) trait Async<T> {
+        fn verify(&self, data: &T) -> impl std::future::Future<Output = Result<()>>;
+    }
+
+    impl<V, T> Async<T> for V
+    where
+        V: Sync<T>,
+    {
+        fn verify(&self, data: &T) -> impl std::future::Future<Output = Result<()>> {
+            std::future::ready(Sync::verify(self, data))
+        }
     }
 }
 
@@ -68,17 +82,53 @@ where
     ) -> Result<()>;
 }
 
+/// Backend-internal trait for asynchronous certificate verification operations.
+pub(crate) trait AsyncCryptoBackend {
+    type Certificate: Clone
+        + verifier::Async<Self::Certificate>
+        + verifier::Async<AttestationReport>;
+
+    /// Verify a certificate chain from `trusted_certs` through `untrusted_chain` to `leaf`.
+    fn verify_chain(
+        trusted_certs: &[&Self::Certificate],
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+    ) -> impl std::future::Future<Output = Result<()>>;
+}
+
+impl<C> AsyncCryptoBackend for C
+where
+    C: CryptoBackend,
+    <C as CertificateBackend>::Certificate: verifier::Sync<<C as CertificateBackend>::Certificate>
+        + verifier::Sync<AttestationReport>
+        + verifier::Async<<C as CertificateBackend>::Certificate>
+        + verifier::Async<AttestationReport>,
+{
+    type Certificate = <C as CertificateBackend>::Certificate;
+
+    fn verify_chain(
+        trusted_certs: &[&Self::Certificate],
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        std::future::ready(<C as CryptoBackend>::verify_chain(
+            trusted_certs,
+            untrusted_chain,
+            leaf,
+        ))
+    }
+}
+
 #[cfg(feature = "crypto_openssl")]
 pub(crate) mod crypto_openssl;
 #[cfg(feature = "crypto_pure_rust")]
 pub(crate) mod crypto_pure_rust;
-#[cfg(feature = "crypto_pure_rust")]
+#[cfg(crypto_provider = "pure_rust")]
 mod x509_certificate;
 
-// If both are enabled, prefer pure rust
-#[cfg(all(feature = "crypto_openssl", not(feature = "crypto_pure_rust")))]
+#[cfg(crypto_provider = "openssl")]
 pub type Crypto = crypto_openssl::Crypto;
-#[cfg(feature = "crypto_pure_rust")]
+#[cfg(crypto_provider = "pure_rust")]
 pub type Crypto = crypto_pure_rust::Crypto;
 
 /// The certificate type for the active crypto backend.

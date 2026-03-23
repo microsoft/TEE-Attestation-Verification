@@ -69,10 +69,11 @@ impl SevVerifier {
 
         // Step 3: Verify signature and TCB
         // Skip redundant certificate chain verification since we already verified the VCEK chain
-        snp::verify::verify_attestation(
+        snp::verify::asynchronous::verify_attestation(
             attestation_report,
             vcek,
             snp::verify::ChainVerification::Skip,
         )
+        .await
     }
 }

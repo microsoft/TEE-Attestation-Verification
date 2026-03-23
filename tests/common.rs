@@ -84,7 +84,7 @@ pub fn test_verify_attestation_suite() {
     for (tag, att, vcek, chain, expected) in tests {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();
-        let result = verify::verify_attestation(&report, &vcek, chain);
+        let result = verify::sync::verify_attestation(&report, &vcek, chain);
 
         if let Err(e_str) = expected {
             let err = result.expect_err(&format!("{}: Expected to fail with {}", tag, e_str));

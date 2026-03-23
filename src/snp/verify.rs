@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::crypto::verifier::Sync as Verifier;
-use crate::crypto::{Certificate, CertificateBackend, Crypto, CryptoBackend};
+use crate::crypto::{Certificate, CertificateBackend, Crypto};
 use crate::{snp, snp::utils::Oid, AttestationReport};
 
 #[derive(Debug)]
@@ -28,6 +27,9 @@ impl std::fmt::Display for VerificationError {
 
 impl std::error::Error for VerificationError {}
 
+//ChainVerification::Skip skips chain verification and only verifies report signature + TCB using VCEK.
+//ChainVerification::WithPinnedArk verifies chain with pinned ARK for the processor model.
+//ChainVerification::WithProvidedArk verifies chain with caller-provided ARK after validating its public key matches pinned ARK.
 pub enum ChainVerification<'a> {
     Skip,
     WithPinnedArk {
@@ -39,53 +41,99 @@ pub enum ChainVerification<'a> {
     },
 }
 
-// Verifies the attestation report using the provided ARK, ASK, and VCEK certificates.
-// If verification is successful, returns Ok(()). Otherwise, returns a VerificationError with details of the step which failed.
-// - Use ChainVerification::Skip to skip chain verification and only verify report signature + TCB using VCEK.
-// - Use ChainVerification::WithPinnedArk to verify chain with pinned ARK for the processor model.
-// - Use ChainVerification::WithProvidedArk to verify chain with caller-provided ARK after validating its public key matches pinned ARK.
-pub fn verify_attestation(
-    attestation_report: &AttestationReport,
-    vcek: &Certificate,
-    chain_verification: ChainVerification<'_>,
-) -> Result<(), VerificationError> {
-    let generation = snp::model::Generation::from_family_and_model(
-        attestation_report.cpuid_fam_id,
-        attestation_report.cpuid_mod_id,
-    )
-    .map_err(|e| VerificationError::UnsupportedProcessor(format!("{:?}", e)))?;
+#[cfg(sync_crypto)]
+pub mod sync {
+    use crate::crypto::verifier::Sync as Verifier;
+    use crate::crypto::{Certificate, Crypto, CryptoBackend};
+    use crate::{snp, AttestationReport};
 
-    match chain_verification {
-        ChainVerification::WithProvidedArk { ask, ark } => {
-            // If ARK is provided, verify it matches the pinned ARK for this generation
-            ark_matches_pinned(generation, ark)
-                .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
 
-            // Verify the certificate chain: ARK -> ASK -> VCEK
-            Crypto::verify_chain(&[ark], &[ask], vcek)
-                .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
-        }
-        ChainVerification::WithPinnedArk { ask } => {
-            // No ARK provided, use pinned ARK for chain verification
-            let pinned_ark = crate::pinned_arks::get_ark(generation)
-                .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
-            Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
-                .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
-        }
-        ChainVerification::Skip => {
-            // No ASK provided, skip chain verification
-        }
-    };
+    pub fn verify_attestation(
+        attestation_report: &AttestationReport,
+        vcek: &Certificate,
+        chain_verification: ChainVerification<'_>,
+    ) -> Result<(), VerificationError> {
+        let generation = snp::model::Generation::from_family_and_model(
+            attestation_report.cpuid_fam_id,
+            attestation_report.cpuid_mod_id,
+        )
+        .map_err(|e| VerificationError::UnsupportedProcessor(format!("{:?}", e)))?;
 
-    // Verify the attestation report signature using the VCEK
-    vcek.verify(attestation_report)
-        .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
+        match chain_verification {
+            ChainVerification::WithProvidedArk { ask, ark } => {
+                ark_matches_pinned(generation, ark)
+                    .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
 
-    // Verify that the TCB values in the VCEK match those reported in the attestation report
-    verify_tcb_values(vcek, attestation_report)
-        .map_err(|e| VerificationError::TcbVerificationError(format!("{:?}", e)))?;
+                Crypto::verify_chain(&[ark], &[ask], vcek)
+                    .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
+            }
+            ChainVerification::WithPinnedArk { ask } => {
+                let pinned_ark = crate::pinned_arks::get_ark(generation)
+                    .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+                Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
+                    .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
+            }
+            ChainVerification::Skip => {}
+        };
 
-    Ok(())
+        vcek.verify(attestation_report)
+            .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
+
+        verify_tcb_values(vcek, attestation_report)
+            .map_err(|e| VerificationError::TcbVerificationError(format!("{:?}", e)))?;
+
+        Ok(())
+    }
+}
+
+#[cfg(async_crypto)]
+pub mod asynchronous {
+    use crate::crypto::verifier::Async as Verifier;
+    use crate::crypto::{Crypto, AsyncCryptoBackend, Certificate};
+    use crate::{snp, AttestationReport};
+
+    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
+
+    pub async fn verify_attestation(
+        attestation_report: &AttestationReport,
+        vcek: &Certificate,
+        chain_verification: ChainVerification<'_>,
+    ) -> Result<(), VerificationError> {
+        let generation = snp::model::Generation::from_family_and_model(
+            attestation_report.cpuid_fam_id,
+            attestation_report.cpuid_mod_id,
+        )
+        .map_err(|e| VerificationError::UnsupportedProcessor(format!("{:?}", e)))?;
+
+        match chain_verification {
+            ChainVerification::WithProvidedArk { ask, ark } => {
+                ark_matches_pinned(generation, ark)
+                    .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+
+                Crypto::verify_chain(&[ark], &[ask], vcek)
+                    .await
+                    .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
+            }
+            ChainVerification::WithPinnedArk { ask } => {
+                let pinned_ark = crate::pinned_arks::get_ark(generation)
+                    .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+                Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
+                    .await
+                    .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
+            }
+            ChainVerification::Skip => {}
+        };
+
+        vcek.verify(attestation_report)
+            .await
+            .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
+
+        verify_tcb_values(vcek, attestation_report)
+            .map_err(|e| VerificationError::TcbVerificationError(format!("{:?}", e)))?;
+
+        Ok(())
+    }
 }
 
 pub(crate) fn ark_matches_pinned(
