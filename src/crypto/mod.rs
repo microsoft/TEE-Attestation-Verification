@@ -123,12 +123,12 @@ where
 pub(crate) mod crypto_openssl;
 #[cfg(feature = "crypto_pure_rust")]
 pub(crate) mod crypto_pure_rust;
-#[cfg(crypto_provider = "pure_rust")]
+#[cfg(crypto_provider = "crypto_pure_rust")]
 mod x509_certificate;
 
-#[cfg(crypto_provider = "openssl")]
+#[cfg(crypto_provider = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;
-#[cfg(crypto_provider = "pure_rust")]
+#[cfg(crypto_provider = "crypto_pure_rust")]
 pub type Crypto = crypto_pure_rust::Crypto;
 
 /// The certificate type for the active crypto backend.

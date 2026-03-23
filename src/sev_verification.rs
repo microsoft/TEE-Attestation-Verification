@@ -72,7 +72,7 @@ impl SevVerifier {
         snp::verify::asynchronous::verify_attestation(
             attestation_report,
             vcek,
-            snp::verify::ChainVerification::Skip,
+            &snp::verify::ChainVerification::Skip,
         )
         .await
     }

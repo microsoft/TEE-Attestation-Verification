@@ -52,7 +52,7 @@ pub mod sync {
     pub fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,
-        chain_verification: ChainVerification<'_>,
+        chain_verification: &ChainVerification<'_>,
     ) -> Result<(), VerificationError> {
         let generation = snp::model::Generation::from_family_and_model(
             attestation_report.cpuid_fam_id,
@@ -90,7 +90,7 @@ pub mod sync {
 #[cfg(async_crypto)]
 pub mod asynchronous {
     use crate::crypto::verifier::Async as Verifier;
-    use crate::crypto::{Crypto, AsyncCryptoBackend, Certificate};
+    use crate::crypto::{AsyncCryptoBackend, Certificate, Crypto};
     use crate::{snp, AttestationReport};
 
     use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
@@ -98,7 +98,7 @@ pub mod asynchronous {
     pub async fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,
-        chain_verification: ChainVerification<'_>,
+        chain_verification: &ChainVerification<'_>,
     ) -> Result<(), VerificationError> {
         let generation = snp::model::Generation::from_family_and_model(
             attestation_report.cpuid_fam_id,

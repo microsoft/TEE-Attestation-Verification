@@ -54,6 +54,7 @@ mod online {
 }
 
 /// Offline verification tests (sync, uses pinned ARKs)
+#[cfg(sync_crypto)]
 mod offline {
     use super::*;
 

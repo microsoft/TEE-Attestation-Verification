@@ -22,6 +22,7 @@ pub const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 pub const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 pub const TURIN_VCEK: &[u8] = include_bytes!("test_data/turin_vcek.pem");
 
+#[cfg(sync_crypto)]
 pub fn test_verify_attestation_suite() {
     let tampered_milan_attestation = {
         let mut tampered = MILAN_ATTESTATION.to_vec();
@@ -84,7 +85,7 @@ pub fn test_verify_attestation_suite() {
     for (tag, att, vcek, chain, expected) in tests {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();
-        let result = verify::sync::verify_attestation(&report, &vcek, chain);
+        let result = verify::sync::verify_attestation(&report, &vcek, &chain);
 
         if let Err(e_str) = expected {
             let err = result.expect_err(&format!("{}: Expected to fail with {}", tag, e_str));
@@ -101,7 +102,7 @@ pub fn test_verify_attestation_suite() {
     }
 }
 
-#[cfg(any(target_family = "wasm", feature = "online"))]
+#[cfg(all(any(target_family = "wasm", feature = "online"), async_crypto))]
 pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<(), String> {
     let attestation_report = AttestationReport::read_from_bytes(bytes)
         .map_err(|e| format!("Failed to read attestation report: {:?}", e))?;
@@ -116,17 +117,17 @@ pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("Verification call failed: {:?}", e))
 }
 
-#[cfg(any(target_family = "wasm", feature = "online"))]
+#[cfg(all(any(target_family = "wasm", feature = "online"), async_crypto))]
 pub async fn verify_milan_attestation() -> Result<(), String> {
     verify_attestation_bytes(MILAN_ATTESTATION).await
 }
 
-#[cfg(any(target_family = "wasm", feature = "online"))]
+#[cfg(all(any(target_family = "wasm", feature = "online"), async_crypto))]
 pub async fn verify_genoa_attestation() -> Result<(), String> {
     verify_attestation_bytes(GENOA_ATTESTATION).await
 }
 
-#[cfg(any(target_family = "wasm", feature = "online"))]
+#[cfg(all(any(target_family = "wasm", feature = "online"), async_crypto))]
 pub async fn verify_turin_attestation() -> Result<(), String> {
     verify_attestation_bytes(TURIN_ATTESTATION).await
 }
