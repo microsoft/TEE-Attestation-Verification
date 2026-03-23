@@ -123,7 +123,7 @@ where
 pub(crate) mod crypto_openssl;
 #[cfg(feature = "crypto_pure_rust")]
 pub(crate) mod crypto_pure_rust;
-#[cfg(crypto_backend = "crypto_pure_rust")]
+#[cfg(feature = "crypto_pure_rust")]
 mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]
