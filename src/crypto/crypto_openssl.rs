@@ -11,14 +11,15 @@ use openssl_sys::{
     X509_get_ext_by_OBJ,
 };
 
-use super::{CryptoBackend, Result, Verifier};
+use super::verifier::Sync as Verifier;
+use super::{CertificateBackend, CryptoBackend, Result};
 use crate::snp::report::{AttestationReport, Signature};
 
 pub struct Crypto;
 
 type Certificate = openssl::x509::X509;
 
-impl CryptoBackend for Crypto {
+impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
@@ -44,29 +45,6 @@ impl CryptoBackend for Crypto {
             .to_pem()
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
         String::from_utf8(pem).map_err(|e| format!("Failed to decode PEM as UTF-8: {:?}", e).into())
-    }
-
-    fn verify_chain(
-        trusted_certs: &[&Certificate],
-        untrusted_chain: &[&Certificate],
-        leaf: &Certificate,
-    ) -> Result<()> {
-        let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
-        for cert in trusted_certs {
-            store_builder.add_cert((*cert).to_owned())?;
-        }
-        store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
-        let store = store_builder.build();
-        let mut ctx = openssl::x509::X509StoreContext::new()?;
-        let mut chain = Stack::<Certificate>::new()?;
-        for cert in untrusted_chain {
-            chain.push((*cert).to_owned())?;
-        }
-        match ctx.init(&store, leaf, &chain, |c| c.verify_cert()) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err("Certificate verification failed".into()),
-            Err(e) => Err(Box::new(e)),
-        }
     }
 
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
@@ -110,9 +88,34 @@ impl CryptoBackend for Crypto {
     }
 }
 
+impl CryptoBackend for Crypto {
+    fn verify_chain(
+        trusted_certs: &[&Certificate],
+        untrusted_chain: &[&Certificate],
+        leaf: &Certificate,
+    ) -> Result<()> {
+        let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
+        for cert in trusted_certs {
+            store_builder.add_cert((*cert).to_owned())?;
+        }
+        store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+        let store = store_builder.build();
+        let mut ctx = openssl::x509::X509StoreContext::new()?;
+        let mut chain = Stack::<Certificate>::new()?;
+        for cert in untrusted_chain {
+            chain.push((*cert).to_owned())?;
+        }
+        match ctx.init(&store, leaf, &chain, |c| c.verify_cert()) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("Certificate verification failed".into()),
+            Err(e) => Err(Box::new(e)),
+        }
+    }
+}
+
 impl Verifier<Certificate> for Certificate {
     fn verify(&self, other: &Certificate) -> Result<()> {
-        Crypto::verify_chain(&[self], &[], other)
+        <Crypto as CryptoBackend>::verify_chain(&[self], &[], other)
     }
 }
 

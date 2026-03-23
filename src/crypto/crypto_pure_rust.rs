@@ -9,8 +9,9 @@ use rsa::{
 };
 use sha2::Sha384;
 
+use super::verifier::Sync as Verifier;
 use super::x509_certificate::{Certificate, SignatureAlgorithm};
-use super::{CryptoBackend, Result, Verifier};
+use super::{CertificateBackend, CryptoBackend, Result};
 use crate::snp::report::{AttestationReport, Signature};
 
 pub struct Crypto;
@@ -43,7 +44,7 @@ impl Verifier<Certificate> for Certificate {
     }
 }
 
-impl CryptoBackend for Crypto {
+impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
@@ -66,6 +67,16 @@ impl CryptoBackend for Crypto {
         cert.to_pem()
     }
 
+    fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.public_key_spki_der()
+    }
+
+    fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
+        cert.get_extension_value_by_oid(oid)
+    }
+}
+
+impl CryptoBackend for Crypto {
     fn verify_chain(
         trusted_certs: &[&Certificate],
         untrusted_chain: &[&Certificate],
@@ -85,14 +96,6 @@ impl CryptoBackend for Crypto {
             prev = Some(cert);
         }
         Ok(())
-    }
-
-    fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
-        cert.public_key_spki_der()
-    }
-
-    fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
-        cert.get_extension_value_by_oid(oid)
     }
 }
 

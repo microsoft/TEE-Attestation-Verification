@@ -4,7 +4,8 @@
 #[cfg(not(any(feature = "online", target_arch = "wasm32")))]
 compile_error!("certificate_chain module requires either the 'online' feature or wasm32 target");
 
-use crate::crypto::{Certificate, Verifier};
+use crate::crypto::verifier::Sync as Verifier;
+use crate::crypto::Certificate;
 use crate::kds::KdsFetcher;
 use crate::pinned_arks;
 use crate::{snp, AttestationReport};

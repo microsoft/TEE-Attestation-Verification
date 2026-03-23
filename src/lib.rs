@@ -12,7 +12,7 @@ pub mod pinned_arks;
 pub mod snp;
 pub mod utils;
 
-use crypto::{Crypto, CryptoBackend};
+use crypto::{CertificateBackend, Crypto};
 
 pub use crypto::Certificate;
 pub use snp::report::AttestationReport;

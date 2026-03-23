@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::crypto::{Certificate, Crypto, CryptoBackend, Verifier};
+use crate::crypto::verifier::Sync as Verifier;
+use crate::crypto::{Certificate, CertificateBackend, Crypto, CryptoBackend};
 use crate::{snp, snp::utils::Oid, AttestationReport};
 
 #[derive(Debug)]
