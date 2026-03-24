@@ -7,7 +7,7 @@
 //! - `crypto_openssl` - OpenSSL-based (not available on WASM)
 //! - `crypto_pure_rust` - Pure Rust (required for WASM)
 //!
-//! If both are enabled, `crypto_pure_rust` takes precedence.
+//! If both are enabled, `crypto_openssl` takes precedence.
 
 #[cfg(not(any(feature = "crypto_openssl", feature = "crypto_pure_rust")))]
 compile_error!("Either `crypto_openssl` or `crypto_pure_rust` feature must be enabled.");
@@ -62,10 +62,10 @@ mod crypto_openssl;
 #[cfg(feature = "crypto_pure_rust")]
 mod crypto_pure_rust;
 
-// If both are enabled, prefer pure rust
-#[cfg(all(feature = "crypto_openssl", not(feature = "crypto_pure_rust")))]
+// If both are enabled, prefer openssl
+#[cfg(feature = "crypto_openssl")]
 pub use crypto_openssl::Crypto;
-#[cfg(feature = "crypto_pure_rust")]
+#[cfg(all(feature = "crypto_pure_rust", not(feature = "crypto_openssl")))]
 pub use crypto_pure_rust::Crypto;
 
 /// The certificate type for the active crypto backend.
