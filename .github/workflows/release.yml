@@ -1,0 +1,184 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "tav-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, for example tav-0.1.0
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare_release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      version: ${{ steps.prepare.outputs.version }}
+      commit_sha: ${{ steps.prepare.outputs.commit_sha }}
+      crate_name: ${{ steps.prepare.outputs.crate_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag and version
+        id: prepare
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            candidate_tag="${GITHUB_REF_NAME}"
+          else
+            candidate_tag="${INPUT_TAG}"
+          fi
+
+          if [[ ! "${candidate_tag}" =~ ^tav-.+$ ]]; then
+            echo "Release tags must use the tav-<version> format, got: ${candidate_tag}" >&2
+            exit 1
+          fi
+
+          git fetch --force --tags origin "refs/tags/${candidate_tag}:refs/tags/${candidate_tag}"
+
+          commit_sha=$(git rev-parse "refs/tags/${candidate_tag}^{commit}")
+          normalized_version="${candidate_tag#tav-}"
+          manifest_name=$(git show "${commit_sha}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["name"])')
+          manifest_version=$(git show "${commit_sha}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["version"])')
+
+          if [[ "${manifest_version}" != "${normalized_version}" ]]; then
+            echo "Tag ${candidate_tag} does not match Cargo.toml version ${manifest_version}" >&2
+            exit 1
+          fi
+
+          echo "tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${manifest_version}" >> "${GITHUB_OUTPUT}"
+          echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
+          echo "crate_name=${manifest_name}" >> "${GITHUB_OUTPUT}"
+
+  validate_release:
+    name: Validate release
+    runs-on: ubuntu-latest
+    needs: prepare_release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_release.outputs.commit_sha }}
+
+      - name: Install rust
+        shell: bash
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Setup WASM tooling
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli
+          cargo install wasm-pack
+
+      - name: Build with openssl
+        run: cargo build --no-default-features --features "crypto_openssl"
+
+      - name: Test offline with openssl
+        run: cargo test --no-default-features --features "crypto_openssl" -- --nocapture
+
+      - name: Build with pure_rust crypto
+        run: cargo build --no-default-features --features "crypto_pure_rust"
+
+      - name: Test offline with pure_rust crypto
+        run: cargo test --no-default-features --features "crypto_pure_rust" -- --nocapture
+
+      - name: Build WASM with WebCrypto crypto
+        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+
+      - name: Test WASM offline
+        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
+
+      - name: Test WASM offline with WebCrypto backend
+        run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
+
+  package_wasm:
+    name: Package WASM artifact
+    runs-on: ubuntu-latest
+    needs: prepare_release
+    env:
+      CRATE_NAME: ${{ needs.prepare_release.outputs.crate_name }}
+      VERSION: ${{ needs.prepare_release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_release.outputs.commit_sha }}
+
+      - name: Install rust
+        shell: bash
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Setup WASM tooling
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli
+          cargo install wasm-pack
+
+      - name: Build release WASM with WebCrypto crypto
+        shell: bash
+        run: |
+          set -euo pipefail
+          wasm-pack build --target web --release --no-default-features --features "crypto_webcrypto"
+
+          mkdir -p dist
+          wasm_archive="${CRATE_NAME}-${VERSION}-wasm-webcrypto.tar.gz"
+          tar -C pkg -czf "dist/${wasm_archive}" .
+
+          (
+            cd dist
+            sha256sum "${wasm_archive}" > SHA256SUMS
+          )
+
+      - name: Upload WASM release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/*
+
+  create_release:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs:
+      - prepare_release
+      - validate_release
+      - package_wasm
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create --verify-tag --draft --generate-notes "${RELEASE_TAG}" dist/*

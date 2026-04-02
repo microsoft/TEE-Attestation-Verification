@@ -14,7 +14,7 @@ Add the library to your `Cargo.toml` with a native crypto backend:
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { version = "0.1.0", features = ["crypto_openssl"] }
+tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-0.1.0", features = ["crypto_openssl"] }
 ```
 
 Then verify an attestation report with the synchronous `snp::verify::sync` API:
@@ -37,10 +37,20 @@ sync::verify_attestation(
 
 ## Wasm
 
+Release tags use the `tav-<crate-version>` format.
+
+Releases include a WASM and JS wrapper tarball for direct consumption. The tarball contains the generated `wasm-pack` `pkg/` output for the WebCrypto backend.
+
+### Consuming a release tarball
+
+Download the matching GitHub release asset for your chosen `tav-<crate-version>` tag.
+
+### Building from source
+
 Build the library for `wasm32` with the WebCrypto backend:
 
 ```bash
-wasm-pack build --target web -- --no-default-features --features "crypto_webcrypto"
+wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
 ```
 
 For a plain Cargo build targeting `wasm32-unknown-unknown`:
