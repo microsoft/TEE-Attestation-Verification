@@ -10,13 +10,13 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 
 ## Crypto Backends
 
-Exactly one crypto backend must be enabled:
+At least one crypto backend must be enabled, with `crypto_pure_rust` being used as a fallback if no alternatives are available:
 
 | Feature | Platforms | sync | async | Dependencies |
 |---|---|---|---|---|
 | `crypto_openssl` | Native | ✓ | ✓ | OpenSSL |
-| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`) |
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
+| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`) |
 
 ## Optional Features
 
