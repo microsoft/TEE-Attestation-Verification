@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-dev0
+## 0.1.0
 
 - Initial development release of the TEE attestation verification library.
 - Supports native Rust consumers with the `crypto_openssl` and `crypto_pure_rust` backends.
