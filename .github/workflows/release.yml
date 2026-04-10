@@ -88,8 +88,8 @@ jobs:
         shell: bash
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli
-          cargo install wasm-pack
+          cargo install wasm-bindgen-cli --version 0.2.95 --locked
+          cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build with openssl
         run: cargo build --no-default-features --features "crypto_openssl"
