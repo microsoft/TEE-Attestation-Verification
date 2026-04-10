@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! WASM-only AMD SEV-SNP Attestation Verification
+//! AMD SEV-SNP Attestation Verification with KDS certificate fetching.
 //!
-//! This implementation is designed to be compiled only for wasm32 and uses
-//! wasm-bindgen for fetching KDS artifacts via an extension-provided JS bridge.
+//! Uses `SevVerifier` to automatically fetch certificate collateral from
+//! AMD's Key Distribution Service, verifying the chain before validating
+//! the attestation report.
 
-#[cfg(not(any(feature = "online", target_arch = "wasm32")))]
-compile_error!("sev_verification module requires either the 'online' feature or wasm32 target");
+#[cfg(not(feature = "kds"))]
+compile_error!("sev_verification module requires the 'kds' feature");
 
 use crate::certificate_chain::AmdCertificates;
 use crate::{snp, AttestationReport};

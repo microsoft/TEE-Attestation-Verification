@@ -24,39 +24,8 @@ fn init_logger() {
     });
 }
 
-/// Online verification tests (async, fetches certs from AMD KDS)
-#[cfg(feature = "online")]
-mod online {
-    use super::*;
-
-    #[wasm_bindgen_test]
-    async fn test_verify_milan_attestation() {
-        init_logger();
-        common::verify_milan_attestation()
-            .await
-            .expect("Verification call failed");
-    }
-
-    #[wasm_bindgen_test]
-    async fn test_verify_genoa_attestation() {
-        init_logger();
-        common::verify_genoa_attestation()
-            .await
-            .expect("Verification call failed");
-    }
-
-    #[wasm_bindgen_test]
-    async fn test_verify_turin_attestation() {
-        init_logger();
-        common::verify_turin_attestation()
-            .await
-            .expect("Verification call failed");
-    }
-}
-
-/// Offline verification tests (async, uses explicit collateral)
 #[cfg(async_crypto)]
-mod offline_async {
+mod r#async {
     use super::*;
 
     #[wasm_bindgen_test]
@@ -64,11 +33,39 @@ mod offline_async {
         init_logger();
         common::test_verify_attestation_suite_async().await;
     }
+
+    #[cfg(feature = "kds")]
+    mod kds {
+        use super::*;
+
+        #[wasm_bindgen_test]
+        async fn test_verify_milan_attestation() {
+            init_logger();
+            common::verify_milan_attestation()
+                .await
+                .expect("Verification call failed");
+        }
+
+        #[wasm_bindgen_test]
+        async fn test_verify_genoa_attestation() {
+            init_logger();
+            common::verify_genoa_attestation()
+                .await
+                .expect("Verification call failed");
+        }
+
+        #[wasm_bindgen_test]
+        async fn test_verify_turin_attestation() {
+            init_logger();
+            common::verify_turin_attestation()
+                .await
+                .expect("Verification call failed");
+        }
+    }
 }
 
-/// Offline verification tests (sync, uses pinned ARKs)
 #[cfg(sync_crypto)]
-mod offline {
+mod sync {
     use super::*;
 
     #[wasm_bindgen_test]

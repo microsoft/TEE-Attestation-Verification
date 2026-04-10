@@ -8,16 +8,34 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 - **WASM-Compatible**: Build for `wasm32` with a WebCrypto backend
 - **Azure Linux 3.0 compatible**: Build for Azure Linux 3.0, with `rust-openssl` as the sole dependency.
 
+## Crypto Backends
+
+At least one crypto backend must be enabled, with `crypto_pure_rust` being used as a fallback if no alternatives are available:
+
+| Feature | Platforms | sync | async | Dependencies |
+|---|---|---|---|---|
+| `crypto_openssl` | Native | ✓ | ✓ | OpenSSL |
+| `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
+| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`) |
+
+## Optional Features
+
+| Feature | Description |
+|---|---|
+| `kds` | Enables automatic certificate fetching from AMD's Key Distribution Service. Uses `curl`/`tokio` on native, `globalThis.fetch` on WASM. |
+
 ## Usage
 
-Add the library to your `Cargo.toml` with a native crypto backend:
+Add the library to your `Cargo.toml` with a crypto backend:
 
 ```toml
 [dependencies]
 tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-0.1.0", features = ["crypto_openssl"] }
 ```
 
-Then verify an attestation report with the synchronous `snp::verify::sync` API:
+### Offline verification (caller provides certificates)
+
+Parse the attestation report from its raw 1184-byte binary representation and verify with the synchronous API:
 
 ```rust
 use tee_attestation_verification_lib::snp::verify::{sync, ChainVerification};
@@ -35,7 +53,26 @@ sync::verify_attestation(
 )?;
 ```
 
-## Wasm
+### KDS verification (automatic certificate fetching)
+
+Enable the `kds` feature to let the library fetch certificates from AMD's KDS:
+
+```toml
+[dependencies]
+tee-attestation-verification-lib = { version = "0.1.0", features = ["crypto_openssl", "kds"] }
+```
+
+```rust
+use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
+use zerocopy::FromBytes;
+
+let attestation_report = AttestationReport::read_from_bytes(attestation_bytes)?;
+
+let mut verifier = SevVerifier::new().await?;
+verifier.verify_attestation(&attestation_report).await?;
+```
+
+## WASM
 
 Release tags use the `tav-<crate-version>` format.
 
@@ -50,13 +87,13 @@ Download the matching GitHub release asset for your chosen `tav-<crate-version>`
 Build the library for `wasm32` with the WebCrypto backend:
 
 ```bash
-wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+wasm-pack build --target web -- --no-default-features --features "crypto_webcrypto,kds"
 ```
 
 For a plain Cargo build targeting `wasm32-unknown-unknown`:
 
 ```bash
-cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_webcrypto"
+cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_webcrypto,kds"
 ```
 
 ## SEV-SNP Verification Process
@@ -67,4 +104,4 @@ cargo build --target wasm32-unknown-unknown --no-default-features --features "cr
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft’s Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party’s policies.
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.

@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! WASM-compatible helper crate for Patty
+//! Portable TEE attestation verification library.
 //!
-//! This crate will host SEV-SNP verification code that can be compiled for both
-//! native service usage and for browser/WASM relying parties. For now it re-exports
-//! the `sev_verification` module which contains the verification engine.
+//! Supports SEV-SNP attestation verification with pluggable crypto backends
+//! (`crypto_openssl`, `crypto_pure_rust`, `crypto_webcrypto`) and optional
+//! online certificate fetching from AMD KDS (`kds` feature).
 
 pub(crate) mod crypto;
 pub mod pinned_arks;
@@ -25,40 +25,16 @@ pub fn certificate_from_der(der: &[u8]) -> Result<Certificate, Box<dyn std::erro
     Crypto::from_der(der)
 }
 
-#[cfg(any(feature = "online", target_arch = "wasm32"))]
+#[cfg(feature = "kds")]
 mod certificate_chain;
-#[cfg(any(feature = "online", target_arch = "wasm32"))]
+#[cfg(feature = "kds")]
 mod kds;
-#[cfg(any(feature = "online", target_arch = "wasm32"))]
+#[cfg(feature = "kds")]
 pub mod sev_verification;
-#[cfg(any(feature = "online", target_arch = "wasm32"))]
+#[cfg(feature = "kds")]
 pub use certificate_chain::AmdCertificates;
-#[cfg(any(feature = "online", target_arch = "wasm32"))]
+#[cfg(feature = "kds")]
 pub use sev_verification::SevVerifier;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-/// Initialize the WASM module with panic hook and logging
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
-pub fn init() {
-    console_error_panic_hook::set_once();
-    wasm_logger::init(wasm_logger::Config::default());
-}
-
-/// JavaScript-facing verification function
-#[cfg(all(target_arch = "wasm32", feature = "serde"))]
-#[wasm_bindgen]
-pub async fn verify_attestation_report(attestation_report_json: &str) -> Result<(), String> {
-    let attestation_report: AttestationReport = serde_json::from_str(attestation_report_json)
-        .map_err(|e| format!("Failed to parse attestation report: {}", e))?;
-
-    let mut verifier = SevVerifier::new()
-        .await
-        .map_err(|e| format!("Failed to initialize verifier: {}", e))?;
-    verifier
-        .verify_attestation(&attestation_report)
-        .await
-        .map_err(|e| format!("Verification failed: {:?}", e))
-}
+#[cfg(all(target_arch = "wasm32", feature = "kds"))]
+pub mod wasm;

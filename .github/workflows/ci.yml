@@ -52,9 +52,9 @@ jobs:
       - name: Test WASM offline with WebCrypto backend
         run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
 
-      - name: Test WASM online (optional - may fail due to KDS rate limiting)
+      - name: Test WASM with KDS (optional - may fail due to KDS rate limiting)
         continue-on-error: true
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,serde,online"
+        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,kds"
 
   native-openssl:
     name: Native openssl
@@ -69,12 +69,12 @@ jobs:
       - name: Build with openssl
         run: cargo build --no-default-features --features "crypto_openssl"
 
-      - name: Test offline with openssl
+      - name: Test with openssl
         run: cargo test --no-default-features --features "crypto_openssl" -- --nocapture
 
-      - name: Test online with openssl (optional - may fail due to KDS rate limiting)
+      - name: Test with openssl + KDS (optional - may fail due to KDS rate limiting)
         continue-on-error: true
-        run: cargo test --no-default-features --features "crypto_openssl,online" -- --nocapture
+        run: cargo test --no-default-features --features "crypto_openssl,kds" -- --nocapture
 
   native-pure-rust:
     name: Native pure-rust
@@ -89,5 +89,9 @@ jobs:
       - name: Build with pure_rust crypto
         run: cargo build --no-default-features --features "crypto_pure_rust"
 
-      - name: Test offline with pure_rust crypto
+      - name: Test with pure_rust crypto
         run: cargo test --no-default-features --features "crypto_pure_rust" -- --nocapture
+
+      - name: Test with pure_rust + KDS (optional - may fail due to KDS rate limiting)
+        continue-on-error: true
+        run: cargo test --no-default-features --features "crypto_pure_rust,kds" -- --nocapture

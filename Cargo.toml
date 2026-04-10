@@ -18,14 +18,13 @@ path = "src/lib.rs"
 crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2", "dep:x509-cert"]
 crypto_webcrypto = ["dep:x509-cert"]
-serde = ["dep:serde", "dep:serde-big-array", "dep:serde_json"]
-online = ["dep:curl", "dep:tokio"]
+kds = ["dep:curl", "dep:tokio"]
 
 
 [[bin]]
 name = "verify-attestation"
 path = "src/bin/verify_cli.rs"
-required-features = ["online"]
+required-features = ["kds"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -46,12 +45,7 @@ sha2 = {version = "0.10", optional = true}
 x509-cert = { version = "0.2", optional = true }
 zerocopy = {version = "0.8.31", features = ["derive"]}
 
-# Serde (optional, enabled by default)
-serde = { version = "1.0", features = ["derive", "std", "alloc"], optional = true }
-serde_json = { version = "1.0", optional = true }
-serde-big-array = { version = "0.5.1", optional = true }
-
-# Online dependencies
+# KDS (online certificate fetching) dependencies
 log = { version = "0.4" }
 
 # WASM deps

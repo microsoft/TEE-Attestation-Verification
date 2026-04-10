@@ -3,14 +3,7 @@
 
 use zerocopy::{byteorder::little_endian as le, *};
 
-#[cfg(feature = "serde")]
-use super::utils::serde_wrappers;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct TcbVersionMilanGenoa {
     pub boot_loader: u8,
@@ -21,7 +14,6 @@ pub struct TcbVersionMilanGenoa {
 }
 
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct TcbVersionTurin {
     pub fmc: u8,
@@ -33,7 +25,6 @@ pub struct TcbVersionTurin {
 }
 
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Default, Immutable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct TcbVersionRaw {
     pub raw: [u8; 8],
@@ -48,14 +39,10 @@ impl TcbVersionRaw {
 }
 
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct Signature {
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub r: [u8; 72],
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub s: [u8; 72],
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     reserved: [u8; 512 - 144],
 }
 
@@ -63,19 +50,15 @@ pub struct Signature {
 ///
 /// See AMD SEV-SNP ABI Specification, Table 23: ATTESTATION_REPORT Structure.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(C)]
 pub struct AttestationReport {
     /// Version number of this attestation report. Set to 0x03 for this specification.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub version: le::U32, // 0x000
 
     /// The guest SVN (Security Version Number).
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub guest_svn: le::U32, // 0x004
 
     /// The guest policy. See Table 10 for a description of the guest policy structure.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u64"))]
     pub policy: le::U64, // 0x008
 
     /// The family ID provided at launch.
@@ -89,18 +72,15 @@ pub struct AttestationReport {
     /// For a guest-requested attestation report (MSG_REPORT_REQ), this field contains
     /// the value 0-3. A host-requested attestation report (SNP_HV_REPORT_REQ) will
     /// have a value of 0xFFFFFFFF.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub vmpl: le::U32, // 0x030
 
     /// The signature algorithm used to sign this report. See Chapter 10 for encodings.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub signature_algo: le::U32, // 0x034
 
     /// Current TCB (Trusted Computing Base) version.
     pub platform_version: TcbVersionRaw, // 0x038
 
     /// Information about the platform. See Table 24.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u64"))]
     pub platform_info: le::U64, // 0x040
 
     /// Flags field containing:
@@ -110,31 +90,25 @@ pub struct AttestationReport {
     /// - Bit 1 (MASK_CHIP_KEY): The value of MaskChipKey
     /// - Bit 0 (AUTHOR_KEY_EN): Indicates that the digest of the author key is present
     ///   in AUTHOR_KEY_DIGEST. Set to the value of GCTX.AuthorKeyEn.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub flags: le::U32, // 0x048
 
     /// Reserved. Must be zero.
-    #[cfg_attr(feature = "serde", serde(with = "serde_wrappers::le_u32"))]
     pub reserved0: le::U32, // 0x04C
 
     /// Guest-provided data if REQUEST_SOURCE is guest, otherwise zero-filled by firmware.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub report_data: [u8; 64], // 0x050
 
     /// The measurement calculated at launch.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub measurement: [u8; 48], // 0x090
 
     /// Data provided by the hypervisor at launch.
     pub host_data: [u8; 32], // 0x0C0
 
     /// SHA-384 digest of the ID public key that signed the ID block provided in SNP_LAUNCH_FINISH.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub id_key_digest: [u8; 48], // 0x0E0
 
     /// SHA-384 digest of the Author public key that certified the ID key, if provided
     /// in SNP_LAUNCH_FINISH. Zeroes if AUTHOR_KEY_EN is 1.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub author_key_digest: [u8; 48], // 0x110
 
     /// Report ID of this guest.
@@ -156,12 +130,10 @@ pub struct AttestationReport {
     pub cpuid_step: u8, // 0x18A
 
     /// Reserved.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub reserved1: [u8; 21], // 0x18B
 
     /// If MaskChipId is set to 0, identifier unique to the chip as output by GET_ID.
     /// Otherwise, set to 0h.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub chip_id: [u8; 64], // 0x1A0
 
     /// Committed TCB version.
@@ -195,7 +167,6 @@ pub struct AttestationReport {
     pub launch_tcb: TcbVersionRaw, // 0x1F0
 
     /// Reserved.
-    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     pub reserved4: [u8; 168], // 0x1F8
 
     /// Signature of bytes 0x00 to 0x29F inclusive of this report.

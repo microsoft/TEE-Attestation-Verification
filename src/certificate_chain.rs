@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(not(any(feature = "online", target_arch = "wasm32")))]
-compile_error!("certificate_chain module requires either the 'online' feature or wasm32 target");
+#[cfg(not(feature = "kds"))]
+compile_error!("certificate_chain module requires the 'kds' feature");
 
 #[cfg(async_crypto)]
 use crate::crypto::verifier::Async as AsyncVerifier;
