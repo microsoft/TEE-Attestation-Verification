@@ -168,6 +168,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_release.outputs.commit_sha }}
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
