@@ -112,6 +112,21 @@ jobs:
       - name: Test WASM offline with WebCrypto backend
         run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install web-verify demo test deps
+        working-directory: demos/web-verify/tests
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run web-verify demo e2e test
+        working-directory: demos/web-verify/tests
+        run: npm test
+
   package_wasm:
     name: Package WASM artifact
     runs-on: ubuntu-latest
