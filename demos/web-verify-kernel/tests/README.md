@@ -1,6 +1,6 @@
-# web-verify end-to-end tests
+# web-verify-kernel end-to-end tests
 
-Playwright test that drives the `demos/web-verify/` page in a real browser,
+Playwright test that drives the `demos/web-verify-kernel/` page in a real browser,
 runs the Milan attestation fixture through `verify_attestation_async`, and
 diffs the rendered output against `milan_report.expected.txt`.
 
@@ -15,7 +15,7 @@ wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
 Install JS dependencies and a Chromium browser for Playwright:
 
 ```sh
-cd demos/web-verify/tests
+cd demos/web-verify-kernel/tests
 npm install
 npx playwright install chromium
 ```

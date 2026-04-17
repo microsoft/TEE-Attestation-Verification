@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// End-to-end test for the web-verify demo.
+// End-to-end test for the web-verify-kernel demo.
 //
 // Drives a real browser, loads the demo page from a static server rooted at
 // the repo (see playwright.config.js), populates the four inputs with the
@@ -46,7 +46,7 @@ test("Milan fixture renders the expected report", async ({ page, baseURL }) => {
     if (msg.type() === "error") console.log("[console.error]", msg.text());
   });
 
-  await page.goto("/demos/web-verify/");
+  await page.goto("/demos/web-verify-kernel/");
 
   // Populate the textareas directly (bypass the file pickers — upload input
   // automation varies between browsers, and the textareas are the single
@@ -93,7 +93,7 @@ test("invalid ARK PEM surfaces a verification error and suppresses output", asyn
   const vcekPem = await (await get(FIXTURES.vcek)).text();
   const askPem  = await (await get(FIXTURES.ask)).text();
 
-  await page.goto("/demos/web-verify/");
+  await page.goto("/demos/web-verify-kernel/");
 
   const reportHex = Array.from(reportBytes, b => b.toString(16).padStart(2, "0")).join("");
   await page.locator("#report-hex").fill(reportHex);

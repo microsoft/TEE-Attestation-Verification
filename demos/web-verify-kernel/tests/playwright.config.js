@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-// Repo root is three levels up from demos/web-verify/tests/.
+// Repo root is three levels up from demos/web-verify-kernel/tests/.
 const repoRoot = resolve(here, "..", "..", "..");
 
 export default defineConfig({
@@ -18,7 +18,7 @@ export default defineConfig({
   // `tests/test_data/` are reachable via HTTP.
   webServer: {
     command: `python3 -m http.server 8123 --directory "${repoRoot}"`,
-    url: "http://127.0.0.1:8123/demos/web-verify/",
+    url: "http://127.0.0.1:8123/demos/web-verify-kernel/",
     reuseExistingServer: !process.env.CI,
     stdout: "ignore",
     stderr: "pipe",

@@ -117,14 +117,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install web-verify demo test deps
-        working-directory: demos/web-verify/tests
+      - name: Install web-verify-kernel demo test deps
+        working-directory: demos/web-verify-kernel/tests
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run web-verify demo e2e test
-        working-directory: demos/web-verify/tests
+      - name: Run web-verify-kernel demo e2e test
+        working-directory: demos/web-verify-kernel/tests
         run: npm test
 
   package_wasm:

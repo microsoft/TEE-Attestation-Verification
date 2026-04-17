@@ -1,4 +1,4 @@
-# web-verify — minimal WASM verification demo
+# web-verify-kernel — minimal WASM verification demo
 
 A standalone HTML/JS page that exercises the WASM bindings from `ffi.rs`
 (specifically `wasm::verify_attestation_async`) and renders the verified
@@ -12,21 +12,21 @@ than loading its own WASM module.
 All commands run from the **repository root**.
 
 1. Build the WASM package with the WebCrypto backend (produces `pkg/`, which
-   `demos/web-verify/index.html` imports via a relative path):
+   `demos/web-verify-kernel/index.html` imports via a relative path):
 
    ```sh
    wasm-pack build --target web -- --no-default-features --features "crypto_webcrypto,kds"
    ```
 
 2. Serve the repository root over HTTP. Browsers will not load WASM modules
-   from `file://` URLs, and serving from inside `demos/web-verify/` would put
+   from `file://` URLs, and serving from inside `demos/web-verify-kernel/` would put
    `pkg/` out of reach of the `../../pkg/` import.
 
    ```sh
    python3 -m http.server 8000
    ```
 
-3. Open <http://localhost:8000/demos/web-verify/> in a browser.
+3. Open <http://localhost:8000/demos/web-verify-kernel/> in a browser.
 
 After editing Rust sources, rerun step 1 and hard-refresh the browser.
 

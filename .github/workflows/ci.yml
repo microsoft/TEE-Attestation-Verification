@@ -56,8 +56,8 @@ jobs:
         continue-on-error: true
         run: wasm-pack test --node --no-default-features --features "crypto_pure_rust,kds"
 
-  web-verify-demo:
-    name: web-verify demo e2e
+  web-verify-kernel-demo:
+    name: web-verify-kernel demo e2e
     runs-on: ubuntu-latest
     needs: wasm-build
 
@@ -83,23 +83,23 @@ jobs:
           node-version: "20"
 
       - name: Install Playwright and browsers
-        working-directory: demos/web-verify/tests
+        working-directory: demos/web-verify-kernel/tests
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
       - name: Run e2e test
-        working-directory: demos/web-verify/tests
+        working-directory: demos/web-verify-kernel/tests
         run: npm test
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: web-verify-playwright-report
+          name: web-verify-kernel-playwright-report
           path: |
-            demos/web-verify/tests/test-results/
-            demos/web-verify/tests/playwright-report/
+            demos/web-verify-kernel/tests/test-results/
+            demos/web-verify-kernel/tests/playwright-report/
 
   native-openssl:
     name: Native openssl
