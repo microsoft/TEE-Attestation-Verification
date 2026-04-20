@@ -168,7 +168,7 @@ pub struct TcbVersionTurin {
     pub microcode: u8,
 }
 
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Default, Immutable, KnownLayout)]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Default, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct TcbVersionRaw {
     pub raw: [u8; 8],
@@ -182,7 +182,7 @@ impl TcbVersionRaw {
     }
 }
 
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct Signature {
     pub r: [u8; 72],
@@ -193,7 +193,7 @@ pub struct Signature {
 /// SNP Attestation Report (0x4A0 = 1184 bytes).
 ///
 /// See AMD SEV-SNP ABI Specification, Table 23: ATTESTATION_REPORT Structure.
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct AttestationReport {
     /// Version number of this attestation report. Set to 0x03 for this specification.
