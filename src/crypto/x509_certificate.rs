@@ -81,6 +81,7 @@ impl Certificate {
         parse_signature_algorithm(&self.inner.signature_algorithm)
     }
 
+    #[cfg(feature = "crypto_pure_rust")]
     pub fn subject_public_key_bytes(&self) -> &[u8] {
         self.inner
             .tbs_certificate

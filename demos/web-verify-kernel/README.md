@@ -15,7 +15,7 @@ All commands run from the **repository root**.
    `demos/web-verify-kernel/index.html` imports via a relative path):
 
    ```sh
-   wasm-pack build --target web -- --no-default-features --features "crypto_webcrypto,kds"
+   wasm-pack build --target web -- --features "crypto_webcrypto"
    ```
 
 2. Serve the repository root over HTTP. Browsers will not load WASM modules
