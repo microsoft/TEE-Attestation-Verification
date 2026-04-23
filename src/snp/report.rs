@@ -9,7 +9,7 @@ use zerocopy::{byteorder::little_endian as le, *};
 
 /// Decoded guest policy from the 64-bit policy field.
 ///
-/// See AMD SEV-SNP ABI Specification, Table 10: GUEST_POLICY Structure.
+/// See AMD SEV-SNP ABI Specification, Table 9: GUEST_POLICY Structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct GuestPolicy(u64);
