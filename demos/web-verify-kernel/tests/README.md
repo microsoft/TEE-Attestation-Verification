@@ -1,28 +1,78 @@
 # web-verify-kernel end-to-end tests
 
-Playwright test that drives the `demos/web-verify-kernel/` page in a real browser,
-runs the Milan attestation fixture through `verify_attestation_async`, and
-diffs the rendered output against `milan_report.expected.txt`.
+Playwright test that drives the `demos/web-verify-kernel/` page in a real
+browser, runs the Milan attestation fixture through
+`verify_attestation_async`, and diffs the rendered output against
+`milan_report.expected.txt`. A second test exercises the error-rendering path
+by validating a Milan VCEK→ASK chain against the Turin ARK and checking that
+the rendered status surfaces `ErrorCode::InvalidRootCertificate` (102).
 
-## Prerequisites
+## How to run the tests
 
-From the repository root, build the WASM package first:
+### 1. Build the WASM bundle
+
+From the **repository root**, build the WASM package directly into the demo
+directory (so the page's `./pkg/...` import resolves):
 
 ```sh
-wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+wasm-pack build --target web --no-default-features --features "crypto_webcrypto" --out-dir demos/web-verify-kernel/pkg
 ```
 
-Install JS dependencies and a Chromium browser for Playwright:
+Rerun this whenever you change Rust sources under `src/`.
+
+### 2. Install JS dependencies
 
 ```sh
 cd demos/web-verify-kernel/tests
 npm install
-npx playwright install chromium
 ```
 
-On systems where Playwright's bundled Chromium can't find its shared
-libraries (e.g. NixOS), use the `playwright-driver.browsers` package from
-nixpkgs instead:
+### 3. Install Chromium
+
+```sh
+npx playwright install --with-deps chromium
+```
+
+`--with-deps` installs the system libraries Chromium needs via `apt`. On
+hosts where this doesn't work (anything not Ubuntu/Debian), see
+"Chromium fails to launch" under Troubleshooting.
+
+### 4. Run the tests
+
+```sh
+npm test
+```
+
+Playwright starts its own `python3 -m http.server` rooted at the demo
+directory (`demos/web-verify-kernel/`) on port `8123`, so no separate server
+is needed. Fixtures are served from `../test-data/` and reached at
+`/test-data/...` over HTTP; the WASM bundle is loaded from `/pkg/...`.
+
+## Troubleshooting
+
+### Chromium fails to launch (`SIGSEGV` or "cannot open shared object file")
+
+Playwright's bundled Chromium depends on a set of shared libraries
+(`libatk-1.0.so.0`, `libgbm.so.1`, `libXcomposite.so.1`, etc.) that
+`npx playwright install --with-deps` only knows how to install via `apt`.
+On other distros (Azure Linux, NixOS, Fedora, RHEL, ...), the browser will
+install but fail at launch with either a clear "cannot open shared object
+file" message or a less-clear `SIGSEGV (Address boundary error)` from the
+test runner — same root cause, different presentation.
+
+To confirm this is your problem, look up the Chromium install path with
+`npx playwright install --dry-run chromium`, then:
+
+```sh
+ldd <path-to-chrome-headless-shell> | grep "not found"
+```
+
+Any output here means the launch will fail.
+
+The supported workaround is to use the Chromium that nixpkgs ships with
+all its dependencies bundled. This invocation provides Chromium *and* runs
+the tests, replacing both step 3 and step 4 above (you still need steps 1
+and 2):
 
 ```sh
 nix-shell -p playwright-driver.browsers --run '
@@ -33,14 +83,19 @@ nix-shell -p playwright-driver.browsers --run '
 '
 ```
 
-## Running
+### `OSError: [Errno 98] Address already in use` from the webserver
+
+Playwright leaves the static webserver running when the test process
+crashes (e.g. on a browser segfault). Subsequent runs then fail to bind
+port 8123. Kill the stale server and rerun:
 
 ```sh
-npm test
+pkill -f "http.server 8123"
 ```
 
-The Playwright config starts its own `python3 -m http.server` rooted at the
-repo, so no separate server is needed.
+### `Executable doesn't exist at .../headless_shell`
+
+The browser isn't installed. Run step 3.
 
 ## Regenerating the golden file
 
@@ -52,4 +107,5 @@ npm run update-golden
 ```
 
 Do this after any intentional change to `demo.js` rendering or to the WASM
-accessors exposed from `src/snp/ffi.rs`.
+accessors exposed from `src/snp/ffi.rs`. Inspect the diff before committing
+to confirm the change matches your intent.

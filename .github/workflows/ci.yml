@@ -75,7 +75,7 @@ jobs:
           cargo install wasm-pack
 
       - name: Build WASM for the demo
-        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto" --out-dir demos/web-verify-kernel/pkg
 
       - name: Setup Node
         uses: actions/setup-node@v4

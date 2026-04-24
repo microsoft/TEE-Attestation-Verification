@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import init, { verify_attestation_async } from "../../pkg/tee_attestation_verification_lib.js";
+import init, { verify_attestation_async } from "./pkg/tee_attestation_verification_lib.js";
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");

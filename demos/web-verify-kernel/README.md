@@ -9,24 +9,22 @@ than loading its own WASM module.
 
 ## Build and run
 
-All commands run from the **repository root**.
-
-1. Build the WASM package with the WebCrypto backend (produces `pkg/`, which
-   `demos/web-verify-kernel/index.html` imports via a relative path):
+1. From the **repository root**, build the WASM package with the WebCrypto
+   backend, emitting `pkg/` directly inside this demo directory (which is
+   what `index.html` imports via `./pkg/...`):
 
    ```sh
-   wasm-pack build --target web -- --features "crypto_webcrypto"
+   wasm-pack build --target web --out-dir demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
    ```
 
-2. Serve the repository root over HTTP. Browsers will not load WASM modules
-   from `file://` URLs, and serving from inside `demos/web-verify-kernel/` would put
-   `pkg/` out of reach of the `../../pkg/` import.
+2. Serve **this directory** over HTTP.
 
    ```sh
+   cd demos/web-verify-kernel
    python3 -m http.server 8000
    ```
 
-3. Open <http://localhost:8000/demos/web-verify-kernel/> in a browser.
+3. Open <http://localhost:8000/> in a browser.
 
 After editing Rust sources, rerun step 1 and hard-refresh the browser.
 
@@ -37,12 +35,15 @@ Four inputs, each accepting either a file upload or pasted text:
 - **Attestation report** — 1184-byte binary (upload) or hex string (textarea).
 - **VCEK**, **ASK**, **ARK** — PEM-encoded certificates.
 
-Test fixtures (Milan) shipped in the repo:
+Test fixtures shipped alongside the demo in `./test-data/`:
 
-- `tests/test_data/milan_attestation_report.bin`
-- `src/pinned_arks/milan_ark.pem`
-- `tests/test_data/milan_ask.pem`
-- `tests/test_data/milan_vcek.pem`
+- Milan: `milan_attestation_report.bin`, `milan_vcek.pem`, `milan_ask.pem`,
+  `milan_ark.pem`.
+- Turin: `turin_attestation_report.bin`, `turin_vcek.pem`, `turin_ask.pem`,
+  `turin_ark.pem`.
+
+These are mirrors of upstream files in `tests/test_data/` and
+`src/pinned_arks/`.
 
 ## Scope of verification
 
