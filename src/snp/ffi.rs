@@ -237,7 +237,7 @@ pub mod wasm {
     impl SnpAttestationReport {
         fn report(&self) -> &AttestationReport {
             AttestationReport::ref_from_bytes(&self.bytes)
-                .expect("SnpAttestationReport bytes were validated at construction")
+                .expect("SnpAttestationReport is only constructed from verified bytes so this parse should not fail")
         }
     }
 
