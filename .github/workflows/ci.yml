@@ -41,7 +41,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo install wasm-bindgen-cli
-          cargo install wasm-pack
+          cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build WASM with WebCrypto crypto
         run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
@@ -72,7 +72,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo install wasm-bindgen-cli
-          cargo install wasm-pack
+          cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build WASM for the demo
         run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto" --out-dir demos/web-verify-kernel/pkg
