@@ -118,7 +118,7 @@ jobs:
           node-version: "20"
 
       - name: Build WASM for the web-verify-kernel demo
-        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto" --out-dir demos/web-verify-kernel/pkg
+        run: wasm-pack build --target web --out-dir demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
 
       - name: Install web-verify-kernel demo test deps
         working-directory: demos/web-verify-kernel/tests
