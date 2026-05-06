@@ -16,9 +16,11 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 ## Test coverage
 
 Test coverage is collected in CI by the `coverage` job using
-[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). Per-run LCOV
-reports and a human-readable summary are uploaded as the `coverage-reports`
-workflow artifact, and the summary is also written to the job summary page.
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). The job runs the
+native OpenSSL and pure-Rust backend test suites, then uploads a combined LCOV
+report (`lcov-combined.info`) and a human-readable summary as the
+`coverage-reports` workflow artifact. The combined summary is also written to
+the job summary page.
 
 To reproduce locally:
 
@@ -26,13 +28,19 @@ To reproduce locally:
 rustup component add llvm-tools-preview
 cargo install cargo-llvm-cov --locked
 
-# Summary in the terminal
+cargo llvm-cov clean --workspace
+
+# Collect OpenSSL coverage data without reporting yet.
+cargo llvm-cov --no-default-features --features "crypto_openssl" \
+    --no-report
+
+# Preserve the OpenSSL profile data, run pure_rust tests, and emit combined LCOV.
 cargo llvm-cov --no-default-features --features "crypto_pure_rust" \
+    --no-clean --lcov --output-path lcov-combined.info \
     --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
 
-# LCOV report (e.g. for IDE integration)
-cargo llvm-cov --no-default-features --features "crypto_pure_rust" \
-    --lcov --output-path lcov.info \
+# Summary in the terminal
+cargo llvm-cov report --summary-only \
     --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
 ```
 

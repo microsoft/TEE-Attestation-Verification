@@ -156,29 +156,43 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Collect coverage (openssl backend)
+      - name: Clean coverage artifacts
+        run: cargo llvm-cov clean --workspace
+
+      - name: Collect coverage data (openssl backend)
         run: |
           cargo llvm-cov --no-default-features --features "crypto_openssl" \
-            --lcov --output-path lcov-openssl.info \
-            --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
+            --no-report
 
-      - name: Collect coverage (pure_rust backend)
+      - name: Collect coverage and combined LCOV report (pure_rust backend)
         run: |
+          # --no-clean preserves the openssl profile data so the report
+          # summarizes coverage across both native backend test runs.
           cargo llvm-cov --no-default-features --features "crypto_pure_rust" \
-            --lcov --output-path lcov-pure-rust.info \
+            --no-clean --lcov --output-path lcov-combined.info \
             --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
 
-      - name: Generate coverage summary
+      - name: Generate combined coverage summary
         run: |
           cargo llvm-cov report --summary-only \
             --ignore-filename-regex '(^|/)(tests|demos|src/bin)/' \
             | tee coverage-summary.txt
+          line_coverage=$(awk '/^TOTAL/ { print $10 }' coverage-summary.txt)
+          region_coverage=$(awk '/^TOTAL/ { print $4 }' coverage-summary.txt)
+          function_coverage=$(awk '/^TOTAL/ { print $7 }' coverage-summary.txt)
           {
-            echo '## Test coverage (pure_rust backend)';
+            echo '## Test coverage (combined native backends)';
+            echo '';
+            echo "**Overall:** ${line_coverage} lines, ${region_coverage} regions, ${function_coverage} functions";
+            echo '';
+            echo '<details open>';
+            echo '<summary>Per-file coverage</summary>';
             echo '';
             echo '```';
             cat coverage-summary.txt;
             echo '```';
+            echo '';
+            echo '</details>';
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage reports
@@ -186,6 +200,5 @@ jobs:
         with:
           name: coverage-reports
           path: |
-            lcov-openssl.info
-            lcov-pure-rust.info
+            lcov-combined.info
             coverage-summary.txt
