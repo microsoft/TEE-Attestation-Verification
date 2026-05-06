@@ -139,6 +139,21 @@ mod tests {
             assert_eq!(err.code(), want);
         }
     }
+
+    #[test]
+    fn invalid_argument_error_preserves_code_and_message() {
+        let err = VerifyError::invalid_argument("bad input".into());
+
+        assert_eq!(err.code(), ErrorCode::InvalidArgument);
+        assert_eq!(err.message(), "bad input");
+    }
+
+    #[test]
+    fn display_prints_message() {
+        let err = VerifyError::from(VerificationError::CertificateChainError("broken".into()));
+
+        assert_eq!(err.to_string(), "Certificate chain error: broken");
+    }
 }
 
 // ---------------------------------------------------------------------------

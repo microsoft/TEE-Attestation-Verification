@@ -184,4 +184,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn unsupported_generation_inputs_return_errors() {
+        let unsupported_milan_genoa_model = Generation::from_family_and_model(0x19, 0x20)
+            .expect_err("Unsupported Milan/Genoa model should fail");
+        assert_eq!(
+            unsupported_milan_genoa_model.to_string(),
+            "Unsupported CPU model: 0x20"
+        );
+
+        let unsupported_turin_model = Generation::from_family_and_model(0x1A, 0x12)
+            .expect_err("Unsupported Turin model should fail");
+        assert_eq!(
+            unsupported_turin_model.to_string(),
+            "Unsupported CPU model: 0x12"
+        );
+
+        let unsupported_family = Generation::from_family_and_model(0x1B, 0x00)
+            .expect_err("Unsupported family should fail");
+        assert_eq!(
+            unsupported_family.to_string(),
+            "Unsupported CPU family: 0x1B"
+        );
+    }
 }

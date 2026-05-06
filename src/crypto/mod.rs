@@ -145,6 +145,45 @@ mod test {
         Crypto::from_pem(pem).unwrap()
     }
 
+    #[test]
+    fn certificate_parse_and_encode_wrappers_round_trip() {
+        let pem_chain = [MILAN_ASK, b"\n", MILAN_ARK].concat();
+        let chain = Crypto::from_pem_chain(&pem_chain).expect("PEM chain should parse");
+        assert_eq!(chain.len(), 2);
+
+        let cert = cert(MILAN_VCEK);
+        let der = Crypto::to_der(&cert).expect("DER encoding should succeed");
+        let from_der = Crypto::from_der(&der).expect("DER parsing should succeed");
+        assert_eq!(
+            Crypto::to_der(&from_der).expect("Reparsed DER should encode"),
+            der
+        );
+
+        let pem = Crypto::to_pem(&cert).expect("PEM encoding should succeed");
+        let from_pem = Crypto::from_pem(pem.as_bytes()).expect("PEM parsing should succeed");
+        assert_eq!(
+            Crypto::to_der(&from_pem).expect("Reparsed PEM should encode as DER"),
+            der
+        );
+    }
+
+    #[test]
+    fn certificate_parse_wrappers_reject_invalid_input() {
+        let malformed_pem = b"-----BEGIN CERTIFICATE-----\nnot-base64\n-----END CERTIFICATE-----\n";
+
+        Crypto::from_pem(b"not a pem").expect_err("Invalid PEM should fail");
+        Crypto::from_pem_chain(malformed_pem).expect_err("Invalid PEM chain should fail");
+        Crypto::from_der(b"not der").expect_err("Invalid DER should fail");
+    }
+
+    #[test]
+    fn extension_lookup_rejects_malformed_oid() {
+        let cert = cert(MILAN_VCEK);
+
+        Crypto::get_extension_value_by_oid(&cert, "not-an-oid")
+            .expect_err("Malformed OID should fail");
+    }
+
     #[cfg(sync_crypto)]
     mod sync_tests {
         use super::super::verifier::Sync as Verifier;
@@ -238,6 +277,46 @@ mod test {
 
             vcek.verify(&report)
                 .expect_err("Zeroed signature should not verify");
+        }
+
+        #[cfg(crypto_backend = "crypto_pure_rust")]
+        #[test]
+        fn nonzero_r_scalar_padding_fails() {
+            let vcek = cert(MILAN_VCEK);
+            let mut report: AttestationReport =
+                AttestationReport::try_read_from_bytes(MILAN_REPORT)
+                    .expect("Failed to parse attestation report")
+                    .clone();
+
+            report.signature.r[48] = 1;
+
+            let err = vcek
+                .verify(&report)
+                .expect_err("Nonzero r scalar padding should not verify");
+            assert!(
+                err.to_string().contains("Invalid r scalar padding"),
+                "expected r scalar padding error, got: {err}"
+            );
+        }
+
+        #[cfg(crypto_backend = "crypto_pure_rust")]
+        #[test]
+        fn nonzero_s_scalar_padding_fails() {
+            let vcek = cert(MILAN_VCEK);
+            let mut report: AttestationReport =
+                AttestationReport::try_read_from_bytes(MILAN_REPORT)
+                    .expect("Failed to parse attestation report")
+                    .clone();
+
+            report.signature.s[48] = 1;
+
+            let err = vcek
+                .verify(&report)
+                .expect_err("Nonzero s scalar padding should not verify");
+            assert!(
+                err.to_string().contains("Invalid s scalar padding"),
+                "expected s scalar padding error, got: {err}"
+            );
         }
 
         #[test]
