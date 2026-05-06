@@ -140,3 +140,52 @@ jobs:
       - name: Test with pure_rust + KDS (optional - may fail due to KDS rate limiting)
         continue-on-error: true
         run: cargo test --no-default-features --features "crypto_pure_rust,kds" -- --nocapture
+
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+          rustup component add llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Collect coverage (openssl backend)
+        run: |
+          cargo llvm-cov --no-default-features --features "crypto_openssl" \
+            --lcov --output-path lcov-openssl.info \
+            --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
+
+      - name: Collect coverage (pure_rust backend)
+        run: |
+          cargo llvm-cov --no-default-features --features "crypto_pure_rust" \
+            --lcov --output-path lcov-pure-rust.info \
+            --ignore-filename-regex '(^|/)(tests|demos|src/bin)/'
+
+      - name: Generate coverage summary
+        run: |
+          cargo llvm-cov report --summary-only \
+            --ignore-filename-regex '(^|/)(tests|demos|src/bin)/' \
+            | tee coverage-summary.txt
+          {
+            echo '## Test coverage (pure_rust backend)';
+            echo '';
+            echo '```';
+            cat coverage-summary.txt;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            lcov-openssl.info
+            lcov-pure-rust.info
+            coverage-summary.txt
