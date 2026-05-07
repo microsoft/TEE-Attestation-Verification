@@ -149,42 +149,41 @@ pub(crate) fn ark_matches_pinned(
     Ok(())
 }
 
+fn extension_value_matches(ext_value: &[u8], expected: &[u8]) -> bool {
+    // Try direct match
+    if ext_value == expected {
+        return true;
+    }
+    // prefix match
+    if ext_value.len() < expected.len()
+        && ext_value == &expected[..ext_value.len()]
+        && expected[ext_value.len()..].iter().all(|e| *e == 0)
+    {
+        return true;
+    }
+    // Try with INTEGER tag (0x02) wrapper
+    if ext_value.len() >= 2 && ext_value[0] == 0x02 {
+        if let Some(&last) = ext_value.last() {
+            if expected.len() == 1 && last == expected[0] {
+                return true;
+            }
+        }
+    }
+    // Try with OCTET STRING tag (0x04) wrapper
+    if ext_value.len() >= 2 && ext_value[0] == 0x04 && ext_value.len() >= 2 {
+        return &ext_value[2..] == expected;
+    }
+    false
+}
+
 pub(crate) fn verify_tcb_values(
     vcek: &Certificate,
     attestation_report: &AttestationReport,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Helper to check extension value (handles different ASN.1 wrapping)
-    let check_ext = |ext_value: &[u8], expected: &[u8]| -> bool {
-        // Try direct match
-        if ext_value == expected {
-            return true;
-        }
-        // prefix match
-        if ext_value.len() < expected.len()
-            && ext_value == &expected[..ext_value.len()]
-            && expected[ext_value.len()..].iter().all(|e| *e == 0)
-        {
-            return true;
-        }
-        // Try with INTEGER tag (0x02) wrapper
-        if ext_value.len() >= 2 && ext_value[0] == 0x02 {
-            if let Some(&last) = ext_value.last() {
-                if expected.len() == 1 && last == expected[0] {
-                    return true;
-                }
-            }
-        }
-        // Try with OCTET STRING tag (0x04) wrapper
-        if ext_value.len() >= 2 && ext_value[0] == 0x04 && ext_value.len() >= 2 {
-            return &ext_value[2..] == expected;
-        }
-        false
-    };
-
     let check_u8_ext = |oid: &str, expected: u8| -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ext_value) = Crypto::get_extension_value_by_oid(vcek, oid)? {
             let expected = [expected];
-            if check_ext(&ext_value, &expected) {
+            if extension_value_matches(&ext_value, &expected) {
                 return Ok(());
             }
             return Err(format!(
@@ -247,10 +246,153 @@ pub(crate) fn verify_tcb_values(
 
     let hwid_oid = Oid::HwId.as_str();
     if let Some(cert_hwid) = Crypto::get_extension_value_by_oid(vcek, hwid_oid)? {
-        if !check_ext(&cert_hwid, attestation_report.chip_id.as_slice()) {
+        if !extension_value_matches(&cert_hwid, attestation_report.chip_id.as_slice()) {
             return Err("Report TCB ID and Certificate ID mismatch".into());
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use zerocopy::TryFromBytes;
+
+    use crate::crypto::{Certificate, CertificateBackend, Crypto};
+    use crate::AttestationReport;
+
+    use super::{extension_value_matches, verify_tcb_values};
+
+    const MILAN_ASK: &[u8] = include_bytes!("../crypto/test_data/milan_ask.pem");
+    const MILAN_VCEK: &[u8] = include_bytes!("../crypto/test_data/milan_vcek.pem");
+    const MILAN_REPORT: &[u8] = include_bytes!("../crypto/test_data/milan_attestation_report.bin");
+    const TURIN_REPORT: &[u8] =
+        include_bytes!("../../tests/test_data/turin_attestation_report.bin");
+    const TURIN_KDS_ASK: &[u8] = include_bytes!("../../tests/test_data/turin_kds_ask.pem");
+    const TURIN_KDS_ARK: &[u8] = include_bytes!("../../tests/test_data/turin_kds_ark.pem");
+
+    // KDS-generated Turin VCEKs for the public Turin report fixture's KDS chip ID
+    // 59790FB1C39F35C1. The report TCB is fmc=1, bl=1, tee=1, snp=4,
+    // ucode=81; each fixture changes exactly one field and leaves the others matched.
+    const TURIN_VCEK_MISMATCH_FMC: &[u8] =
+        include_bytes!("../../tests/test_data/turin_vcek_mismatch_fmc_02.der");
+    const TURIN_VCEK_MISMATCH_BL: &[u8] =
+        include_bytes!("../../tests/test_data/turin_vcek_mismatch_bl_02.der");
+    const TURIN_VCEK_MISMATCH_TEE: &[u8] =
+        include_bytes!("../../tests/test_data/turin_vcek_mismatch_tee_02.der");
+    const TURIN_VCEK_MISMATCH_SNP: &[u8] =
+        include_bytes!("../../tests/test_data/turin_vcek_mismatch_snp_05.der");
+    const TURIN_VCEK_MISMATCH_UCODE: &[u8] =
+        include_bytes!("../../tests/test_data/turin_vcek_mismatch_ucode_82.der");
+
+    fn milan_report() -> AttestationReport {
+        AttestationReport::try_read_from_bytes(MILAN_REPORT)
+            .expect("Milan report fixture should parse")
+            .clone()
+    }
+
+    fn turin_report() -> AttestationReport {
+        AttestationReport::try_read_from_bytes(TURIN_REPORT)
+            .expect("Turin report fixture should parse")
+            .clone()
+    }
+
+    fn cert_from_der(der: &[u8]) -> Certificate {
+        Crypto::from_der(der).expect("DER certificate fixture should parse")
+    }
+
+    #[test]
+    fn turin_kds_chain_fixtures_parse() {
+        Crypto::from_pem(TURIN_KDS_ASK).expect("Turin KDS ASK should parse");
+        Crypto::from_pem(TURIN_KDS_ARK).expect("Turin KDS ARK should parse");
+    }
+
+    #[test]
+    fn extension_value_matching_accepts_supported_encodings() {
+        assert!(extension_value_matches(&[0x05], &[0x05]));
+        assert!(extension_value_matches(&[0x05], &[0x05, 0x00, 0x00]));
+        assert!(extension_value_matches(&[0x02, 0x01, 0x05], &[0x05]));
+        assert!(extension_value_matches(
+            &[0x04, 0x02, 0x05, 0x06],
+            &[0x05, 0x06]
+        ));
+    }
+
+    #[test]
+    fn extension_value_matching_rejects_mismatches() {
+        assert!(!extension_value_matches(&[0x06], &[0x05]));
+        assert!(!extension_value_matches(&[0x05], &[0x05, 0x01]));
+        assert!(!extension_value_matches(&[0x02, 0x01, 0x06], &[0x05]));
+        assert!(!extension_value_matches(&[0x04, 0x02, 0x06], &[0x05]));
+    }
+
+    #[test]
+    fn verify_tcb_values_rejects_mismatched_tcb_extension() {
+        let vcek = Crypto::from_pem(MILAN_VCEK).expect("Milan VCEK should parse");
+        let mut report = milan_report();
+        report.reported_tcb.raw[0] ^= 0xFF;
+
+        let err =
+            verify_tcb_values(&vcek, &report).expect_err("Mismatched TCB extension should fail");
+        assert!(
+            err.to_string().contains("Error verifying TCB boot loader"),
+            "expected boot loader TCB error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_tcb_values_rejects_missing_tcb_extension() {
+        let ask = Crypto::from_pem(MILAN_ASK).expect("Milan ASK should parse");
+        let report = milan_report();
+
+        let err = verify_tcb_values(&ask, &report).expect_err("Missing TCB extension should fail");
+        assert!(
+            err.to_string().contains("Extension OID"),
+            "expected missing extension error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_tcb_values_rejects_hwid_mismatch() {
+        let vcek = Crypto::from_pem(MILAN_VCEK).expect("Milan VCEK should parse");
+        let mut report = milan_report();
+        report.chip_id[0] ^= 0xFF;
+
+        let err = verify_tcb_values(&vcek, &report).expect_err("HWID mismatch should fail");
+        assert!(
+            err.to_string()
+                .contains("Report TCB ID and Certificate ID mismatch"),
+            "expected HWID mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_tcb_values_reports_turin_field_mismatches() {
+        let report = turin_report();
+        let cases: &[(&str, &[u8], &str)] = &[
+            (
+                "boot loader",
+                TURIN_VCEK_MISMATCH_BL,
+                "Error verifying TCB boot loader",
+            ),
+            ("TEE", TURIN_VCEK_MISMATCH_TEE, "Error verifying TCB TEE"),
+            ("SNP", TURIN_VCEK_MISMATCH_SNP, "Error verifying TCB SNP"),
+            (
+                "microcode",
+                TURIN_VCEK_MISMATCH_UCODE,
+                "Error verifying TCB microcode",
+            ),
+            ("FMC", TURIN_VCEK_MISMATCH_FMC, "Error verifying TCB FMC"),
+        ];
+
+        for (field, der, expected_error) in cases {
+            let vcek = cert_from_der(der);
+            let err = verify_tcb_values(&vcek, &report)
+                .expect_err(&format!("{field} mismatch should fail"));
+            assert!(
+                err.to_string().contains(expected_error),
+                "expected {field} error to contain '{expected_error}', got: {err}"
+            );
+        }
+    }
 }
