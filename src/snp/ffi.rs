@@ -1,14 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! FFI types and bindings for SNP attestation verification.
+//! FFI types and target-specific bindings for SNP attestation verification.
 //!
-//! - [`ErrorCode`] and [`VerifyError`] classify verification failures and are
-//!   shared between all FFI surfaces.
-//! - [`wasm`] (only compiled on `wasm32`): exports a `wasm_bindgen` class
-//!   [`wasm::SnpAttestationReport`] returned by a successful
-//!   `verify_attestation_async`. Because the struct is only constructible via
-//!   successful verification, callers cannot inspect unverified reports.
+//! [`crate::snp::ffi::ErrorCode`] and [`crate::snp::ffi::VerifyError`] classify
+//! verification failures in a form suitable for non-Rust callers.
+//! Target-specific bindings live under submodules; the `wasm` submodule is
+//! compiled only for `wasm32` and exposes
+//! the caller-provided-certificate WebAssembly API.
 //!
 //! A sync `verify_attestation` for C FFI consumers will be added alongside the
 //! C FFI bindings.
@@ -32,11 +31,17 @@ use wasm_bindgen::prelude::*;
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
+    /// Input bytes or certificate text could not be parsed.
     InvalidArgument = 1,
+    /// The report's processor family/model is not supported.
     UnsupportedProcessor = 101,
+    /// The selected or provided ARK certificate is not a valid trusted root.
     InvalidRootCertificate = 102,
+    /// The ARK → ASK → VCEK certificate chain could not be verified.
     CertificateChainError = 103,
+    /// The attestation report signature could not be verified with the VCEK.
     SignatureVerificationError = 104,
+    /// Report TCB values did not match the corresponding VCEK extensions.
     TcbVerificationError = 105,
 }
 
@@ -164,9 +169,19 @@ mod tests {
 pub mod wasm {
     //! `wasm_bindgen` bindings exposing verified SNP attestation reports to JS.
     //!
-    //! The only way to obtain a [`SnpAttestationReport`] is by calling
-    //! [`verify_attestation_async`], so all accessor methods are guaranteed to
-    //! return data from a cryptographically verified report.
+    //! Build this crate for `wasm32` with the WebCrypto backend, then call
+    //! [`verify_attestation_async`] from JavaScript with raw report bytes and
+    //! PEM-encoded ARK, ASK, and VCEK certificates. On success, the function
+    //! returns a [`SnpAttestationReport`]. The only way to obtain that type is
+    //! through successful verification, so its accessor methods return fields
+    //! from a cryptographically verified report.
+    //!
+    //! ```sh
+    //! wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+    //! ```
+    //!
+    //! See `demos/web-verify-kernel/README.md` in the repository for a runnable
+    //! browser demo that uses these bindings.
 
     use wasm_bindgen::prelude::*;
     use zerocopy::FromBytes;

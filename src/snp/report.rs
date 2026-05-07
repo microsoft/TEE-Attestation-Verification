@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! AMD SEV-SNP attestation report structures.
+//!
+//! [`crate::snp::report::AttestationReport`] mirrors the AMD SEV-SNP ABI report
+//! layout and can be parsed directly from the raw 1184-byte report buffer using
+//! `zerocopy`'s [`zerocopy::FromBytes`] trait.
+
 use zerocopy::{byteorder::little_endian as le, *};
 
 // ---------------------------------------------------------------------------
@@ -27,54 +33,67 @@ impl GuestPolicy {
     const CIPHERTEXT_HIDING_DRAM_BIT: u64 = 1 << 24;
     const PAGE_SWAP_DISABLE_BIT: u64 = 1 << 25;
 
+    /// Wraps the raw 64-bit guest policy field.
     pub fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
+    /// Returns the raw 64-bit guest policy field.
     pub fn raw(&self) -> u64 {
         self.0
     }
 
+    /// Returns the minimum ABI minor version required by the guest.
     pub fn abi_minor(&self) -> u8 {
         (self.0 & Self::ABI_MINOR_MASK) as u8
     }
 
+    /// Returns the minimum ABI major version required by the guest.
     pub fn abi_major(&self) -> u8 {
         ((self.0 & Self::ABI_MAJOR_MASK) >> 8) as u8
     }
 
+    /// Returns whether simultaneous multithreading is allowed.
     pub fn smt(&self) -> bool {
         self.0 & Self::SMT_BIT != 0
     }
 
+    /// Returns whether association with a migration agent is allowed.
     pub fn migrate_ma(&self) -> bool {
         self.0 & Self::MIGRATE_MA_BIT != 0
     }
 
+    /// Returns whether debug mode is allowed.
     pub fn debug(&self) -> bool {
         self.0 & Self::DEBUG_BIT != 0
     }
 
+    /// Returns whether the guest must run on a single socket.
     pub fn single_socket(&self) -> bool {
         self.0 & Self::SINGLE_SOCKET_BIT != 0
     }
 
+    /// Returns whether CXL devices are allowed.
     pub fn cxl_allow(&self) -> bool {
         self.0 & Self::CXL_ALLOW_BIT != 0
     }
 
+    /// Returns whether 256-bit AES-XTS memory encryption is required.
     pub fn mem_aes_256_xts(&self) -> bool {
         self.0 & Self::MEM_AES_256_XTS_BIT != 0
     }
 
+    /// Returns whether RAPL is disabled.
     pub fn rapl_dis(&self) -> bool {
         self.0 & Self::RAPL_DIS_BIT != 0
     }
 
+    /// Returns whether ciphertext hiding for DRAM is enabled.
     pub fn ciphertext_hiding_dram(&self) -> bool {
         self.0 & Self::CIPHERTEXT_HIDING_DRAM_BIT != 0
     }
 
+    /// Returns whether page swapping is disabled.
     pub fn page_swap_disable(&self) -> bool {
         self.0 & Self::PAGE_SWAP_DISABLE_BIT != 0
     }
@@ -83,13 +102,18 @@ impl GuestPolicy {
 /// The key type used to sign the attestation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SigningKey {
+    /// Versioned Chip Endorsement Key.
     Vcek,
+    /// Versioned Loaded Endorsement Key.
     Vlek,
+    /// No signing key is indicated.
     None,
+    /// Reserved signing-key encoding from the report.
     Reserved(u8),
 }
 
 impl SigningKey {
+    /// Decodes the raw signing-key field from report flags.
     pub fn from_raw(raw: u8) -> Self {
         match raw {
             0 => Self::Vcek,
@@ -99,6 +123,7 @@ impl SigningKey {
         }
     }
 
+    /// Returns the raw signing-key encoding.
     pub fn raw(&self) -> u8 {
         match self {
             Self::Vcek => 0,
@@ -122,22 +147,27 @@ impl ReportFlags {
     const MASK_CHIP_KEY_BIT: u32 = 1 << 1;
     const SIGNING_KEY_MASK: u32 = 0b111 << 2;
 
+    /// Wraps the raw 32-bit report flags field.
     pub fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
+    /// Returns the raw 32-bit report flags field.
     pub fn raw(&self) -> u32 {
         self.0
     }
 
+    /// Returns whether the report includes an author key digest.
     pub fn author_key_en(&self) -> bool {
         self.0 & Self::AUTHOR_KEY_EN_BIT != 0
     }
 
+    /// Returns whether the chip ID is masked in the report.
     pub fn mask_chip_key(&self) -> bool {
         self.0 & Self::MASK_CHIP_KEY_BIT != 0
     }
 
+    /// Returns the decoded signing key used for the report.
     pub fn signing_key(&self) -> SigningKey {
         SigningKey::from_raw(((self.0 & Self::SIGNING_KEY_MASK) >> 2) as u8)
     }
@@ -147,45 +177,64 @@ impl ReportFlags {
 // TCB version types
 // ---------------------------------------------------------------------------
 
+/// TCB version layout used by Milan and Genoa processors.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes)]
 #[repr(C)]
 pub struct TcbVersionMilanGenoa {
+    /// Boot loader security version number.
     pub boot_loader: u8,
+    /// TEE security version number.
     pub tee: u8,
     reserved: [u8; 4],
+    /// SNP firmware security version number.
     pub snp: u8,
+    /// Microcode security version number.
     pub microcode: u8,
 }
 
+/// TCB version layout used by Turin processors.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes)]
 #[repr(C)]
 pub struct TcbVersionTurin {
+    /// Firmware microcontroller security version number.
     pub fmc: u8,
+    /// Boot loader security version number.
     pub boot_loader: u8,
+    /// TEE security version number.
     pub tee: u8,
+    /// SNP firmware security version number.
     pub snp: u8,
     reserved: [u8; 3],
+    /// Microcode security version number.
     pub microcode: u8,
 }
 
+/// Raw 8-byte TCB version field from an attestation report.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Default, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct TcbVersionRaw {
+    /// Raw TCB bytes in report layout order.
     pub raw: [u8; 8],
 }
 impl TcbVersionRaw {
+    /// Interprets the raw bytes using the Milan/Genoa TCB layout.
     pub fn as_milan_genoa(&self) -> TcbVersionMilanGenoa {
         try_transmute!(*self).unwrap()
     }
+
+    /// Interprets the raw bytes using the Turin TCB layout.
     pub fn as_turin(&self) -> TcbVersionTurin {
         try_transmute!(*self).unwrap()
     }
 }
 
+/// ECDSA signature field from an SEV-SNP attestation report.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct Signature {
+    /// Signature `r` component in the report's fixed-width encoding.
     pub r: [u8; 72],
+    /// Signature `s` component in the report's fixed-width encoding.
     pub s: [u8; 72],
     reserved: [u8; 512 - 144],
 }

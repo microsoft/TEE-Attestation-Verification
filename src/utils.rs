@@ -1,3 +1,8 @@
+//! Hex encoding and decoding helpers.
+//!
+//! These helpers are small utilities used by verification error messages and
+//! callers that need to render or parse byte strings as hexadecimal text.
+
 fn b16_to_hex(b16: u8) -> char {
     const ASCI_0: u8 = b'0';
     const ASCI_A: u8 = b'a';
@@ -8,6 +13,7 @@ fn b16_to_hex(b16: u8) -> char {
     }
 }
 
+/// Encodes bytes as lowercase hexadecimal text.
 pub fn to_hex(bytes: &[u8]) -> String {
     let mut res = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -17,6 +23,10 @@ pub fn to_hex(bytes: &[u8]) -> String {
     res
 }
 
+/// Decodes hexadecimal text into bytes.
+///
+/// Returns an error if the input contains non-ASCII characters, has odd
+/// length, or contains characters that are not valid hexadecimal digits.
 pub fn from_hex(s: &str) -> Result<Vec<u8>, String> {
     if !s.is_ascii() {
         return Err("Hex string must contain only ASCII characters".to_string());

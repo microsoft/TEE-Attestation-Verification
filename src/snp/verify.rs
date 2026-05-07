@@ -1,15 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! SEV-SNP attestation verification with caller-provided certificates.
+//!
+//! The verification APIs identify the processor generation from the report,
+//! optionally verify the ARK → ASK → VCEK certificate chain, verify the report
+//! signature with the VCEK, and compare report TCB values against VCEK
+//! certificate extensions. Use the `sync` module with sync-capable crypto
+//! backends and [`crate::snp::verify::asynchronous`] with async-capable crypto
+//! backends.
+
 use crate::crypto::{Certificate, CertificateBackend, Crypto};
 use crate::{snp, snp::utils::Oid, AttestationReport};
 
+/// Error returned when SEV-SNP attestation verification fails.
 #[derive(Debug)]
 pub enum VerificationError {
+    /// The report's processor family/model is not supported by this crate.
     UnsupportedProcessor(String),
+    /// The selected or provided ARK certificate is not a valid trusted root.
     InvalidRootCertificate(String),
+    /// The ARK → ASK → VCEK certificate chain could not be verified.
     CertificateChainError(String),
+    /// The attestation report signature could not be verified with the VCEK.
     SignatureVerificationError(String),
+    /// Report TCB values did not match the corresponding VCEK extensions.
     TcbVerificationError(String),
 }
 
@@ -27,21 +42,29 @@ impl std::fmt::Display for VerificationError {
 
 impl std::error::Error for VerificationError {}
 
-//ChainVerification::Skip skips chain verification and only verifies report signature + TCB using VCEK.
-//ChainVerification::WithPinnedArk verifies chain with pinned ARK for the processor model.
-//ChainVerification::WithProvidedArk verifies chain with caller-provided ARK after validating its public key matches pinned ARK.
+/// Certificate-chain verification mode for caller-provided certificates.
 pub enum ChainVerification<'a> {
+    /// Skip certificate-chain verification and only verify the report signature
+    /// and TCB values using the provided VCEK.
     Skip,
+    /// Verify the chain using the ASK provided by the caller and the pinned ARK
+    /// for the report's processor generation.
     WithPinnedArk {
+        /// AMD SEV Key (ASK) certificate.
         ask: &'a Certificate,
     },
+    /// Verify the chain using caller-provided ASK and ARK certificates after
+    /// confirming that the provided ARK public key matches the pinned ARK.
     WithProvidedArk {
+        /// AMD SEV Key (ASK) certificate.
         ask: &'a Certificate,
+        /// AMD Root Key (ARK) certificate.
         ark: &'a Certificate,
     },
 }
 
 #[cfg(sync_crypto)]
+/// Synchronous SEV-SNP attestation verification.
 pub mod sync {
     use crate::crypto::verifier::Sync as Verifier;
     use crate::crypto::{Certificate, Crypto, CryptoBackend};
@@ -49,6 +72,11 @@ pub mod sync {
 
     use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
 
+    /// Verifies an SEV-SNP attestation report using caller-provided certificates.
+    ///
+    /// Verification consists of processor-generation detection, certificate-chain
+    /// verification according to `chain_verification`, report signature
+    /// verification with `vcek`, and report/VCEK TCB extension matching.
     pub fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,
@@ -88,6 +116,7 @@ pub mod sync {
 }
 
 #[cfg(async_crypto)]
+/// Asynchronous SEV-SNP attestation verification.
 pub mod asynchronous {
     use crate::crypto::verifier::Async as Verifier;
     use crate::crypto::{AsyncCryptoBackend, Certificate, Crypto};
@@ -95,6 +124,11 @@ pub mod asynchronous {
 
     use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
 
+    /// Verifies an SEV-SNP attestation report using caller-provided certificates.
+    ///
+    /// Verification consists of processor-generation detection, certificate-chain
+    /// verification according to `chain_verification`, report signature
+    /// verification with `vcek`, and report/VCEK TCB extension matching.
     pub async fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,
