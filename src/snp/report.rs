@@ -7,7 +7,7 @@
 //! layout and can be parsed directly from the raw 1184-byte report buffer using
 //! `zerocopy`'s [`zerocopy::FromBytes`] trait.
 //!
-//! # Examples
+//! # Example
 //!
 //! Verify an attestation report before returning the authenticated claims to the caller:
 //!

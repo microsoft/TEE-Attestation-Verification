@@ -11,17 +11,6 @@ fn main() {
     let has_webcrypto = std::env::var_os("CARGO_FEATURE_CRYPTO_WEBCRYPTO").is_some();
 
     // Allow both webcrypto and openssl to be enabled, and to choose the one which is supported on the target platform.
-    if target_arch == "wasm32" && !(has_webcrypto || has_pure_rust) {
-        panic!(
-          "On wasm32 targets, at least one of `crypto_webcrypto` or `crypto_pure_rust` must be enabled, enable one of them."
-      );
-    }
-    if target_arch != "wasm32" && !(has_openssl || has_pure_rust) {
-        panic!(
-            "On native targets, at least one of `crypto_openssl` or `crypto_pure_rust` must be enabled, enable one of them."
-        );
-    }
-
     let crypto_backend = if target_arch != "wasm32" {
         if has_openssl {
             "crypto_openssl"
@@ -29,7 +18,7 @@ fn main() {
             "crypto_pure_rust"
         } else {
             panic!(
-              "On native targets, at least one of `crypto_openssl` or `crypto_pure_rust` must be enabled, enable one of them."
+              "On native targets, at least one of `crypto_openssl` or `crypto_pure_rust` must be enabled."
             );
         }
     } else if target_arch == "wasm32" {
@@ -39,7 +28,7 @@ fn main() {
             "crypto_pure_rust"
         } else {
             panic!(
-              "On wasm32 targets, at least one of `crypto_webcrypto` or `crypto_pure_rust` must be enabled, enable one of them."
+              "On wasm32 targets, at least one of `crypto_webcrypto` or `crypto_pure_rust` must be enabled."
             );
         }
     } else {

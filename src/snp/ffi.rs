@@ -6,8 +6,8 @@
 //! [`crate::snp::ffi::ErrorCode`] and [`crate::snp::ffi::VerifyError`] classify
 //! verification failures in a form suitable for non-Rust callers.
 //! Target-specific bindings live under submodules; the `wasm` submodule is
-//! compiled only for `wasm32` and exposes
-//! the caller-provided-certificate WebAssembly API.
+//! compiled only for `wasm32` and exposes the caller-provided-certificate
+//! WebAssembly API.
 //!
 //! A sync `verify_attestation` for C FFI consumers will be added alongside the
 //! C FFI bindings.
@@ -169,16 +169,9 @@ mod tests {
 pub mod wasm {
     //! `wasm_bindgen` bindings exposing verified SNP attestation reports to JS.
     //!
-    //! Build this crate for `wasm32` with the WebCrypto backend, then call
-    //! [`verify_attestation_async`] from JavaScript with raw report bytes and
-    //! PEM-encoded ARK, ASK, and VCEK certificates. On success, the function
-    //! returns a [`SnpAttestationReport`]. The only way to obtain that type is
-    //! through successful verification, so its accessor methods return fields
-    //! from a cryptographically verified report.
-    //!
-    //! ```sh
-    //! wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
-    //! ```
+    //! SnpAttestationReport is opaque and can only be obtained through successful
+    //! verification with `verify_attestation_async`. Its accessor methods return
+    //! fields from the verified report bytes.
     //!
     //! See `demos/web-verify-kernel/README.md` in the repository for a runnable
     //! browser demo that uses these bindings.
