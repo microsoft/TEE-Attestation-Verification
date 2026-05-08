@@ -9,7 +9,7 @@ authors = ["Cameron Baird"]
 license = "MIT"
 
 [package.metadata.docs.rs]
-features = ["crypto_pure_rust", "kds"]
+features = ["crypto_openssl", "crypto_webcrypto", "kds"]
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [lib]
@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-# At least one crypto backend must be enabled.
+default = ["crypto_openssl", "crypto_webcrypto"]
 crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = ["dep:ecdsa", "dep:p384", "dep:rsa", "dep:sha2", "dep:x509-cert"]
 crypto_webcrypto = ["dep:x509-cert"]
@@ -39,8 +39,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [dependencies]
 # Crypto
 foreign-types = { version = "0.3", optional = true }
-openssl = { version = "0.10", optional = true }
-openssl-sys = { version = "0.9", optional = true }
 ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
 p384 = { version = "0.13", features = ["ecdsa"], optional = true}
 rsa = { version = "0.9", optional = true }
@@ -51,6 +49,13 @@ zerocopy = {version = "0.8.31", features = ["derive"]}
 # KDS (online certificate fetching) dependencies
 log = { version = "0.4" }
 
+# Native deps
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+openssl = { version = "0.10", optional = true }
+openssl-sys = { version = "0.9", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true}
+curl = { version = "0.4", optional = true }
+
 # WASM deps
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -59,8 +64,3 @@ js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 console_error_panic_hook = "0.1"
 wasm-logger = "0.2"
-
-# Native CLI deps
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true}
-curl = { version = "0.4", optional = true }

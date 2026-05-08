@@ -108,13 +108,13 @@ where
     }
 }
 
-#[cfg(feature = "crypto_openssl")]
+#[cfg(crypto_backend = "crypto_openssl")]
 pub(crate) mod crypto_openssl;
-#[cfg(feature = "crypto_pure_rust")]
+#[cfg(crypto_backend = "crypto_pure_rust")]
 pub(crate) mod crypto_pure_rust;
-#[cfg(feature = "crypto_webcrypto")]
+#[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
-#[cfg(any(feature = "crypto_pure_rust", feature = "crypto_webcrypto"))]
+#[cfg(any(crypto_backend = "crypto_pure_rust", crypto_backend = "crypto_webcrypto"))]
 mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]

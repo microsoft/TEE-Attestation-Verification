@@ -10,26 +10,40 @@ fn main() {
     let has_pure_rust = std::env::var_os("CARGO_FEATURE_CRYPTO_PURE_RUST").is_some();
     let has_webcrypto = std::env::var_os("CARGO_FEATURE_CRYPTO_WEBCRYPTO").is_some();
 
-    if has_webcrypto && target_arch != "wasm32" {
+    // Allow both webcrypto and openssl to be enabled, and to choose the one which is supported on the target platform.
+    if target_arch == "wasm32" && !(has_webcrypto || has_pure_rust) {
         panic!(
-            "`crypto_webcrypto` is only supported on wasm32 targets, use `crypto_openssl` instead."
+          "On wasm32 targets, at least one of `crypto_webcrypto` or `crypto_pure_rust` must be enabled, enable one of them."
+      );
+    }
+    if target_arch != "wasm32" && !(has_openssl || has_pure_rust) {
+        panic!(
+            "On native targets, at least one of `crypto_openssl` or `crypto_pure_rust` must be enabled, enable one of them."
         );
     }
 
-    if has_openssl && target_arch == "wasm32" {
-        panic!(
-            "`crypto_openssl` is not supported on wasm32 targets, use `crypto_webcrypto` or `crypto_pure_rust` instead."
-        );
-    }
-
-    let crypto_backend = if has_openssl {
-        "crypto_openssl"
-    } else if has_webcrypto {
-        "crypto_webcrypto"
-    } else if has_pure_rust {
-        "crypto_pure_rust"
+    let crypto_backend = if target_arch != "wasm32" {
+        if has_openssl {
+            "crypto_openssl"
+        } else if has_pure_rust {
+            "crypto_pure_rust"
+        } else {
+            panic!(
+              "On native targets, at least one of `crypto_openssl` or `crypto_pure_rust` must be enabled, enable one of them."
+            );
+        }
+    } else if target_arch == "wasm32" {
+        if has_webcrypto {
+            "crypto_webcrypto"
+        } else if has_pure_rust {
+            "crypto_pure_rust"
+        } else {
+            panic!(
+              "On wasm32 targets, at least one of `crypto_webcrypto` or `crypto_pure_rust` must be enabled, enable one of them."
+            );
+        }
     } else {
-        panic!("At least one crypto backend must be enabled, enable one of `crypto_openssl`, `crypto_webcrypto` or `crypto_pure_rust`.")
+        panic!("Unsupported target architecture: {target_arch}");
     };
 
     let backend_map = std::collections::BTreeMap::from([

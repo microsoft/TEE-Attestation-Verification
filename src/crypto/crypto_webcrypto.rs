@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(all(target_arch = "wasm32", feature = "crypto_webcrypto"))]
-
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;

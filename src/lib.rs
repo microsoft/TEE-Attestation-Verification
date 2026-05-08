@@ -12,8 +12,8 @@
 //! At least one crypto backend feature must be enabled:
 //!
 //! - `crypto_openssl`: native OpenSSL-backed verification.
-//! - `crypto_pure_rust`: native or WASM-compatible pure Rust verification.
 //! - `crypto_webcrypto`: WASM WebCrypto-backed verification.
+//! - `crypto_pure_rust`: native or WASM-compatible pure Rust verification.
 //! - `kds`: enables certificate fetching from AMD KDS.
 //!
 //! # Usage
