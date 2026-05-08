@@ -13,7 +13,7 @@
 //! but callers should compare `report_data` to their expected nonce, challenge,
 //! public-key digest, or other application-specific context.
 //!
-//! The `sync` and `asyncronous` modules provide separate APIs for synchronous and asynchronous crypto backends.
+//! The `sync` and `asynchronous` modules provide separate APIs for synchronous and asynchronous crypto backends.
 //!
 //! # Example
 //!
