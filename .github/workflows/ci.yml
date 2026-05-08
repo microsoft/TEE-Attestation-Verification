@@ -27,6 +27,28 @@ jobs:
         run: |
           cargo fmt -- --check
 
+  docs-build:
+    name: Docs build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Setup WASM tooling
+        run: |
+          rustup target add wasm32-unknown-unknown
+
+      - name: Native build docs
+        run: |
+          cargo doc
+
+      - name: WASM build docs
+        run: |
+          cargo doc --target wasm32-unknown-unknown
+
   wasm-build:
     name: WASM build
     runs-on: ubuntu-latest
