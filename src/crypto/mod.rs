@@ -114,7 +114,10 @@ pub(crate) mod crypto_openssl;
 pub(crate) mod crypto_pure_rust;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
-#[cfg(any(crypto_backend = "crypto_pure_rust", crypto_backend = "crypto_webcrypto"))]
+#[cfg(any(
+    crypto_backend = "crypto_pure_rust",
+    crypto_backend = "crypto_webcrypto"
+))]
 mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]

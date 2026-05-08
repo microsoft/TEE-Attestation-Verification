@@ -6,6 +6,35 @@
 //! [`crate::snp::report::AttestationReport`] mirrors the AMD SEV-SNP ABI report
 //! layout and can be parsed directly from the raw 1184-byte report buffer using
 //! `zerocopy`'s [`zerocopy::FromBytes`] trait.
+//!
+//! # Examples
+//!
+//! Verify an attestation report before returning the authenticated claims to the caller:
+//!
+//! ```no_run
+//! use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
+//! use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
+//! use zerocopy::FromBytes;
+//!
+//! # async fn example<'a>(
+//! #     attestation_bytes: &'a [u8],
+//! #     vcek_pem: &'a [u8],
+//! #     ask_pem: &'a [u8],
+//! # ) -> Result<AttestationReport, Box<dyn std::error::Error + 'a>> {
+//! let report = AttestationReport::read_from_bytes(attestation_bytes)?;
+//! let vcek = certificate_from_pem(vcek_pem)?;
+//! let ask = certificate_from_pem(ask_pem)?;
+//!
+//! verify::asynchronous::verify_attestation(
+//!     &report,
+//!     &vcek,
+//!     &ChainVerification::WithPinnedArk { ask: &ask },
+//! )
+//! .await?;
+//!
+//! # Ok(report)
+//! # }
+//! ```
 
 use zerocopy::{byteorder::little_endian as le, *};
 
@@ -239,7 +268,7 @@ pub struct Signature {
     reserved: [u8; 512 - 144],
 }
 
-/// SNP Attestation Report (0x4A0 = 1184 bytes).
+/// SEV-SNP attestation report (0x4A0 = 1184 bytes).
 ///
 /// See AMD SEV-SNP ABI Specification, Table 23: ATTESTATION_REPORT Structure.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
@@ -289,6 +318,10 @@ pub struct AttestationReport {
     pub reserved0: le::U32, // 0x04C
 
     /// Guest-provided data if REQUEST_SOURCE is guest, otherwise zero-filled by firmware.
+    ///
+    /// Verification authenticates this value as part of the signed report, but
+    /// callers are responsible for comparing it to their expected nonce,
+    /// challenge, public-key digest, or other application-specific context.
     pub report_data: [u8; 64], // 0x050
 
     /// The measurement calculated at launch.
@@ -301,7 +334,7 @@ pub struct AttestationReport {
     pub id_key_digest: [u8; 48], // 0x0E0
 
     /// SHA-384 digest of the Author public key that certified the ID key, if provided
-    /// in SNP_LAUNCH_FINISH. Zeroes if AUTHOR_KEY_EN is 1.
+    /// in SNP_LAUNCH_FINISH. Zeroes if AUTHOR_KEY_EN is 0.
     pub author_key_digest: [u8; 48], // 0x110
 
     /// Report ID of this guest.
@@ -374,12 +407,12 @@ impl AttestationReport {
         &bytes[..0x2A0]
     }
 
-    /// Decode the guest policy bitfield.
+    /// Returns the decoded guest policy bitfield.
     pub fn policy(&self) -> GuestPolicy {
         GuestPolicy::from_raw(self.policy.get())
     }
 
-    /// Decode the report flags bitfield.
+    /// Returns the decoded report flags bitfield.
     pub fn flags(&self) -> ReportFlags {
         ReportFlags::from_raw(self.flags.get())
     }

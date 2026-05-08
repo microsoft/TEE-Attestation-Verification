@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Portable pure-Rust cryptographic backend.
+//!
+//! This backend is selected when `crypto_pure_rust` is enabled and no
+//! target-preferred backend is enabled. It uses pure-Rust crates for X.509
+//! certificate parsing, certificate-chain signature checks, and SEV-SNP
+//! attestation report signature verification.
+
 use p384::ecdsa::VerifyingKey as EcdsaVerifyingKey;
 use rsa::{
     pkcs8::DecodePublicKey,

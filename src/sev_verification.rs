@@ -33,9 +33,9 @@ impl SevVerifier {
     }
 
     #[cfg(target_arch = "wasm32")]
-    /// Initialize wasm logging and panic hook once. Only available when the
-    /// `wasm` feature is enabled. No-op on non-wasm builds or when the feature
-    /// isn't enabled.
+    /// Initializes WASM logging and the panic hook once.
+    ///
+    /// This helper is only compiled for `wasm32` targets.
     fn init_wasm_logging() {
         {
             static INIT: std::sync::Once = std::sync::Once::new();

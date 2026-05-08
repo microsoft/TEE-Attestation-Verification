@@ -24,7 +24,7 @@ pub struct Chain {
     pub ask: Certificate,
 }
 
-/// AMD certificate chain representation for SEV-SNP verification
+/// AMD certificate manager for SEV-SNP verification.
 pub struct AmdCertificates {
     pub chains_cache: Vec<(snp::model::Generation, Chain)>,
     /// Versioned Chip Endorsement Key (VCEK) certificates by processor model
@@ -34,12 +34,19 @@ pub struct AmdCertificates {
 }
 
 impl AmdCertificates {
-    /// Create a new AmdCertificates by fetching ARK and ASK from KDS
+    /// Creates a new KDS-backed certificate manager.
+    ///
+    /// Certificate chains and VCEKs are fetched lazily when verification needs
+    /// them.
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Self::with_cache(false).await
     }
 
-    /// Create a new AmdCertificates with caching enabled
+    /// Creates a new KDS-backed certificate manager with optional KDS fetcher caching.
+    ///
+    /// Certificate chains and VCEKs are still cached by this manager after they
+    /// are fetched; `use_cache` controls whether the underlying KDS fetcher uses
+    /// its own cache.
     pub async fn with_cache(use_cache: bool) -> Result<Self, Box<dyn std::error::Error>> {
         // Create fetcher
         let fetcher = if use_cache {

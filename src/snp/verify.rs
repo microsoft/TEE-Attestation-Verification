@@ -6,9 +6,43 @@
 //! The verification APIs identify the processor generation from the report,
 //! optionally verify the ARK → ASK → VCEK certificate chain, verify the report
 //! signature with the VCEK, and compare report TCB values against VCEK
-//! certificate extensions. Use the `sync` module with sync-capable crypto
-//! backends and [`crate::snp::verify::asynchronous`] with async-capable crypto
-//! backends.
+//! certificate extensions.
+//!
+//! Successful verification authenticates the signed report, including
+//! [`AttestationReport::report_data`](crate::AttestationReport::report_data),
+//! but callers should compare `report_data` to their expected nonce, challenge,
+//! public-key digest, or other application-specific context.
+//!
+//! The `sync` and `asyncronous` modules provide separate APIs for synchronous and asynchronous crypto
+//!
+//! # Examples
+//!
+//! Verify an attestation report before returning the authenticated claims to the caller:
+//!
+//! ```no_run
+//! use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
+//! use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
+//! use zerocopy::FromBytes;
+//!
+//! # async fn example<'a>(
+//! #     attestation_bytes: &'a [u8],
+//! #     vcek_pem: &'a [u8],
+//! #     ask_pem: &'a [u8],
+//! # ) -> Result<AttestationReport, Box<dyn std::error::Error + 'a>> {
+//! let report = AttestationReport::read_from_bytes(attestation_bytes)?;
+//! let vcek = certificate_from_pem(vcek_pem)?;
+//! let ask = certificate_from_pem(ask_pem)?;
+//!
+//! verify::asynchronous::verify_attestation(
+//!     &report,
+//!     &vcek,
+//!     &ChainVerification::WithPinnedArk { ask: &ask },
+//! )
+//! .await?;
+//!
+//! # Ok(report)
+//! # }
+//! ```
 
 use crate::crypto::{Certificate, CertificateBackend, Crypto};
 use crate::{snp, snp::utils::Oid, AttestationReport};
@@ -76,7 +110,9 @@ pub mod sync {
     ///
     /// Verification consists of processor-generation detection, certificate-chain
     /// verification according to `chain_verification`, report signature
-    /// verification with `vcek`, and report/VCEK TCB extension matching.
+    /// verification with `vcek`, and report/VCEK TCB extension matching. Callers
+    /// must separately compare `attestation_report.report_data` to the expected
+    /// nonce, challenge, public-key digest, or other application-specific context.
     pub fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,
@@ -128,7 +164,9 @@ pub mod asynchronous {
     ///
     /// Verification consists of processor-generation detection, certificate-chain
     /// verification according to `chain_verification`, report signature
-    /// verification with `vcek`, and report/VCEK TCB extension matching.
+    /// verification with `vcek`, and report/VCEK TCB extension matching. Callers
+    /// must separately compare `attestation_report.report_data` to the expected
+    /// nonce, challenge, public-key digest, or other application-specific context.
     pub async fn verify_attestation(
         attestation_report: &AttestationReport,
         vcek: &Certificate,

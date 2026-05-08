@@ -10,13 +10,14 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 
 ## Crypto Backends
 
-At least one crypto backend must be enabled, with `crypto_pure_rust` being used as a fallback if no alternatives are available:
+At least one target-compatible crypto backend must be enabled.
+If multiple backends are enabled, the target-compatible backend is selected with `crypto_openssl` and `crypto_webcrypto` preferred over `crypto_pure_rust`.
 
 | Feature | Platforms | sync | async | Dependencies |
 |---|---|---|---|---|
 | `crypto_openssl` | Native | ✓ | ✓ | OpenSSL |
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
-| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`) |
+| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`); selected when enabled and no target-preferred backend is enabled |
 
 ## Optional Features
 
@@ -87,7 +88,7 @@ Download the matching GitHub release asset for your chosen `tav-<crate-version>`
 Build the library for `wasm32` with the WebCrypto backend:
 
 ```bash
-wasm-pack build --target web -- --no-default-features --features "crypto_webcrypto,kds"
+wasm-pack build --target web --no-default-features --features "crypto_webcrypto,kds"
 ```
 
 For a plain Cargo build targeting `wasm32-unknown-unknown`:
@@ -100,7 +101,7 @@ cargo build --target wasm32-unknown-unknown --no-default-features --features "cr
 
 - **Certificate Validation**: Verifies the certificate chain from the ARK through the ASK to the VCEK, and the ARK against a root-of-trust
 - **Signature Validation**: Validates the attestation report signature was signed by the VCEK
-- **TCB Verification**: Confirm that the TCB values in the attestation report match the VCEK's x509v3 extensions.
+- **TCB Verification**: Confirms that the TCB values in the attestation report match the VCEK's X.509 v3 extensions.
 
 ## Trademarks
 

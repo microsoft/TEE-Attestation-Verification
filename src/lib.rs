@@ -9,20 +9,23 @@
 //!
 //! # Feature flags
 //!
-//! At least one crypto backend feature must be enabled:
+//! At least one target-compatible crypto backend feature must be enabled.
+//!
+//! ## Crypto backends
 //!
 //! - `crypto_openssl`: native OpenSSL-backed verification.
 //! - `crypto_webcrypto`: WASM WebCrypto-backed verification.
-//! - `crypto_pure_rust`: native or WASM-compatible pure Rust verification.
+//! - `crypto_pure_rust`: portable pure-Rust verification, selected when no target-preferred backend is enabled.
+//!
+//! ## Additional features
+//!
 //! - `kds`: enables certificate fetching from AMD KDS.
 //!
 //! # Usage
 //!
-//! Use [`snp::report`] and [`AttestationReport`] to parse and inspect raw
-//! SEV-SNP attestation reports. Use [`snp::verify`] to verify reports with
-//! caller-provided certificate collateral. Use [`snp::ffi`] for FFI and
-//! WASM-oriented consumers; the `snp::ffi::wasm` submodule contains the
-//! caller-provided-certificate WASM API when building for `wasm32`.
+//! [`AttestationReport`] provides the parsing and inspection APIs for SEV-SNP attestation reports.
+//!
+//! [`snp::verify`] is used to verify reports using provided collateral.
 //!
 //! ```no_run
 //! use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
@@ -47,13 +50,14 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! Use [`snp::ffi`] for FFI and WASM-oriented consumers; the `snp::ffi::wasm`
+//! submodule contains the caller-provided-certificate WASM API when building
+//! for `wasm32`.
 
 pub(crate) mod crypto;
-/// Pinned AMD Root Key (ARK) certificates for offline verification.
 pub mod pinned_arks;
-/// AMD SEV-SNP attestation report types, verification APIs, and FFI bindings.
 pub mod snp;
-/// Hex encoding and decoding helpers.
 pub mod utils;
 
 use crypto::{CertificateBackend, Crypto};
@@ -82,7 +86,6 @@ mod certificate_chain;
 #[cfg(feature = "kds")]
 mod kds;
 #[cfg(feature = "kds")]
-/// KDS-backed SEV-SNP verifier that fetches AMD certificate collateral.
 pub mod sev_verification;
 #[cfg(feature = "kds")]
 pub use certificate_chain::AmdCertificates;
@@ -90,8 +93,6 @@ pub use certificate_chain::AmdCertificates;
 pub use sev_verification::SevVerifier;
 
 #[cfg(all(target_arch = "wasm32", feature = "kds"))]
-/// KDS-fetching WASM API, distinct from the caller-provided-certificate
-/// `snp::ffi::wasm` API.
 pub mod wasm;
 
 #[cfg(test)]

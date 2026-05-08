@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Native OpenSSL-backed cryptographic backend.
+//!
+//! This backend uses OpenSSL for X.509 certificate parsing and encoding,
+//! certificate-chain verification, and SEV-SNP attestation report signature
+//! verification. It is the native backend selected when `crypto_openssl` is
+//! enabled for a non-`wasm32` target.
+
 use foreign_types::ForeignType;
 use openssl::asn1::Asn1Object;
 use openssl::ecdsa::EcdsaSig;
