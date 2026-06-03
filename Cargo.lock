@@ -1006,7 +1006,7 @@ dependencies = [
 
 [[package]]
 name = "tee-attestation-verification-lib"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "console_error_panic_hook",
  "curl",
