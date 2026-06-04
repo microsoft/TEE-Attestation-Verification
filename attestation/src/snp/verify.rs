@@ -100,7 +100,6 @@ pub enum ChainVerification<'a> {
 #[cfg(sync_crypto)]
 /// Synchronous SEV-SNP attestation verification.
 pub mod sync {
-    use crate::crypto::verifier::Sync as Verifier;
     use crate::crypto::{Certificate, Crypto, CryptoBackend};
     use crate::{snp, AttestationReport};
 
@@ -129,19 +128,19 @@ pub mod sync {
                 ark_matches_pinned(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
 
-                Crypto::verify_chain(&[ark], &[ask], vcek)
+                Crypto::verify_chain(ark, &[ask], vcek)
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::WithPinnedArk { ask } => {
                 let pinned_ark = crate::pinned_arks::get_ark(generation)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
-                Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
+                Crypto::verify_chain(&pinned_ark, &[ask], vcek)
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::Skip => {}
         };
 
-        vcek.verify(attestation_report)
+        snp::report::verify_report_signature(vcek, attestation_report)
             .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
 
         verify_tcb_values(vcek, attestation_report)
@@ -154,7 +153,6 @@ pub mod sync {
 #[cfg(async_crypto)]
 /// Asynchronous SEV-SNP attestation verification.
 pub mod asynchronous {
-    use crate::crypto::verifier::Async as Verifier;
     use crate::crypto::{AsyncCryptoBackend, Certificate, Crypto};
     use crate::{snp, AttestationReport};
 
@@ -183,21 +181,21 @@ pub mod asynchronous {
                 ark_matches_pinned(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
 
-                Crypto::verify_chain(&[ark], &[ask], vcek)
+                Crypto::verify_chain(ark, &[ask], vcek)
                     .await
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::WithPinnedArk { ask } => {
                 let pinned_ark = crate::pinned_arks::get_ark(generation)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
-                Crypto::verify_chain(&[&pinned_ark], &[ask], vcek)
+                Crypto::verify_chain(&pinned_ark, &[ask], vcek)
                     .await
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::Skip => {}
         };
 
-        vcek.verify(attestation_report)
+        snp::report::verify_report_signature_async(vcek, attestation_report)
             .await
             .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
 

@@ -1010,6 +1010,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "p384",
+ "pkcs1",
  "rsa",
  "sha2",
  "tokio",

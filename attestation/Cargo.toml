@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["crypto_openssl", "crypto_webcrypto"]
+default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]
 crypto_pure_rust = ["crypto/crypto_pure_rust"]
 crypto_webcrypto = ["crypto/crypto_webcrypto"]

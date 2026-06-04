@@ -1,25 +1,89 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(async_crypto)]
+use std::{future::Future, pin::Pin};
+
+use pkcs1::{RsaPssParams, TrailerField};
 use x509_cert::der::{
-    oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode, DecodePem, Encode,
-    EncodePem,
+    asn1::AnyRef, oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode,
+    DecodePem, Encode, EncodePem,
 };
 use x509_cert::spki::AlgorithmIdentifierOwned;
 
-use super::Result;
+use super::{Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Certificate {
     inner: x509_cert::Certificate,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SignatureAlgorithm {
-    RsaPss,
+/// Synchronous checking of a certificate path
+#[cfg(sync_crypto)]
+pub fn verify_certificate_path(
+    mut verify_signature: impl FnMut(&Certificate, &Certificate) -> Result<()>,
+    root_trust_anchor: &Certificate,
+    untrusted_chain: &[&Certificate],
+    leaf: &Certificate,
+) -> Result<()> {
+    // Verify that the chain is properly ordered and that signatures are valid.
+    let full_chain = untrusted_chain
+        .iter()
+        .copied()
+        .chain(std::iter::once(leaf))
+        .collect::<Vec<_>>();
+
+    // The trusted certificate must issue the first certificate in the path.
+    verify_signature(root_trust_anchor, full_chain[0])
+        .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
+    for edge in full_chain.windows(2) {
+        let issuer = edge[0];
+        let subject = edge[1];
+        verify_signature(issuer, subject)
+            .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Asynchronous checking of the certificate path
+#[cfg(async_crypto)]
+pub async fn verify_certificate_path_async<F>(
+    mut verify_signature: F,
+    root_trust_anchor: &Certificate,
+    untrusted_chain: &[&Certificate],
+    leaf: &Certificate,
+) -> Result<()>
+where
+    F: for<'a> FnMut(
+        &'a Certificate,
+        &'a Certificate,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>>,
+{
+    // Verify that the chain is properly ordered and that signatures are valid.
+    let full_chain = untrusted_chain
+        .iter()
+        .copied()
+        .chain(std::iter::once(leaf))
+        .collect::<Vec<_>>();
+
+    // The trusted certificate must issue the first certificate in the path.
+    verify_signature(root_trust_anchor, full_chain[0])
+        .await
+        .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
+    for edge in full_chain.windows(2) {
+        let issuer = edge[0];
+        let subject = edge[1];
+        verify_signature(issuer, subject)
+            .await
+            .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
+    }
+
+    Ok(())
 }
 
 impl Certificate {
+    // Certificate accessors.
     pub fn from_pem(pem: &[u8]) -> Result<Self> {
         Ok(Self {
             inner: x509_cert::Certificate::from_pem(pem)?,
@@ -77,41 +141,85 @@ impl Certificate {
         self.inner.signature.raw_bytes()
     }
 
-    pub fn signature_algorithm(&self) -> Result<SignatureAlgorithm> {
+    pub fn signature_algorithm(&self) -> Result<SignatureKeyAlgorithm> {
         parse_signature_algorithm(&self.inner.signature_algorithm)
-    }
-
-    #[cfg(feature = "crypto_pure_rust")]
-    pub fn subject_public_key_bytes(&self) -> &[u8] {
-        self.inner
-            .tbs_certificate
-            .subject_public_key_info
-            .subject_public_key
-            .raw_bytes()
     }
 }
 
-fn parse_signature_algorithm(algorithm: &AlgorithmIdentifierOwned) -> Result<SignatureAlgorithm> {
+fn parse_signature_algorithm(
+    algorithm: &AlgorithmIdentifierOwned,
+) -> Result<SignatureKeyAlgorithm> {
     let algorithm_ref = algorithm.owned_to_ref();
 
     if algorithm_ref.oid == oid::RSA_PSS {
-        return Ok(SignatureAlgorithm::RsaPss);
+        let parameters = algorithm_ref
+            .parameters
+            .ok_or("RSA-PSS signature algorithm parameters are required")?;
+
+        return parse_rsa_pss_signature_algorithm(parameters);
     }
 
     Err(format!("Unsupported signature algorithm OID: {}", algorithm_ref.oid).into())
+}
+
+fn parse_rsa_pss_signature_algorithm(parameters: AnyRef<'_>) -> Result<SignatureKeyAlgorithm> {
+    let parameters = parameters.decode_as::<RsaPssParams<'_>>()?;
+    let expected_algorithm = RsaPssSignatureKeyAlgorithm::Ps384;
+
+    if parameters.hash.oid != oid::SHA384
+        || !parameters
+            .hash
+            .parameters
+            .map(|parameters| parameters.is_null())
+            .unwrap_or(true)
+    {
+        return Err("Unsupported RSA-PSS hash algorithm parameters".into());
+    }
+
+    let Some(mask_gen_hash) = parameters.mask_gen.parameters else {
+        return Err("RSA-PSS MGF1 parameters are required".into());
+    };
+
+    if parameters.mask_gen.oid != oid::MGF1
+        || mask_gen_hash.oid != oid::SHA384
+        || !mask_gen_hash
+            .parameters
+            .map(|parameters| parameters.is_null())
+            .unwrap_or(true)
+    {
+        return Err("Unsupported RSA-PSS mask generation parameters".into());
+    }
+
+    if usize::from(parameters.salt_len) != expected_algorithm.salt_len() {
+        return Err(format!(
+            "Unsupported RSA-PSS salt length: expected {}, got {}",
+            expected_algorithm.salt_len(),
+            parameters.salt_len
+        )
+        .into());
+    }
+
+    if parameters.trailer_field != TrailerField::BC {
+        return Err("Unsupported RSA-PSS trailer field".into());
+    }
+
+    Ok(SignatureKeyAlgorithm::RsaPss(expected_algorithm))
 }
 
 mod oid {
     use x509_cert::der::oid::ObjectIdentifier;
 
     pub const RSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.10");
+    pub const MGF1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.8");
+    pub const SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
 }
 
 #[cfg(test)]
 mod test {
     use x509_cert::der::Encode;
 
-    use super::{Certificate, SignatureAlgorithm};
+    use super::Certificate;
+    use crate::{RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
 
     const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
     const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
@@ -239,7 +347,18 @@ mod test {
         assert_eq!(
             cert.signature_algorithm()
                 .expect("Signature algorithm should parse"),
-            SignatureAlgorithm::RsaPss
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
         );
+    }
+
+    #[test]
+    fn rsa_pss_signature_algorithm_requires_parameters() {
+        let algorithm = x509_cert::spki::AlgorithmIdentifierOwned {
+            oid: super::oid::RSA_PSS,
+            parameters: None,
+        };
+
+        super::parse_signature_algorithm(&algorithm)
+            .expect_err("RSA-PSS parameters default to SHA-1 and should be rejected");
     }
 }
