@@ -31,7 +31,7 @@ Add the library to your `Cargo.toml` with a crypto backend:
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-0.1.0", features = ["crypto_openssl"] }
+tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-1.0.1", features = ["crypto_openssl"] }
 ```
 
 ### Offline verification (caller provides certificates)
@@ -60,7 +60,7 @@ Enable the `kds` feature to let the library fetch certificates from AMD's KDS:
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { version = "0.1.0", features = ["crypto_openssl", "kds"] }
+tee-attestation-verification-lib = { version = "1.0.1", features = ["crypto_openssl", "kds"] }
 ```
 
 ```rust
