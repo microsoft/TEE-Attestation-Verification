@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Hex encoding and decoding helpers.
 //!
 //! These helpers are small utilities used by verification error messages and
