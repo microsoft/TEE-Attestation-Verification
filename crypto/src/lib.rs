@@ -12,60 +12,84 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 mod signature;
 pub use signature::{
-    DigestAlgorithm, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureEncoding,
-    SignatureKeyAlgorithm,
+    DigestAlgorithm, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
 
-/// API for the key and signature types of the backend
 pub trait SignatureBackend {
-    type Key;
-    type Signature<'a>;
+    type Signature;
 
-    fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self::Key>;
+    fn signature_from_der(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Self::Signature>;
 
-    fn verify_signature(
-        key: &Self::Key,
-        signed_bytes: &[u8],
-        signature: &Self::Signature<'_>,
-    ) -> Result<()>;
+    fn signature_from_raw(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Self::Signature>;
+
+    fn signature_from_ec_components(
+        r: &[u8],
+        s: &[u8],
+        algorithm: EcSignatureKeyAlgorithm,
+    ) -> Result<Self::Signature>;
 }
 
-pub trait AsyncSignatureBackend {
+pub trait KeyBackend {
     type Key;
-    type Signature<'a>;
+
+    fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self::Key>;
+}
+
+pub trait AsyncKeyBackend {
+    type Key;
 
     fn key_from_spki_der(
         spki_der: &[u8],
         algorithm: SignatureKeyAlgorithm,
     ) -> impl std::future::Future<Output = Result<Self::Key>>;
-
-    fn verify_signature(
-        key: &Self::Key,
-        signed_bytes: &[u8],
-        signature: &Self::Signature<'_>,
-    ) -> impl std::future::Future<Output = Result<()>>;
 }
 
-impl<T> AsyncSignatureBackend for T
+impl<K> AsyncKeyBackend for K
 where
-    T: SignatureBackend,
+    K: KeyBackend,
 {
-    type Key = <T as SignatureBackend>::Key;
-    type Signature<'a> = <T as SignatureBackend>::Signature<'a>;
+    type Key = <K as KeyBackend>::Key;
 
     async fn key_from_spki_der(
         spki_der: &[u8],
         algorithm: SignatureKeyAlgorithm,
     ) -> Result<Self::Key> {
-        <T as SignatureBackend>::key_from_spki_der(spki_der, algorithm)
+        <K as KeyBackend>::key_from_spki_der(spki_der, algorithm)
     }
+}
 
+pub trait KeySignatureBackend: SignatureBackend + KeyBackend {
+    fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> Result<()>;
+}
+
+pub trait AsyncKeySignatureBackend: SignatureBackend + AsyncKeyBackend {
+    fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> impl std::future::Future<Output = Result<()>>;
+}
+
+impl<K> AsyncKeySignatureBackend for K
+where
+    K: KeySignatureBackend,
+{
     async fn verify_signature(
         key: &Self::Key,
+        signature: &Self::Signature,
         signed_bytes: &[u8],
-        signature: &Self::Signature<'_>,
     ) -> Result<()> {
-        <T as SignatureBackend>::verify_signature(key, signed_bytes, signature)
+        <K as KeySignatureBackend>::verify_signature(key, signature, signed_bytes)
     }
 }
 
@@ -96,7 +120,7 @@ pub trait CertificateBackend {
 }
 
 /// Synchronous API for a cryptographic backend
-pub trait CryptoBackend: CertificateBackend + SignatureBackend {
+pub trait CryptoBackend: CertificateBackend + KeySignatureBackend {
     /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
     fn verify_chain(
         trusted_cert: &<Self as CertificateBackend>::Certificate,
@@ -106,7 +130,7 @@ pub trait CryptoBackend: CertificateBackend + SignatureBackend {
 }
 
 /// Asynchronous API for a cryptographic backend
-pub trait AsyncCryptoBackend: CertificateBackend + AsyncSignatureBackend {
+pub trait AsyncCryptoBackend: CertificateBackend + AsyncKeySignatureBackend {
     /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
     fn verify_chain(
         trusted_cert: &<Self as CertificateBackend>::Certificate,
@@ -150,12 +174,6 @@ pub type Crypto = crypto_webcrypto::Crypto;
 
 /// The certificate type for the active crypto backend.
 pub type Certificate = <Crypto as CertificateBackend>::Certificate;
-
-/// The key type for the active crypto backend.
-pub type Key = <Crypto as AsyncSignatureBackend>::Key;
-
-/// The signature type for the active crypto backend.
-pub type Signature<'a> = <Crypto as AsyncSignatureBackend>::Signature<'a>;
 
 #[cfg(test)]
 mod tests;

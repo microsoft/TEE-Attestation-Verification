@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(async_crypto)]
+#[cfg(all(async_crypto, not(sync_crypto)))]
 use std::{future::Future, pin::Pin};
 
 use pkcs1::{RsaPssParams, TrailerField};
@@ -47,7 +47,9 @@ pub fn verify_certificate_path(
 }
 
 /// Asynchronous checking of the certificate path
-#[cfg(async_crypto)]
+// If sync_crypto enabled, this is automatically dispatched to verify_certificate_path
+// So disable if sync_crypto is enabled to avoid unused warnings
+#[cfg(all(async_crypto, not(sync_crypto)))]
 pub async fn verify_certificate_path_async<F>(
     mut verify_signature: F,
     root_trust_anchor: &Certificate,

@@ -13,6 +13,7 @@ use openssl::asn1::Asn1Object;
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
+use openssl::nid::Nid;
 use openssl::pkey::{PKey, Public};
 use openssl::rsa::Padding;
 use openssl::sign::{RsaPssSaltlen, Verifier as OpenSslVerifier};
@@ -23,10 +24,9 @@ use openssl_sys::{
     X509_get_ext_by_OBJ,
 };
 
-use super::signature as signature_types;
 use super::{
-    CertificateBackend, CryptoBackend, DigestAlgorithm, EcSignatureKeyAlgorithm, Result,
-    RsaPssSignatureKeyAlgorithm, Signature, SignatureBackend, SignatureEncoding,
+    CertificateBackend, CryptoBackend, DigestAlgorithm, EcSignatureKeyAlgorithm, KeyBackend,
+    KeySignatureBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend,
     SignatureKeyAlgorithm,
 };
 
@@ -39,31 +39,96 @@ pub struct Key {
     verification: OpenSslKeyVerification,
 }
 
-enum OpenSslKeyVerification {
-    EcdsaP384 { digest: MessageDigest },
-    RsaPssSha384 { digest: MessageDigest },
+pub enum Signature {
+    Ecdsa {
+        algorithm: EcSignatureKeyAlgorithm,
+        der: Vec<u8>,
+    },
+    RsaPss {
+        algorithm: RsaPssSignatureKeyAlgorithm,
+        raw: Vec<u8>,
+    },
 }
 
-impl SignatureBackend for Crypto {
+enum OpenSslKeyVerification {
+    Ecdsa {
+        algorithm: EcSignatureKeyAlgorithm,
+        digest: MessageDigest,
+    },
+    RsaPssSha384 {
+        digest: MessageDigest,
+    },
+}
+
+impl KeyBackend for Crypto {
     type Key = Key;
-    type Signature<'a> = signature_types::Signature<'a>;
 
     fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self::Key> {
         Key::from_spki_der(spki_der, algorithm)
     }
+}
 
+impl SignatureBackend for Crypto {
+    type Signature = Signature;
+
+    fn signature_from_der(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Self::Signature> {
+        Signature::from_der(signature, algorithm)
+    }
+
+    fn signature_from_raw(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Self::Signature> {
+        Signature::from_raw(signature, algorithm)
+    }
+
+    fn signature_from_ec_components(
+        r: &[u8],
+        s: &[u8],
+        algorithm: EcSignatureKeyAlgorithm,
+    ) -> Result<Self::Signature> {
+        Signature::from_ec_components(r, s, algorithm)
+    }
+}
+
+impl KeySignatureBackend for Crypto {
     fn verify_signature(
         key: &Self::Key,
+        signature: &Self::Signature,
         signed_bytes: &[u8],
-        signature: &Self::Signature<'_>,
     ) -> Result<()> {
-        key.verify(signed_bytes, signature)
+        key.verify(signature, signed_bytes)
     }
 }
 
 impl Crypto {
     pub fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Key> {
         Key::from_spki_der(spki_der, algorithm)
+    }
+
+    pub fn signature_from_der(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Signature> {
+        Signature::from_der(signature, algorithm)
+    }
+
+    pub fn signature_from_raw(
+        signature: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> Result<Signature> {
+        Signature::from_raw(signature, algorithm)
+    }
+
+    pub fn signature_from_ec_components(
+        r: &[u8],
+        s: &[u8],
+        algorithm: EcSignatureKeyAlgorithm,
+    ) -> Result<Signature> {
+        Signature::from_ec_components(r, s, algorithm)
     }
 }
 
@@ -171,11 +236,12 @@ impl Key {
         self.verification.algorithm()
     }
 
-    pub fn verify(&self, signed_bytes: &[u8], signature: &Signature<'_>) -> Result<()> {
-        let signature = self.verification.signature_bytes(&signature)?;
+    pub fn verify(&self, signature: &Signature, signed_bytes: &[u8]) -> Result<()> {
+        self.verification.ensure_signature_algorithm(signature)?;
+        let signature = signature.as_openssl_bytes();
         let mut verifier = self.verification.verifier(&self.key)?;
 
-        match verifier.verify_oneshot(signature.as_ref(), signed_bytes) {
+        match verifier.verify_oneshot(signature, signed_bytes) {
             Ok(true) => Ok(()),
             Ok(false) => Err(self.verification.failure_message().into()),
             Err(e) => Err(Box::new(e)),
@@ -186,18 +252,33 @@ impl Key {
 impl OpenSslKeyVerification {
     fn from_key_algorithm(key: &PKey<Public>, algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         match algorithm {
-            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => {
-                key.ec_key()
+            SignatureKeyAlgorithm::Ec(algorithm) => {
+                let key = key
+                    .ec_key()
                     .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                Ok(Self::EcdsaP384 {
-                    digest: message_digest(EcSignatureKeyAlgorithm::P384.digest()),
+                let curve_name = key
+                    .group()
+                    .curve_name()
+                    .ok_or("ECDSA public key must use a named curve")?;
+                let expected_curve_name = ec_curve_nid(algorithm);
+                if curve_name != expected_curve_name {
+                    return Err(format!(
+                        "ECDSA public key curve does not match algorithm {}",
+                        algorithm.name()
+                    )
+                    .into());
+                }
+
+                Ok(Self::Ecdsa {
+                    algorithm,
+                    digest: message_digest(algorithm.digest()),
                 })
             }
-            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => {
+            SignatureKeyAlgorithm::RsaPss(algorithm @ RsaPssSignatureKeyAlgorithm::Ps384) => {
                 key.rsa()
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
                 Ok(Self::RsaPssSha384 {
-                    digest: message_digest(RsaPssSignatureKeyAlgorithm::Ps384.digest()),
+                    digest: message_digest(algorithm.digest()),
                 })
             }
             _ => Err(format!("Unsupported OpenSSL signature key algorithm: {algorithm:?}").into()),
@@ -206,23 +287,24 @@ impl OpenSslKeyVerification {
 
     fn algorithm(&self) -> SignatureKeyAlgorithm {
         match self {
-            Self::EcdsaP384 { .. } => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
+            Self::Ecdsa { algorithm, .. } => SignatureKeyAlgorithm::Ec(*algorithm),
             Self::RsaPssSha384 { .. } => {
                 SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
             }
         }
     }
 
-    fn signature_bytes<'a>(
-        &self,
-        signature: &'a Signature<'_>,
-    ) -> Result<std::borrow::Cow<'a, [u8]>> {
-        match self {
-            Self::EcdsaP384 { .. } => signature.as_openssl_ecdsa_p384_der(),
-            Self::RsaPssSha384 { .. } => Ok(std::borrow::Cow::Borrowed(
-                signature.as_openssl_rsa_pss_raw()?,
-            )),
+    fn ensure_signature_algorithm(&self, signature: &Signature) -> Result<()> {
+        let expected = self.algorithm();
+        let actual = signature.algorithm();
+        if actual != expected {
+            return Err(format!(
+                "Signature algorithm {actual:?} does not match key algorithm {expected:?}"
+            )
+            .into());
         }
+
+        Ok(())
     }
 
     fn verifier<'key>(&self, key: &'key PKey<Public>) -> Result<OpenSslVerifier<'key>> {
@@ -240,71 +322,93 @@ impl OpenSslKeyVerification {
 
     fn digest(&self) -> MessageDigest {
         match *self {
-            Self::EcdsaP384 { digest } | Self::RsaPssSha384 { digest } => digest,
+            Self::Ecdsa { digest, .. } | Self::RsaPssSha384 { digest } => digest,
         }
     }
 
     fn failure_message(&self) -> &'static str {
         match self {
-            Self::EcdsaP384 { .. } => "ECDSA signature verification failed",
+            Self::Ecdsa { .. } => "ECDSA signature verification failed",
             Self::RsaPssSha384 { .. } => "RSA-PSS signature verification failed",
         }
     }
 }
 
-impl<'a> signature_types::Signature<'a> {
-    fn as_openssl_ecdsa_p384_der(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
-        match self.encoding() {
-            SignatureEncoding::Der => Ok(std::borrow::Cow::Borrowed(self.bytes())),
-            SignatureEncoding::EcdsaFixed => Ok(std::borrow::Cow::Owned(ecdsa_p384_fixed_to_der(
-                self.as_openssl_ecdsa_p384_fixed()?,
-            )?)),
-            SignatureEncoding::Raw => {
-                Err("ECDSA verification requires DER or fixed-width signature encoding".into())
+impl Signature {
+    pub fn from_der(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        match algorithm {
+            SignatureKeyAlgorithm::Ec(algorithm) => {
+                let der = EcdsaSig::from_der(signature)
+                    .map_err(|e| format!("Failed to parse DER ECDSA signature: {:?}", e))?
+                    .to_der()?;
+                Ok(Self::Ecdsa { algorithm, der })
+            }
+            SignatureKeyAlgorithm::RsaPss(_) => Err("RSA-PSS signatures must be raw bytes".into()),
+        }
+    }
+
+    pub fn from_raw(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        match algorithm {
+            SignatureKeyAlgorithm::RsaPss(algorithm @ RsaPssSignatureKeyAlgorithm::Ps384) => {
+                Ok(Self::RsaPss {
+                    algorithm,
+                    raw: signature.to_vec(),
+                })
+            }
+            SignatureKeyAlgorithm::RsaPss(algorithm) => Err(format!(
+                "Unsupported OpenSSL RSA-PSS signature algorithm: {algorithm:?}"
+            )
+            .into()),
+            SignatureKeyAlgorithm::Ec(_) => {
+                Err("ECDSA signatures must be DER or components".into())
             }
         }
     }
 
-    fn as_openssl_ecdsa_p384_fixed(&self) -> Result<&[u8]> {
-        if self.encoding() != SignatureEncoding::EcdsaFixed {
-            return Err("ECDSA verification requires DER or fixed-width signature encoding".into());
-        }
+    pub fn from_ec_components(
+        r: &[u8],
+        s: &[u8],
+        algorithm: EcSignatureKeyAlgorithm,
+    ) -> Result<Self> {
+        let r = ec_component_from_bytes("r", r, algorithm)?;
+        let s = ec_component_from_bytes("s", s, algorithm)?;
+        let der = EcdsaSig::from_private_components(r, s)?.to_der()?;
 
-        if self.bytes().len() != 96 {
-            return Err(format!(
-                "Invalid ECDSA P-384 fixed signature length: expected 96, got {}",
-                self.bytes().len()
-            )
-            .into());
-        }
-
-        Ok(self.bytes())
+        Ok(Self::Ecdsa { algorithm, der })
     }
 
-    fn as_openssl_rsa_pss_raw(&self) -> Result<&[u8]> {
-        if self.encoding() != SignatureEncoding::Raw {
-            return Err("RSA-PSS verification requires raw signature encoding".into());
+    pub fn algorithm(&self) -> SignatureKeyAlgorithm {
+        match self {
+            Self::Ecdsa { algorithm, .. } => SignatureKeyAlgorithm::Ec(*algorithm),
+            Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
         }
+    }
 
-        Ok(self.bytes())
+    fn as_openssl_bytes(&self) -> &[u8] {
+        match self {
+            Self::Ecdsa { der, .. } => der,
+            Self::RsaPss { raw, .. } => raw,
+        }
     }
 }
 
-fn ecdsa_p384_fixed_to_der(fixed: &[u8]) -> Result<Vec<u8>> {
-    if fixed.len() != 96 {
+fn ec_component_from_bytes(
+    name: &str,
+    component: &[u8],
+    algorithm: EcSignatureKeyAlgorithm,
+) -> Result<BigNum> {
+    let max_len = algorithm.scalar_byte_len();
+    if component.is_empty() || component.len() > max_len {
         return Err(format!(
-            "Invalid ECDSA P-384 fixed signature length: expected 96, got {}",
-            fixed.len()
+            "Invalid ECDSA {} {name} component length: expected 1..={}, got {}",
+            algorithm.name(),
+            max_len,
+            component.len()
         )
         .into());
     }
 
-    let ecdsa_sig = EcdsaSig::from_private_components(
-        BigNum::from_slice(&fixed[..48])?,
-        BigNum::from_slice(&fixed[48..])?,
-    )?;
-
-    Ok(ecdsa_sig.to_der()?)
+    Ok(BigNum::from_slice(component)?)
 }
 
 fn message_digest(digest: DigestAlgorithm) -> MessageDigest {
@@ -312,5 +416,13 @@ fn message_digest(digest: DigestAlgorithm) -> MessageDigest {
         DigestAlgorithm::Sha256 => MessageDigest::sha256(),
         DigestAlgorithm::Sha384 => MessageDigest::sha384(),
         DigestAlgorithm::Sha512 => MessageDigest::sha512(),
+    }
+}
+
+fn ec_curve_nid(algorithm: EcSignatureKeyAlgorithm) -> Nid {
+    match algorithm {
+        EcSignatureKeyAlgorithm::P256 => Nid::X9_62_PRIME256V1,
+        EcSignatureKeyAlgorithm::P384 => Nid::SECP384R1,
+        EcSignatureKeyAlgorithm::P521 => Nid::SECP521R1,
     }
 }

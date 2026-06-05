@@ -15,7 +15,9 @@ crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = [
     "dep:ecdsa",
     "dep:getrandom",
+    "dep:p256",
     "dep:p384",
+    "dep:p521",
     "dep:pkcs1",
     "dep:rsa",
     "dep:sha2",
@@ -27,7 +29,9 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 [dependencies]
 foreign-types = { version = "0.3", optional = true }
 ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
+p521 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
 pkcs1 = { version = "0.7", optional = true }
 rsa = { version = "0.9", optional = true }
 sha2 = { version = "0.10", optional = true }

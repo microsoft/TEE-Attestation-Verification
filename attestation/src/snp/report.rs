@@ -276,18 +276,13 @@ const ECDSA_P384_SCALAR_SIZE: usize = 48;
 const SNP_ECDSA_P384_SCALAR_SIZE: usize = 72;
 
 impl Signature {
-    fn to_ecdsa_fixed(self) -> crypto::Result<crypto::Signature<'static>> {
+    fn to_ecdsa_components(
+        self,
+    ) -> crypto::Result<([u8; ECDSA_P384_SCALAR_SIZE], [u8; ECDSA_P384_SCALAR_SIZE])> {
         let r = snp_ecdsa_p384_scalar_to_fixed("r", &self.r)?;
         let s = snp_ecdsa_p384_scalar_to_fixed("s", &self.s)?;
 
-        let mut fixed = Vec::with_capacity(ECDSA_P384_SCALAR_SIZE * 2);
-        fixed.extend_from_slice(&r);
-        fixed.extend_from_slice(&s);
-
-        Ok(crypto::Signature::new(
-            fixed,
-            crypto::SignatureEncoding::EcdsaFixed,
-        ))
+        Ok((r, s))
     }
 }
 
@@ -469,17 +464,22 @@ pub(crate) fn verify_report_signature(
 ) -> crypto::Result<()> {
     match report.signature_algo.get() {
         0x0001 => {
-            let signature = report.signature.to_ecdsa_fixed()?;
+            let (r, s) = report.signature.to_ecdsa_components()?;
+            let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
+            let signature =
+                <crypto::Crypto as crypto::SignatureBackend>::signature_from_ec_components(
+                    &r, &s, algorithm,
+                )?;
             let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
-            let key = <crypto::Crypto as crypto::SignatureBackend>::key_from_spki_der(
+            let key = <crypto::Crypto as crypto::KeyBackend>::key_from_spki_der(
                 &spki_der,
-                crypto::SignatureKeyAlgorithm::Ec(crypto::EcSignatureKeyAlgorithm::P384),
+                crypto::SignatureKeyAlgorithm::Ec(algorithm),
             )?;
 
-            <crypto::Crypto as crypto::SignatureBackend>::verify_signature(
+            <crypto::Crypto as crypto::KeySignatureBackend>::verify_signature(
                 &key,
-                report.signed_bytes(),
                 &signature,
+                report.signed_bytes(),
             )
         }
         _ => Err(format!(
@@ -497,18 +497,23 @@ pub(crate) async fn verify_report_signature_async(
 ) -> crypto::Result<()> {
     match report.signature_algo.get() {
         0x0001 => {
-            let signature = report.signature.to_ecdsa_fixed()?;
+            let (r, s) = report.signature.to_ecdsa_components()?;
+            let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
+            let signature =
+                <crypto::Crypto as crypto::SignatureBackend>::signature_from_ec_components(
+                    &r, &s, algorithm,
+                )?;
             let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
-            let key = <crypto::Crypto as crypto::AsyncSignatureBackend>::key_from_spki_der(
+            let key = <crypto::Crypto as crypto::AsyncKeyBackend>::key_from_spki_der(
                 &spki_der,
-                crypto::SignatureKeyAlgorithm::Ec(crypto::EcSignatureKeyAlgorithm::P384),
+                crypto::SignatureKeyAlgorithm::Ec(algorithm),
             )
             .await?;
 
-            <crypto::Crypto as crypto::AsyncSignatureBackend>::verify_signature(
+            <crypto::Crypto as crypto::AsyncKeySignatureBackend>::verify_signature(
                 &key,
-                report.signed_bytes(),
                 &signature,
+                report.signed_bytes(),
             )
             .await
         }
