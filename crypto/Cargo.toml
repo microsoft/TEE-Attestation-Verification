@@ -5,7 +5,7 @@ edition = "2021"
 repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["confidentiality", "sev-snp", "tpm"]
 description = "Cryptographic backends for TEE attestation verification"
-authors = ["Cameron Baird"]
+authors = ["Cameron Baird", "Chris Jensen"]
 license = "MIT"
 links = "tav_crypto"
 
