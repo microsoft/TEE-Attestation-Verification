@@ -13,9 +13,17 @@ permissions:
   contents: read
 
 jobs:
-  native-openssl:
-    name: Native OpenSSL backend
+  native:
+    name: Native ${{ matrix.backend.name }} backend
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: OpenSSL
+            features: crypto_openssl
+          - name: pure-Rust
+            features: crypto_pure_rust
 
     steps:
       - uses: actions/checkout@v6
@@ -23,54 +31,23 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build with OpenSSL backend
-        run: cargo build --manifest-path crypto/Cargo.toml --no-default-features --features "crypto_openssl"
+      - name: Build with ${{ matrix.backend.name }} backend
+        run: cargo build --manifest-path crypto/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}"
 
-      - name: Test with OpenSSL backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features "crypto_openssl" -- --nocapture
+      - name: Test with ${{ matrix.backend.name }} backend
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
 
-  native-pure-rust:
-    name: Native pure-Rust backend
+  wasm:
+    name: WASM ${{ matrix.backend.name }} backend
     runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install rust
-        run: |
-          rustup update stable && rustup default stable
-
-      - name: Build with pure-Rust backend
-        run: cargo build --manifest-path crypto/Cargo.toml --no-default-features --features "crypto_pure_rust"
-
-      - name: Test with pure-Rust backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features "crypto_pure_rust" -- --nocapture
-
-  wasm-webcrypto:
-    name: WASM WebCrypto backend
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install rust
-        run: |
-          rustup update stable && rustup default stable
-
-      - name: Setup WASM tooling
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli
-          cargo install wasm-pack --version 0.13.1 --locked
-
-      - name: Check WebCrypto backend
-        run: cargo check --manifest-path crypto/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "crypto_webcrypto"
-
-      - name: Test WebCrypto backend
-        working-directory: crypto
-        run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
-
-  wasm-pure-rust:
-    name: WASM Pure Rust backend
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: WebCrypto
+            features: crypto_webcrypto
+          - name: pure-Rust
+            features: crypto_pure_rust
 
     steps:
       - uses: actions/checkout@v6
@@ -84,9 +61,9 @@ jobs:
           cargo install wasm-bindgen-cli
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Check Pure Rust backend
-        run: cargo check --manifest-path crypto/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "crypto_pure_rust"
+      - name: Check ${{ matrix.backend.name }} backend
+        run: cargo check --manifest-path crypto/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "${{ matrix.backend.features }}"
 
-      - name: Test Pure Rust backend
+      - name: Test ${{ matrix.backend.name }} backend
         working-directory: crypto
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
+        run: wasm-pack test --node --no-default-features --features "${{ matrix.backend.features }}"
