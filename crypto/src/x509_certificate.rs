@@ -166,14 +166,13 @@ fn parse_signature_algorithm(
 
 fn parse_rsa_pss_signature_algorithm(parameters: AnyRef<'_>) -> Result<SignatureKeyAlgorithm> {
     let parameters = parameters.decode_as::<RsaPssParams<'_>>()?;
-    let expected_algorithm = RsaPssSignatureKeyAlgorithm::Ps384;
+    let algorithm = rsa_pss_algorithm_from_hash_oid(parameters.hash.oid)?;
 
-    if parameters.hash.oid != oid::SHA384
-        || !parameters
-            .hash
-            .parameters
-            .map(|parameters| parameters.is_null())
-            .unwrap_or(true)
+    if !parameters
+        .hash
+        .parameters
+        .map(|parameters| parameters.is_null())
+        .unwrap_or(true)
     {
         return Err("Unsupported RSA-PSS hash algorithm parameters".into());
     }
@@ -183,7 +182,7 @@ fn parse_rsa_pss_signature_algorithm(parameters: AnyRef<'_>) -> Result<Signature
     };
 
     if parameters.mask_gen.oid != oid::MGF1
-        || mask_gen_hash.oid != oid::SHA384
+        || mask_gen_hash.oid != rsa_pss_hash_oid(algorithm)
         || !mask_gen_hash
             .parameters
             .map(|parameters| parameters.is_null())
@@ -192,10 +191,10 @@ fn parse_rsa_pss_signature_algorithm(parameters: AnyRef<'_>) -> Result<Signature
         return Err("Unsupported RSA-PSS mask generation parameters".into());
     }
 
-    if usize::from(parameters.salt_len) != expected_algorithm.salt_len() {
+    if usize::from(parameters.salt_len) != algorithm.salt_len() {
         return Err(format!(
             "Unsupported RSA-PSS salt length: expected {}, got {}",
-            expected_algorithm.salt_len(),
+            algorithm.salt_len(),
             parameters.salt_len
         )
         .into());
@@ -205,7 +204,24 @@ fn parse_rsa_pss_signature_algorithm(parameters: AnyRef<'_>) -> Result<Signature
         return Err("Unsupported RSA-PSS trailer field".into());
     }
 
-    Ok(SignatureKeyAlgorithm::RsaPss(expected_algorithm))
+    Ok(SignatureKeyAlgorithm::RsaPss(algorithm))
+}
+
+fn rsa_pss_algorithm_from_hash_oid(oid: ObjectIdentifier) -> Result<RsaPssSignatureKeyAlgorithm> {
+    match oid {
+        oid::SHA256 => Ok(RsaPssSignatureKeyAlgorithm::Ps256),
+        oid::SHA384 => Ok(RsaPssSignatureKeyAlgorithm::Ps384),
+        oid::SHA512 => Ok(RsaPssSignatureKeyAlgorithm::Ps512),
+        _ => Err("Unsupported RSA-PSS hash algorithm parameters".into()),
+    }
+}
+
+fn rsa_pss_hash_oid(algorithm: RsaPssSignatureKeyAlgorithm) -> ObjectIdentifier {
+    match algorithm {
+        RsaPssSignatureKeyAlgorithm::Ps256 => oid::SHA256,
+        RsaPssSignatureKeyAlgorithm::Ps384 => oid::SHA384,
+        RsaPssSignatureKeyAlgorithm::Ps512 => oid::SHA512,
+    }
 }
 
 mod oid {
@@ -213,12 +229,14 @@ mod oid {
 
     pub const RSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.10");
     pub const MGF1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.8");
+    pub const SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
     pub const SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+    pub const SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
 }
 
 #[cfg(test)]
 mod test {
-    use x509_cert::der::Encode;
+    use x509_cert::der::{asn1::AnyRef, Decode, Encode};
 
     use super::Certificate;
     use crate::{RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
@@ -362,5 +380,108 @@ mod test {
 
         super::parse_signature_algorithm(&algorithm)
             .expect_err("RSA-PSS parameters default to SHA-1 and should be rejected");
+    }
+
+    #[test]
+    fn rsa_pss_signature_algorithm_accepts_supported_hashes() {
+        for algorithm in [
+            RsaPssSignatureKeyAlgorithm::Ps256,
+            RsaPssSignatureKeyAlgorithm::Ps384,
+            RsaPssSignatureKeyAlgorithm::Ps512,
+        ] {
+            let der = rsa_pss_params_der(algorithm, algorithm, algorithm.salt_len());
+            let parameters = AnyRef::from_der(&der).expect("RSA-PSS params DER should parse");
+
+            assert_eq!(
+                super::parse_rsa_pss_signature_algorithm(parameters)
+                    .expect("RSA-PSS params should be supported"),
+                SignatureKeyAlgorithm::RsaPss(algorithm)
+            );
+        }
+    }
+
+    #[test]
+    fn rsa_pss_signature_algorithm_requires_matching_mgf1_hash() {
+        let der = rsa_pss_params_der(
+            RsaPssSignatureKeyAlgorithm::Ps384,
+            RsaPssSignatureKeyAlgorithm::Ps256,
+            RsaPssSignatureKeyAlgorithm::Ps384.salt_len(),
+        );
+        let parameters = AnyRef::from_der(&der).expect("RSA-PSS params DER should parse");
+
+        super::parse_rsa_pss_signature_algorithm(parameters)
+            .expect_err("Mismatched MGF1 hash should be rejected");
+    }
+
+    #[test]
+    fn rsa_pss_signature_algorithm_requires_matching_salt_length() {
+        let der = rsa_pss_params_der(
+            RsaPssSignatureKeyAlgorithm::Ps512,
+            RsaPssSignatureKeyAlgorithm::Ps512,
+            RsaPssSignatureKeyAlgorithm::Ps384.salt_len(),
+        );
+        let parameters = AnyRef::from_der(&der).expect("RSA-PSS params DER should parse");
+
+        super::parse_rsa_pss_signature_algorithm(parameters)
+            .expect_err("Mismatched salt length should be rejected");
+    }
+
+    fn rsa_pss_params_der(
+        hash: RsaPssSignatureKeyAlgorithm,
+        mgf1_hash: RsaPssSignatureKeyAlgorithm,
+        salt_len: usize,
+    ) -> Vec<u8> {
+        der_sequence(
+            &[
+                der_explicit(0, &hash_algorithm_identifier(hash)),
+                der_explicit(1, &mgf1_algorithm_identifier(mgf1_hash)),
+                der_explicit(2, &[0x02, 0x01, salt_len as u8]),
+                der_explicit(3, &[0x02, 0x01, 0x01]),
+            ]
+            .concat(),
+        )
+    }
+
+    fn mgf1_algorithm_identifier(hash: RsaPssSignatureKeyAlgorithm) -> Vec<u8> {
+        let mut bytes = vec![
+            0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08,
+        ];
+        bytes.extend_from_slice(&hash_algorithm_identifier(hash));
+        der_sequence(&bytes)
+    }
+
+    fn hash_algorithm_identifier(hash: RsaPssSignatureKeyAlgorithm) -> Vec<u8> {
+        let oid_final_byte = match hash {
+            RsaPssSignatureKeyAlgorithm::Ps256 => 0x01,
+            RsaPssSignatureKeyAlgorithm::Ps384 => 0x02,
+            RsaPssSignatureKeyAlgorithm::Ps512 => 0x03,
+        };
+        der_sequence(&[
+            0x06,
+            0x09,
+            0x60,
+            0x86,
+            0x48,
+            0x01,
+            0x65,
+            0x03,
+            0x04,
+            0x02,
+            oid_final_byte,
+            0x05,
+            0x00,
+        ])
+    }
+
+    fn der_explicit(tag: u8, content: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0xa0 + tag, content.len() as u8];
+        bytes.extend_from_slice(content);
+        bytes
+    }
+
+    fn der_sequence(content: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x30, content.len() as u8];
+        bytes.extend_from_slice(content);
+        bytes
     }
 }

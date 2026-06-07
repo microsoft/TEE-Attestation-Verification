@@ -466,17 +466,16 @@ pub(crate) fn verify_report_signature(
         0x0001 => {
             let (r, s) = report.signature.to_ecdsa_components()?;
             let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
-            let signature =
-                <crypto::Crypto as crypto::SignatureBackend>::signature_from_ec_components(
-                    &r, &s, algorithm,
-                )?;
+            let signature = <crypto::Signature as crypto::SignatureBackend>::from_ec_components(
+                &r, &s, algorithm,
+            )?;
             let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
-            let key = <crypto::Crypto as crypto::KeyBackend>::key_from_spki_der(
+            let key = <crypto::Key as crypto::KeyBackend>::from_spki_der(
                 &spki_der,
                 crypto::SignatureKeyAlgorithm::Ec(algorithm),
             )?;
 
-            <crypto::Crypto as crypto::KeySignatureBackend>::verify_signature(
+            <crypto::Crypto as crypto::CryptoBackend>::verify_signature(
                 &key,
                 &signature,
                 report.signed_bytes(),
@@ -499,18 +498,17 @@ pub(crate) async fn verify_report_signature_async(
         0x0001 => {
             let (r, s) = report.signature.to_ecdsa_components()?;
             let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
-            let signature =
-                <crypto::Crypto as crypto::SignatureBackend>::signature_from_ec_components(
-                    &r, &s, algorithm,
-                )?;
+            let signature = <crypto::Signature as crypto::SignatureBackend>::from_ec_components(
+                &r, &s, algorithm,
+            )?;
             let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
-            let key = <crypto::Crypto as crypto::AsyncKeyBackend>::key_from_spki_der(
+            let key = <crypto::Key as crypto::AsyncKeyBackend>::from_spki_der(
                 &spki_der,
                 crypto::SignatureKeyAlgorithm::Ec(algorithm),
             )
             .await?;
 
-            <crypto::Crypto as crypto::AsyncKeySignatureBackend>::verify_signature(
+            <crypto::Crypto as crypto::AsyncCryptoBackend>::verify_signature(
                 &key,
                 &signature,
                 report.signed_bytes(),

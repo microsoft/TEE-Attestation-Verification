@@ -16,12 +16,12 @@ use rsa::{
     pss::{Signature as PssSignature, VerifyingKey as PssVerifyingKey},
     RsaPublicKey,
 };
-use sha2::Sha384;
+use sha2::{Sha256, Sha384, Sha512};
 
 use super::x509_certificate::{self, Certificate};
 use super::{
-    CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm, KeyBackend, KeySignatureBackend,
-    Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
+    CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm, KeyBackend, Result,
+    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -30,63 +30,119 @@ pub enum Key {
     EcdsaP256(EcdsaP256VerifyingKey),
     EcdsaP384(EcdsaP384VerifyingKey),
     EcdsaP521(EcdsaP521VerifyingKey),
+    RsaPssSha256(PssVerifyingKey<Sha256>),
     RsaPssSha384(PssVerifyingKey<Sha384>),
+    RsaPssSha512(PssVerifyingKey<Sha512>),
 }
 
 pub enum Signature {
     EcdsaP256(EcdsaP256Signature),
     EcdsaP384(EcdsaP384Signature),
     EcdsaP521(EcdsaP521Signature),
-    RsaPssSha384(PssSignature),
+    RsaPss {
+        algorithm: RsaPssSignatureKeyAlgorithm,
+        signature: PssSignature,
+    },
 }
 
-impl SignatureBackend for Crypto {
-    type Signature = Signature;
-
-    fn signature_from_der(
-        signature: &[u8],
-        algorithm: SignatureKeyAlgorithm,
-    ) -> Result<Self::Signature> {
-        signature_from_der(signature, algorithm)
+impl SignatureBackend for Signature {
+    fn from_bytes(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        match algorithm {
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => Ok(Signature::EcdsaP256(
+                EcdsaP256Signature::from_der(signature)
+                    .map_err(|e| format!("Failed to parse DER ECDSA P-256 signature: {:?}", e))?,
+            )),
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => Ok(Signature::EcdsaP384(
+                EcdsaP384Signature::from_der(signature)
+                    .map_err(|e| format!("Failed to parse DER ECDSA P-384 signature: {:?}", e))?,
+            )),
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => Ok(Signature::EcdsaP521(
+                EcdsaP521Signature::from_der(signature)
+                    .map_err(|e| format!("Failed to parse DER ECDSA P-521 signature: {:?}", e))?,
+            )),
+            SignatureKeyAlgorithm::RsaPss(algorithm) => Ok(Signature::RsaPss {
+                algorithm,
+                signature: PssSignature::try_from(signature)
+                    .map_err(|e| format!("Failed to parse RSA-PSS signature: {:?}", e))?,
+            }),
+        }
     }
 
-    fn signature_from_raw(
-        signature: &[u8],
-        algorithm: SignatureKeyAlgorithm,
-    ) -> Result<Self::Signature> {
-        signature_from_raw(signature, algorithm)
-    }
+    fn from_ec_components(r: &[u8], s: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Self> {
+        let expected_len = algorithm.scalar_byte_len();
+        if r.len() != expected_len || s.len() != expected_len {
+            return Err(format!(
+                "Invalid ECDSA {} component length: expected {}, got r={} s={}",
+                algorithm.name(),
+                expected_len,
+                r.len(),
+                s.len()
+            )
+            .into());
+        }
 
-    fn signature_from_ec_components(
-        r: &[u8],
-        s: &[u8],
-        algorithm: EcSignatureKeyAlgorithm,
-    ) -> Result<Self::Signature> {
-        signature_from_ec_components(r, s, algorithm)
+        let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
+        fixed.extend_from_slice(r);
+        fixed.extend_from_slice(s);
+        match algorithm {
+            EcSignatureKeyAlgorithm::P256 => Ok(Signature::EcdsaP256(
+                EcdsaP256Signature::from_slice(&fixed).map_err(|e| {
+                    format!("Failed to parse fixed-width ECDSA P-256 signature: {:?}", e)
+                })?,
+            )),
+            EcSignatureKeyAlgorithm::P384 => Ok(Signature::EcdsaP384(
+                EcdsaP384Signature::from_slice(&fixed).map_err(|e| {
+                    format!("Failed to parse fixed-width ECDSA P-384 signature: {:?}", e)
+                })?,
+            )),
+            EcSignatureKeyAlgorithm::P521 => Ok(Signature::EcdsaP521(
+                EcdsaP521Signature::from_slice(&fixed).map_err(|e| {
+                    format!("Failed to parse fixed-width ECDSA P-521 signature: {:?}", e)
+                })?,
+            )),
+        }
     }
 }
 
-impl KeyBackend for Crypto {
-    type Key = Key;
+impl KeyBackend for Key {
+    fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        match algorithm {
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => {
+                let key = EcdsaP256VerifyingKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
+                Ok(Key::EcdsaP256(key))
+            }
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => {
+                let key = EcdsaP384VerifyingKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
+                Ok(Key::EcdsaP384(key))
+            }
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => {
+                use p521::elliptic_curve::sec1::ToEncodedPoint;
 
-    fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self::Key> {
-        Key::from_spki_der(spki_der, algorithm)
-    }
-}
-
-impl KeySignatureBackend for Crypto {
-    fn verify_signature(
-        key: &Self::Key,
-        signature: &Self::Signature,
-        signed_bytes: &[u8],
-    ) -> Result<()> {
-        key.verify(signed_bytes, signature)
-    }
-}
-
-impl Crypto {
-    pub fn key_from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Key> {
-        Key::from_spki_der(spki_der, algorithm)
+                let public_key = p521::PublicKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
+                let key =
+                    EcdsaP521VerifyingKey::from_encoded_point(&public_key.to_encoded_point(false))
+                        .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
+                Ok(Key::EcdsaP521(key))
+            }
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256) => {
+                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
+                Ok(Key::RsaPssSha256(PssVerifyingKey::<Sha256>::new(rsa_pub)))
+            }
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => {
+                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
+                Ok(Key::RsaPssSha384(PssVerifyingKey::<Sha384>::new(rsa_pub)))
+            }
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps512) => {
+                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
+                Ok(Key::RsaPssSha512(PssVerifyingKey::<Sha512>::new(rsa_pub)))
+            }
+        }
     }
 }
 
@@ -123,6 +179,54 @@ impl CertificateBackend for Crypto {
 }
 
 impl CryptoBackend for Crypto {
+    type Key = Key;
+    type Signature = Signature;
+
+    fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> Result<()> {
+        match (key, signature) {
+            (Key::EcdsaP256(key), Signature::EcdsaP256(signature)) => {
+                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P256)
+            }
+            (Key::EcdsaP384(key), Signature::EcdsaP384(signature)) => {
+                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P384)
+            }
+            (Key::EcdsaP521(key), Signature::EcdsaP521(signature)) => {
+                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P521)
+            }
+            (
+                Key::RsaPssSha256(key),
+                Signature::RsaPss {
+                    algorithm: RsaPssSignatureKeyAlgorithm::Ps256,
+                    signature,
+                },
+            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
+            (
+                Key::RsaPssSha384(key),
+                Signature::RsaPss {
+                    algorithm: RsaPssSignatureKeyAlgorithm::Ps384,
+                    signature,
+                },
+            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
+            (
+                Key::RsaPssSha512(key),
+                Signature::RsaPss {
+                    algorithm: RsaPssSignatureKeyAlgorithm::Ps512,
+                    signature,
+                },
+            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
+            _ => Err(format!(
+                "Signature algorithm {:?} does not match key algorithm {:?}",
+                signature.algorithm(),
+                key.algorithm()
+            )
+            .into()),
+        }
+    }
+
     fn verify_chain(
         trusted_cert: &Certificate,
         untrusted_chain: &[&Certificate],
@@ -140,82 +244,29 @@ impl CryptoBackend for Crypto {
 fn verify_certificate_signature(issuer: &Certificate, subject: &Certificate) -> Result<()> {
     let tbs_bytes = subject.tbs_certificate_der()?;
     let issuer_spki = issuer.public_key_spki_der()?;
-    let key =
-        <Crypto as KeyBackend>::key_from_spki_der(&issuer_spki, subject.signature_algorithm()?)?;
-    let signature = <Crypto as SignatureBackend>::signature_from_raw(
-        subject.signature_bytes(),
-        subject.signature_algorithm()?,
-    )?;
+    let algorithm = subject.signature_algorithm()?;
+    let key = <Key as KeyBackend>::from_spki_der(&issuer_spki, algorithm)?;
+    let signature =
+        <Signature as SignatureBackend>::from_bytes(subject.signature_bytes(), algorithm)?;
 
-    <Crypto as KeySignatureBackend>::verify_signature(&key, &signature, &tbs_bytes)
+    <Crypto as CryptoBackend>::verify_signature(&key, &signature, &tbs_bytes)
 }
 
 impl Key {
-    pub fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
-        match algorithm {
-            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => {
-                let key = EcdsaP256VerifyingKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                Ok(Key::EcdsaP256(key))
-            }
-            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => {
-                let key = EcdsaP384VerifyingKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                Ok(Key::EcdsaP384(key))
-            }
-            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => {
-                use p521::elliptic_curve::sec1::ToEncodedPoint;
-
-                let public_key = p521::PublicKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                let key =
-                    EcdsaP521VerifyingKey::from_encoded_point(&public_key.to_encoded_point(false))
-                        .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                Ok(Key::EcdsaP521(key))
-            }
-            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => {
-                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
-                Ok(Key::RsaPssSha384(PssVerifyingKey::<Sha384>::new(rsa_pub)))
-            }
-            _ => Err(format!("Unsupported signature key algorithm: {algorithm:?}").into()),
-        }
-    }
-
     pub fn algorithm(&self) -> SignatureKeyAlgorithm {
         match self {
             Key::EcdsaP256(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
             Key::EcdsaP384(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
             Key::EcdsaP521(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521),
+            Key::RsaPssSha256(_) => {
+                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256)
+            }
             Key::RsaPssSha384(_) => {
                 SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
             }
-        }
-    }
-
-    pub fn verify(&self, signed_bytes: &[u8], signature: &Signature) -> Result<()> {
-        match (self, signature) {
-            (Key::EcdsaP256(key), Signature::EcdsaP256(signature)) => {
-                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P256)
+            Key::RsaPssSha512(_) => {
+                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps512)
             }
-            (Key::EcdsaP384(key), Signature::EcdsaP384(signature)) => {
-                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P384)
-            }
-            (Key::EcdsaP521(key), Signature::EcdsaP521(signature)) => {
-                verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P521)
-            }
-            (Key::RsaPssSha384(key), Signature::RsaPssSha384(signature)) => {
-                use rsa::signature::Verifier;
-                key.verify(signed_bytes, &signature)
-                    .map_err(|e| format!("RSA-PSS signature verification failed: {:?}", e))?;
-                Ok(())
-            }
-            _ => Err(format!(
-                "Signature algorithm {:?} does not match key algorithm {:?}",
-                signature.algorithm(),
-                self.algorithm()
-            )
-            .into()),
         }
     }
 }
@@ -239,76 +290,19 @@ where
     Ok(())
 }
 
-fn signature_from_der(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Signature> {
-    match algorithm {
-        SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => Ok(Signature::EcdsaP256(
-            EcdsaP256Signature::from_der(signature)
-                .map_err(|e| format!("Failed to parse DER ECDSA P-256 signature: {:?}", e))?,
-        )),
-        SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => Ok(Signature::EcdsaP384(
-            EcdsaP384Signature::from_der(signature)
-                .map_err(|e| format!("Failed to parse DER ECDSA P-384 signature: {:?}", e))?,
-        )),
-        SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => Ok(Signature::EcdsaP521(
-            EcdsaP521Signature::from_der(signature)
-                .map_err(|e| format!("Failed to parse DER ECDSA P-521 signature: {:?}", e))?,
-        )),
-        SignatureKeyAlgorithm::RsaPss(_) => Err("RSA-PSS signatures must be raw bytes".into()),
-    }
-}
-
-fn signature_from_raw(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Signature> {
-    match algorithm {
-        SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => {
-            Ok(Signature::RsaPssSha384(
-                PssSignature::try_from(signature)
-                    .map_err(|e| format!("Failed to parse RSA-PSS signature: {:?}", e))?,
-            ))
-        }
-        SignatureKeyAlgorithm::RsaPss(algorithm) => {
-            Err(format!("Unsupported RSA-PSS signature algorithm: {algorithm:?}").into())
-        }
-        SignatureKeyAlgorithm::Ec(_) => Err("ECDSA signatures must be DER or components".into()),
-    }
-}
-
-fn signature_from_ec_components(
-    r: &[u8],
-    s: &[u8],
-    algorithm: EcSignatureKeyAlgorithm,
-) -> Result<Signature> {
-    let expected_len = algorithm.scalar_byte_len();
-    if r.len() != expected_len || s.len() != expected_len {
-        return Err(format!(
-            "Invalid ECDSA {} component length: expected {}, got r={} s={}",
-            algorithm.name(),
-            expected_len,
-            r.len(),
-            s.len()
-        )
-        .into());
-    }
-
-    let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
-    fixed.extend_from_slice(r);
-    fixed.extend_from_slice(s);
-    match algorithm {
-        EcSignatureKeyAlgorithm::P256 => Ok(Signature::EcdsaP256(
-            EcdsaP256Signature::from_slice(&fixed).map_err(|e| {
-                format!("Failed to parse fixed-width ECDSA P-256 signature: {:?}", e)
-            })?,
-        )),
-        EcSignatureKeyAlgorithm::P384 => Ok(Signature::EcdsaP384(
-            EcdsaP384Signature::from_slice(&fixed).map_err(|e| {
-                format!("Failed to parse fixed-width ECDSA P-384 signature: {:?}", e)
-            })?,
-        )),
-        EcSignatureKeyAlgorithm::P521 => Ok(Signature::EcdsaP521(
-            EcdsaP521Signature::from_slice(&fixed).map_err(|e| {
-                format!("Failed to parse fixed-width ECDSA P-521 signature: {:?}", e)
-            })?,
-        )),
-    }
+fn verify_rsa_pss_signature<D>(
+    key: &PssVerifyingKey<D>,
+    signed_bytes: &[u8],
+    signature: &PssSignature,
+) -> Result<()>
+where
+    D: sha2::Digest,
+    PssVerifyingKey<D>: rsa::signature::Verifier<PssSignature>,
+{
+    use rsa::signature::Verifier;
+    key.verify(signed_bytes, signature)
+        .map_err(|e| format!("RSA-PSS signature verification failed: {:?}", e))?;
+    Ok(())
 }
 
 impl Signature {
@@ -317,9 +311,7 @@ impl Signature {
             Self::EcdsaP256(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
             Self::EcdsaP384(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
             Self::EcdsaP521(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521),
-            Self::RsaPssSha384(_) => {
-                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
-            }
+            Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
         }
     }
 }
