@@ -37,21 +37,16 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "20"
 
-      - name: Install Playwright test deps
+      - name: Install Playwright and browsers
         working-directory: demos/web-verify-kernel/tests
-        timeout-minutes: 10
         run: |
           npm install --no-audit --no-fund
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y chromium
-          chromium --version
+          npx playwright install --with-deps chromium
 
       - name: Run e2e test
         working-directory: demos/web-verify-kernel/tests
-        env:
-          PLAYWRIGHT_CHROMIUM_EXECUTABLE: /usr/bin/chromium
         run: npm test
 
       - name: Upload failure artifacts
