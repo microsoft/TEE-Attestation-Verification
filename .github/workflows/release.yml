@@ -126,12 +126,17 @@ jobs:
 
       - name: Install web-verify-kernel demo test deps
         working-directory: demos/web-verify-kernel/tests
+        timeout-minutes: 10
         run: |
           npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y chromium
+          chromium --version
 
       - name: Run web-verify-kernel demo e2e test
         working-directory: demos/web-verify-kernel/tests
+        env:
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE: /usr/bin/chromium
         run: npm test
 
   package_wasm:

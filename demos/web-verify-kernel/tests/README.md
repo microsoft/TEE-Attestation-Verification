@@ -44,6 +44,13 @@ hosts where this doesn't work (anything not Ubuntu/Debian), see
 npm test
 ```
 
+In GitHub Actions these tests run with apt-installed Chromium instead of
+downloading Playwright's bundled Chromium:
+
+```sh
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm test
+```
+
 Playwright starts its own `python3 -m http.server` rooted at the demo
 directory (`demos/web-verify-kernel/`) on port `8123`, so no separate server
 is needed. Fixtures are served from `../test-data/` and reached at
