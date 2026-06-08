@@ -8,6 +8,6 @@
     "update-golden": "UPDATE_GOLDEN=1 playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.50.1"
+    "@playwright/test": "1.60.0"
   }
 }
