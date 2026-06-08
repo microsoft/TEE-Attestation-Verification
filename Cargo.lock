@@ -1053,7 +1053,7 @@ version = "1.0.2"
 dependencies = [
  "cborrs",
  "cborrs-nondet",
- "openssl-sys",
+ "tee-attestation-verification-crypto",
 ]
 
 [[package]]

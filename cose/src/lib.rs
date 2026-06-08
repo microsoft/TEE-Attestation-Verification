@@ -1,12 +1,12 @@
 mod cbor;
 mod cose;
-mod ossl_wrappers;
-mod sign;
-mod verify;
 
 pub use cbor::CborValue;
-pub use cose::{cose_sign1, cose_verify1};
-pub use ossl_wrappers::{EvpKey, KeyType, WhichEC, WhichRSA};
+pub use cose::{cose_verify1_async, signature_key_algorithm_for_cose_alg};
 
-#[cfg(feature = "pqc")]
-pub use ossl_wrappers::WhichMLDSA;
+#[cfg(sync_crypto)]
+pub use cose::cose_verify1;
+
+pub use crypto::{
+    EcSignatureKeyAlgorithm, Key, KeyBackend, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+};

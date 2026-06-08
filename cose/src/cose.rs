@@ -1,63 +1,34 @@
-use crate::cbor::{serialize_array, CborSlice, CborValue};
-use crate::ossl_wrappers::{
-    ecdsa_der_to_fixed, ecdsa_fixed_to_der, rsa_pss_md_for_cose_alg, EvpKey, KeyType, WhichEC,
-    WhichRSA,
+use crate::cbor::{serialize_array, CborSlice};
+use crypto::{
+    AsyncCryptoBackend, CryptoBackend, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm,
+    SignatureBackend, SignatureKeyAlgorithm,
 };
 
-#[cfg(feature = "pqc")]
-use crate::ossl_wrappers::WhichMLDSA;
-
-const COSE_SIGN1_TAG: u64 = 18;
-const COSE_HEADER_ALG: i64 = 1;
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
-const CBOR_SIMPLE_VALUE_NULL: u8 = 22;
 
-/// Return the COSE algorithm identifier for a given key.
-/// https://www.iana.org/assignments/cose/cose.xhtml
-fn cose_alg(key: &EvpKey) -> Result<i64, String> {
-    match &key.typ {
-        KeyType::EC(WhichEC::P256) => Ok(-7),
-        KeyType::EC(WhichEC::P384) => Ok(-35),
-        KeyType::EC(WhichEC::P521) => Ok(-36),
-        KeyType::RSA(WhichRSA::PS256) => Ok(-37),
-        KeyType::RSA(WhichRSA::PS384) => Ok(-38),
-        KeyType::RSA(WhichRSA::PS512) => Ok(-39),
-        #[cfg(feature = "pqc")]
-        KeyType::MLDSA(which) => match which {
-            WhichMLDSA::P44 => Ok(-48),
-            WhichMLDSA::P65 => Ok(-49),
-            WhichMLDSA::P87 => Ok(-50),
-        },
+/// Return the signature algorithm for a COSE algorithm identifier.
+///
+/// Algorithm identifiers are from the IANA COSE Algorithms registry.
+pub fn signature_key_algorithm_for_cose_alg(alg: i64) -> Result<SignatureKeyAlgorithm, String> {
+    match alg {
+        -7 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256)),
+        -35 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384)),
+        -36 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521)),
+        -37 => Ok(SignatureKeyAlgorithm::RsaPss(
+            RsaPssSignatureKeyAlgorithm::Ps256,
+        )),
+        -38 => Ok(SignatureKeyAlgorithm::RsaPss(
+            RsaPssSignatureKeyAlgorithm::Ps384,
+        )),
+        -39 => Ok(SignatureKeyAlgorithm::RsaPss(
+            RsaPssSignatureKeyAlgorithm::Ps512,
+        )),
+        _ => Err(format!("{alg} is not a supported COSE signature algorithm")),
     }
-}
-
-/// Insert alg(1) into a CborValue map, return error if already exists.
-fn insert_alg_value(key: &EvpKey, phdr: CborValue) -> Result<CborValue, String> {
-    let mut entries = match phdr {
-        CborValue::Map(entries) => entries,
-        _ => {
-            return Err("Protected header is not a CBOR map".to_string());
-        }
-    };
-
-    let alg_key = CborValue::Int(COSE_HEADER_ALG);
-    if entries.iter().any(|(k, _)| k == &alg_key) {
-        return Err("Algorithm already set in protected header".to_string());
-    }
-
-    let alg_val = CborValue::Int(cose_alg(key)?);
-    entries.insert(0, (alg_key, alg_val));
-
-    Ok(CborValue::Map(entries))
 }
 
 /// To-be-signed (TBS).
 /// https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4.
-///
-/// Uses `serialize_array` with borrowed slices to avoid copying
-/// `phdr` and `payload` into intermediate `Vec<u8>`s. These can
-/// be large (payload especially), so we serialize directly from
-/// the caller's buffers.
 fn sig_structure(phdr: &[u8], payload: &[u8]) -> Result<Vec<u8>, String> {
     serialize_array(&[
         CborSlice::TextStr(SIG_STRUCTURE1_CONTEXT),
@@ -67,200 +38,180 @@ fn sig_structure(phdr: &[u8], payload: &[u8]) -> Result<Vec<u8>, String> {
     ])
 }
 
-/// Produce a COSE_Sign1 envelope.
-pub fn cose_sign1(
-    key: &EvpKey,
-    phdr: CborValue,
-    uhdr: CborValue,
-    payload: &[u8],
-    detached: bool,
-) -> Result<Vec<u8>, String> {
-    let phdr_with_alg = insert_alg_value(key, phdr)?;
-    let phdr_bytes = phdr_with_alg.to_bytes()?;
-    let tbs = sig_structure(&phdr_bytes, payload)?;
-    let sig = crate::sign::sign(key, &tbs)?;
-
-    let sig = match &key.typ {
-        KeyType::EC(_) => ecdsa_der_to_fixed(&sig, key.ec_field_size()?)?,
-        KeyType::RSA(_) => sig,
-        #[cfg(feature = "pqc")]
-        KeyType::MLDSA(_) => sig,
-    };
-
-    let payload_item = if detached {
-        CborValue::Simple(CBOR_SIMPLE_VALUE_NULL)
-    } else {
-        CborValue::ByteString(payload.to_vec())
-    };
-
-    let envelope = CborValue::Tagged {
-        tag: COSE_SIGN1_TAG,
-        payload: Box::new(CborValue::Array(vec![
-            CborValue::ByteString(phdr_bytes),
-            uhdr,
-            payload_item,
-            CborValue::ByteString(sig),
-        ])),
-    };
-
-    envelope.to_bytes()
-}
-
-/// Verify a COSE_Sign1 from pre-parsed components. The caller supplies
-/// the serialized protected header, payload, fixed-size signature (all
-/// as byte slices), and the COSE algorithm integer (e.g. -7 for ES256).
+/// Verify a COSE_Sign1 from pre-parsed components with the active synchronous
+/// crypto backend.
+#[cfg(sync_crypto)]
 pub fn cose_verify1(
-    key: &EvpKey,
+    key: &<crypto::Crypto as CryptoBackend>::Key,
     alg: i64,
     phdr: &[u8],
     payload: &[u8],
     sig: &[u8],
-) -> Result<bool, String> {
-    match &key.typ {
-        KeyType::RSA(_) => {
-            // For RSA, accept any PS* algorithm regardless of key size.
-            rsa_pss_md_for_cose_alg(alg)?;
-        }
-        _ => {
-            let expected_alg = cose_alg(key)?;
-            if alg != expected_alg {
-                return Err("Algorithm mismatch between supplied alg and key".into());
-            }
-        }
+) -> Result<(), String> {
+    let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
+    if key.algorithm() != algorithm {
+        return Err("Algorithm mismatch between supplied alg and key".into());
     }
-
-    let sig = match &key.typ {
-        KeyType::EC(_) => ecdsa_fixed_to_der(sig, key.ec_field_size()?)?,
-        KeyType::RSA(_) => sig.to_vec(),
-        #[cfg(feature = "pqc")]
-        KeyType::MLDSA(_) => sig.to_vec(),
-    };
-
+    let signature = signature_from_cose_bytes(sig, algorithm)?;
     let tbs = sig_structure(phdr, payload)?;
 
-    match &key.typ {
-        KeyType::RSA(_) => {
-            let md = rsa_pss_md_for_cose_alg(alg)?;
-            crate::verify::verify_with_md(key, &sig, &tbs, md)
+    <crypto::Crypto as CryptoBackend>::verify_signature(key, &signature, &tbs)
+        .map_err(|e| e.to_string())
+}
+
+/// Verify a COSE_Sign1 from pre-parsed components with the active asynchronous
+/// crypto backend.
+#[cfg(async_crypto)]
+pub async fn cose_verify1_async(
+    key: &<crypto::Crypto as AsyncCryptoBackend>::Key,
+    alg: i64,
+    phdr: &[u8],
+    payload: &[u8],
+    sig: &[u8],
+) -> Result<(), String> {
+    let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
+    if key.algorithm() != algorithm {
+        return Err("Algorithm mismatch between supplied alg and key".into());
+    }
+    let signature = signature_from_cose_bytes(sig, algorithm)?;
+    let tbs = sig_structure(phdr, payload)?;
+
+    <crypto::Crypto as AsyncCryptoBackend>::verify_signature(key, &signature, &tbs)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn signature_from_cose_bytes(
+    sig: &[u8],
+    algorithm: SignatureKeyAlgorithm,
+) -> Result<crypto::Signature, String> {
+    match algorithm {
+        SignatureKeyAlgorithm::Ec(algorithm) => {
+            let field_size = algorithm.scalar_byte_len();
+            if sig.len() != field_size * 2 {
+                return Err(format!(
+                    "Expected {} byte ECDSA signature, got {}",
+                    field_size * 2,
+                    sig.len()
+                ));
+            }
+
+            <crypto::Signature as SignatureBackend>::from_ec_components(
+                &sig[..field_size],
+                &sig[field_size..],
+                algorithm,
+            )
+            .map_err(|e| e.to_string())
         }
-        _ => crate::verify::verify(key, &sig, &tbs),
+        SignatureKeyAlgorithm::RsaPss(_) => {
+            <crypto::Signature as SignatureBackend>::from_bytes(sig, algorithm)
+                .map_err(|e| e.to_string())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hex_decode(s: &str) -> Vec<u8> {
-        assert!(s.len() % 2 == 0, "odd-length hex string");
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use crypto::KeyBackend;
 
-    const TEST_PHDR: &str = "A319018B020FA3061A698B72820173736572766963652E6578616D706C652E636F6D02706C65646765722E7369676E6174757265666363662E7631A1647478696465322E313334";
+    const PAYLOAD: &[u8] = b"verification-only COSE vector";
 
-    /// Helper: sign then verify via the new APIs.
-    fn sign_and_verify(key_type: KeyType) {
-        let key = EvpKey::new(key_type).unwrap();
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"Good boy...";
+    const P256_SPKI: &[u8] = &[
+        48, 89, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2, 1, 6, 8, 42, 134, 72, 206, 61, 3, 1, 7, 3,
+        66, 0, 4, 201, 171, 117, 35, 159, 13, 22, 69, 184, 252, 18, 119, 177, 246, 18, 133, 248,
+        151, 60, 164, 201, 112, 233, 4, 224, 54, 241, 53, 11, 85, 3, 249, 180, 113, 248, 87, 244,
+        106, 253, 83, 32, 139, 158, 31, 51, 72, 167, 32, 114, 51, 92, 109, 60, 158, 23, 216, 2, 11,
+        126, 11, 242, 186, 211, 205,
+    ];
+    const P256_PHDR: &[u8] = &[161, 1, 38];
+    const P256_SIG: &[u8] = &[
+        90, 37, 149, 163, 211, 129, 174, 167, 177, 116, 232, 19, 137, 13, 86, 18, 47, 248, 221,
+        245, 81, 132, 222, 25, 6, 230, 131, 70, 41, 27, 154, 74, 57, 92, 210, 184, 112, 104, 224,
+        64, 234, 0, 184, 153, 253, 249, 148, 125, 58, 93, 103, 128, 147, 144, 252, 13, 252, 91,
+        233, 88, 189, 169, 103, 151,
+    ];
 
-        let envelope = cose_sign1(&key, phdr, uhdr, payload, false).unwrap();
+    const RSA_PSS_SPKI: &[u8] = &[
+        48, 130, 1, 34, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 1, 5, 0, 3, 130, 1, 15, 0,
+        48, 130, 1, 10, 2, 130, 1, 1, 0, 175, 27, 158, 101, 168, 58, 209, 97, 4, 179, 2, 172, 30,
+        85, 207, 239, 147, 239, 117, 160, 15, 74, 0, 187, 226, 206, 146, 151, 66, 169, 236, 97,
+        160, 250, 245, 177, 238, 210, 124, 161, 38, 23, 163, 31, 155, 96, 28, 183, 13, 174, 70,
+        185, 134, 2, 253, 106, 66, 185, 3, 127, 53, 97, 56, 27, 90, 15, 118, 188, 167, 23, 128,
+        134, 188, 224, 207, 205, 17, 17, 148, 146, 178, 88, 11, 114, 126, 183, 104, 193, 215, 7,
+        71, 182, 91, 118, 174, 220, 146, 94, 123, 11, 197, 3, 25, 104, 111, 55, 9, 48, 142, 67, 34,
+        246, 127, 220, 194, 47, 15, 0, 44, 137, 39, 185, 22, 216, 112, 44, 226, 164, 58, 130, 119,
+        175, 191, 210, 224, 159, 62, 74, 21, 115, 184, 24, 248, 123, 151, 112, 221, 0, 85, 57, 82,
+        158, 56, 239, 0, 34, 184, 233, 153, 40, 250, 194, 114, 76, 210, 193, 124, 70, 108, 48, 128,
+        99, 231, 12, 9, 1, 203, 39, 69, 223, 206, 118, 24, 252, 141, 173, 86, 140, 127, 73, 192,
+        115, 93, 141, 222, 251, 189, 58, 179, 37, 214, 126, 250, 129, 16, 5, 182, 118, 69, 77, 148,
+        154, 201, 225, 227, 26, 171, 172, 110, 196, 16, 104, 254, 18, 188, 68, 39, 126, 212, 133,
+        39, 151, 236, 217, 183, 36, 127, 133, 46, 223, 36, 67, 243, 223, 28, 140, 48, 12, 181, 139,
+        149, 2, 123, 87, 198, 151, 2, 3, 1, 0, 1,
+    ];
+    const RSA_PSS_PHDR: &[u8] = &[161, 1, 56, 36];
+    const RSA_PSS_SIG: &[u8] = &[
+        120, 140, 34, 185, 178, 240, 162, 3, 67, 154, 48, 48, 123, 75, 49, 28, 172, 121, 157, 121,
+        60, 52, 179, 5, 70, 143, 108, 198, 170, 32, 22, 182, 48, 38, 77, 207, 86, 34, 184, 15, 147,
+        104, 157, 234, 38, 10, 253, 236, 187, 4, 158, 154, 98, 122, 90, 122, 50, 93, 214, 143, 55,
+        171, 26, 109, 250, 150, 130, 37, 200, 235, 161, 196, 153, 220, 39, 167, 110, 69, 208, 139,
+        191, 201, 229, 116, 38, 129, 229, 249, 132, 55, 156, 249, 118, 192, 247, 241, 134, 93, 156,
+        125, 174, 116, 96, 194, 187, 10, 75, 133, 45, 44, 213, 187, 55, 193, 165, 89, 121, 116,
+        186, 8, 14, 72, 23, 154, 69, 64, 206, 169, 225, 8, 203, 26, 173, 213, 162, 182, 87, 172,
+        106, 136, 40, 220, 241, 190, 135, 79, 31, 105, 31, 18, 38, 50, 14, 246, 35, 185, 161, 35,
+        43, 113, 207, 153, 106, 40, 75, 193, 177, 122, 82, 93, 246, 137, 248, 247, 218, 154, 221,
+        119, 84, 142, 153, 154, 3, 184, 188, 10, 87, 228, 228, 52, 16, 107, 94, 251, 223, 179, 253,
+        250, 204, 125, 230, 218, 34, 86, 183, 110, 161, 159, 89, 214, 251, 1, 159, 231, 231, 95,
+        230, 13, 22, 185, 239, 209, 151, 109, 19, 149, 212, 207, 169, 80, 167, 108, 239, 161, 216,
+        168, 172, 208, 150, 38, 14, 34, 76, 203, 219, 160, 78, 11, 108, 193, 8, 109, 89, 223, 228,
+        73,
+    ];
 
-        // Parse envelope to extract raw components for cose_verify1.
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        let alg = cose_alg(&key).unwrap();
-        assert!(cose_verify1(&key, alg, &phdr_raw, payload, &sig_raw).unwrap());
+    fn key(
+        spki: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> <crypto::Crypto as CryptoBackend>::Key {
+        <<crypto::Crypto as CryptoBackend>::Key as KeyBackend>::from_spki_der(spki, algorithm)
+            .unwrap()
     }
 
     #[test]
-    fn test_insert_alg() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let phdr_with_alg = insert_alg_value(&key, phdr).unwrap();
+    #[cfg(sync_crypto)]
+    fn cose_verify1_ec_p256_vector() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
 
-        let alg = phdr_with_alg.map_at_int(COSE_HEADER_ALG).unwrap();
-        assert_eq!(alg, &CborValue::Int(cose_alg(&key).unwrap()));
+        cose_verify1(&key, -7, P256_PHDR, PAYLOAD, P256_SIG).unwrap();
+    }
 
-        assert_eq!(
-            insert_alg_value(&key, phdr_with_alg).unwrap_err(),
-            "Algorithm already set in protected header"
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_rsa_ps256_vector() {
+        let algorithm = SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256);
+        let key = key(RSA_PSS_SPKI, algorithm);
+
+        cose_verify1(&key, -37, RSA_PSS_PHDR, PAYLOAD, RSA_PSS_SIG).unwrap();
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_wrong_message_returns_error() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        let err = cose_verify1(&key, -7, P256_PHDR, b"wrong", P256_SIG).unwrap_err();
+        assert!(
+            err.contains("signature verification failed"),
+            "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn cose_ec_p256() {
-        sign_and_verify(KeyType::EC(WhichEC::P256));
-    }
-
-    #[test]
-    fn cose_ec_p384() {
-        sign_and_verify(KeyType::EC(WhichEC::P384));
-    }
-
-    #[test]
-    fn cose_ec_p521() {
-        sign_and_verify(KeyType::EC(WhichEC::P521));
-    }
-
-    #[test]
-    fn cose_detached_payload() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"Good boy...";
-
-        let envelope = cose_sign1(&key, phdr, uhdr, payload, true).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        assert_eq!(items[2], CborValue::Simple(CBOR_SIMPLE_VALUE_NULL));
-
-        let alg = cose_alg(&key).unwrap();
-        assert!(cose_verify1(&key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-    }
-
-    #[test]
+    #[cfg(sync_crypto)]
     fn cose_verify1_wrong_alg() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
         assert_eq!(
             cose_verify1(&key, -35, b"", b"", b"").unwrap_err(),
             "Algorithm mismatch between supplied alg and key"
@@ -268,369 +219,14 @@ mod tests {
     }
 
     #[test]
-    fn cose_with_der_imported_key() {
-        let original_key = EvpKey::new(KeyType::EC(WhichEC::P384)).unwrap();
-
-        let priv_der = original_key.to_der_private().unwrap();
-        let signing_key = EvpKey::from_der_private(&priv_der).unwrap();
-
-        let pub_der = original_key.to_der_public().unwrap();
-        let verification_key = EvpKey::from_der_public(&pub_der).unwrap();
-
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"test with DER-imported key";
-
-        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        let alg = cose_alg(&verification_key).unwrap();
-        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-    }
-
-    #[test]
-    fn cose_rsa_ps256() {
-        sign_and_verify(KeyType::RSA(WhichRSA::PS256));
-    }
-
-    #[test]
-    fn cose_rsa_ps384() {
-        sign_and_verify(KeyType::RSA(WhichRSA::PS384));
-    }
-
-    #[test]
-    fn cose_rsa_ps512() {
-        sign_and_verify(KeyType::RSA(WhichRSA::PS512));
-    }
-
-    #[test]
-    fn cose_rsa_with_der_imported_key() {
-        let original_key = EvpKey::new(KeyType::RSA(WhichRSA::PS256)).unwrap();
-
-        let priv_der = original_key.to_der_private().unwrap();
-        let signing_key = EvpKey::from_der_private(&priv_der).unwrap();
-
-        let pub_der = original_key.to_der_public().unwrap();
-        let verification_key = EvpKey::from_der_public(&pub_der).unwrap();
-
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"RSA with DER-imported key";
-
-        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        let alg = cose_alg(&verification_key).unwrap();
-        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-    }
-
-    #[test]
-    fn cose_rsa_detached_payload() {
-        let key = EvpKey::new(KeyType::RSA(WhichRSA::PS384)).unwrap();
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"RSA detached";
-
-        let envelope = cose_sign1(&key, phdr, uhdr, payload, true).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        let alg = cose_alg(&key).unwrap();
-        assert!(cose_verify1(&key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-    }
-
-    /// Sign with a PS256 key (2048-bit RSA) but use SHA-384 (PS384
-    /// algorithm). Verify must succeed because the header's algorithm
-    /// drives the digest, not the key's WhichRSA variant.
-    #[test]
-    fn cose_rsa_ps256_key_with_sha384() {
-        use crate::ossl_wrappers::rsa_pss_md_for_cose_alg;
-
-        let key = EvpKey::new(KeyType::RSA(WhichRSA::PS256)).unwrap();
-        let payload = b"PS256 key, SHA-384 digest";
-
-        // Build phdr with alg = -38 (PS384) already set.
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let mut phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        if let CborValue::Map(ref mut entries) = phdr {
-            entries.insert(0, (CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-38)));
-        }
-        let phdr_ser = phdr.to_bytes().unwrap();
-
-        // Build TBS and sign with SHA-384.
-        let tbs = sig_structure(&phdr_ser, payload).unwrap();
-        let md = rsa_pss_md_for_cose_alg(-38).unwrap();
-        let sig = crate::sign::sign_with_md(&key, &tbs, md).unwrap();
-
-        // Verify with PS384 alg.
-        assert!(cose_verify1(&key, -38, &phdr_ser, payload, &sig).unwrap());
-    }
-
-    /// Verify that a &[u8] payload is stored directly in the envelope
-    /// bstr without double-encoding as bstr(bstr(...)).
-    #[test]
-    fn cose_sign1_no_double_encoding() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"test payload";
-
-        let envelope = cose_sign1(&key, phdr, uhdr, payload, false).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let payload_in_envelope = match &items[2] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("payload not bstr"),
-        };
-        // The envelope payload must equal the raw data, not a
-        // CBOR-encoded bstr wrapping it.
-        assert_eq!(
-            payload_in_envelope,
-            payload.to_vec(),
-            "payload double-encoded as bstr(bstr(...))"
-        );
-    }
-
-    // ---------------------------------------------------------------
-    // Negative tests: error propagation through cose_sign1/cose_verify1
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn cose_sign1_rejects_non_map_phdr() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        assert_eq!(
-            cose_sign1(
-                &key,
-                CborValue::Int(0),
-                CborValue::Map(vec![]),
-                b"msg",
-                false
-            )
-            .unwrap_err(),
-            "Protected header is not a CBOR map"
-        );
-    }
-
-    #[test]
-    fn cose_sign1_rejects_duplicate_alg() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let phdr = CborValue::Map(vec![(CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-7))]);
-        assert_eq!(
-            cose_sign1(&key, phdr, CborValue::Map(vec![]), b"msg", false).unwrap_err(),
-            "Algorithm already set in protected header"
-        );
-    }
-
-    #[test]
-    fn cose_sign1_propagates_ossl_sign_error() {
-        // Null key triggers EVP_DigestSignInit failure.
-        let null_key = EvpKey {
-            key: std::ptr::null_mut(),
-            typ: KeyType::EC(WhichEC::P256),
-        };
-        let err = cose_sign1(
-            &null_key,
-            CborValue::Map(vec![]),
-            CborValue::Map(vec![]),
-            b"msg",
-            false,
-        )
-        .unwrap_err();
-        assert!(
-            err.starts_with("EVP_DigestSignInit returned 0: error:"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn cose_verify1_wrong_rsa_alg() {
-        let key = EvpKey::new(KeyType::RSA(WhichRSA::PS256)).unwrap();
-        assert_eq!(
-            cose_verify1(&key, -7, b"", b"", b"").unwrap_err(),
-            "-7 is not a COSE RSA-PSS algorithm"
-        );
-    }
-
-    #[test]
+    #[cfg(sync_crypto)]
     fn cose_verify1_ec_sig_wrong_length() {
-        let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let pub_der = key.to_der_public().unwrap();
-        let pub_key = EvpKey::from_der_public(&pub_der).unwrap();
-        // P-256 expects 64 byte fixed sig, pass 3 bytes.
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
         assert_eq!(
-            cose_verify1(&pub_key, -7, b"", b"", &[0u8; 3]).unwrap_err(),
+            cose_verify1(&key, -7, b"", b"", &[0u8; 3]).unwrap_err(),
             "Expected 64 byte ECDSA signature, got 3"
         );
-    }
-
-    #[test]
-    fn cose_verify1_propagates_ossl_verify_error() {
-        // Null key triggers EVP_DigestVerifyInit failure.
-        let null_key = EvpKey {
-            key: std::ptr::null_mut(),
-            typ: KeyType::RSA(WhichRSA::PS256),
-        };
-        let err = cose_verify1(&null_key, -37, b"", b"", &[0u8; 256]).unwrap_err();
-        assert!(
-            err.starts_with("EVP_DigestVerifyInit returned 0: error:"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn cose_sign_verify_with_pem_imported_key() {
-        let original = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-
-        let priv_pem = original.to_pem_private().unwrap();
-        let signing_key = EvpKey::from_pem_private(&priv_pem).unwrap();
-
-        let pub_pem = original.to_pem_public().unwrap();
-        let verification_key = EvpKey::from_pem_public(&pub_pem).unwrap();
-
-        let phdr_bytes = hex_decode(TEST_PHDR);
-        let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-        let uhdr = CborValue::Map(vec![]);
-        let payload = b"signed with PEM-imported key";
-
-        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
-
-        let parsed = CborValue::from_bytes(&envelope).unwrap();
-        let inner = match parsed {
-            CborValue::Tagged { payload, .. } => *payload,
-            _ => panic!("not tagged"),
-        };
-        let items = match inner {
-            CborValue::Array(v) => v,
-            _ => panic!("not array"),
-        };
-        let phdr_raw = match &items[0] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("phdr not bstr"),
-        };
-        let sig_raw = match &items[3] {
-            CborValue::ByteString(b) => b.clone(),
-            _ => panic!("sig not bstr"),
-        };
-
-        let alg = cose_alg(&verification_key).unwrap();
-        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-    }
-
-    #[cfg(feature = "pqc")]
-    mod pqc_tests {
-        use super::*;
-        #[test]
-        fn cose_mldsa44() {
-            sign_and_verify(KeyType::MLDSA(WhichMLDSA::P44));
-        }
-        #[test]
-        fn cose_mldsa65() {
-            sign_and_verify(KeyType::MLDSA(WhichMLDSA::P65));
-        }
-        #[test]
-        fn cose_mldsa87() {
-            sign_and_verify(KeyType::MLDSA(WhichMLDSA::P87));
-        }
-
-        #[test]
-        fn cose_mldsa_with_der_imported_key() {
-            let original_key = EvpKey::new(KeyType::MLDSA(WhichMLDSA::P65)).unwrap();
-
-            let priv_der = original_key.to_der_private().unwrap();
-            let signing_key = EvpKey::from_der_private(&priv_der).unwrap();
-
-            let pub_der = original_key.to_der_public().unwrap();
-            let verification_key = EvpKey::from_der_public(&pub_der).unwrap();
-
-            let phdr_bytes = hex_decode(TEST_PHDR);
-            let phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
-            let uhdr = CborValue::Map(vec![]);
-            let payload = b"ML-DSA with DER-imported key";
-
-            let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
-
-            let parsed = CborValue::from_bytes(&envelope).unwrap();
-            let inner = match parsed {
-                CborValue::Tagged { payload, .. } => *payload,
-                _ => panic!("not tagged"),
-            };
-            let items = match inner {
-                CborValue::Array(v) => v,
-                _ => panic!("not array"),
-            };
-            let phdr_raw = match &items[0] {
-                CborValue::ByteString(b) => b.clone(),
-                _ => panic!("phdr not bstr"),
-            };
-            let sig_raw = match &items[3] {
-                CborValue::ByteString(b) => b.clone(),
-                _ => panic!("sig not bstr"),
-            };
-
-            let alg = cose_alg(&verification_key).unwrap();
-            assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
-        }
     }
 }
