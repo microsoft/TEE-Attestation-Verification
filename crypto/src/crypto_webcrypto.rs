@@ -10,11 +10,13 @@
 //! RSA-PSS/SHA-384 and ECDSA P-384/SHA-384 verification support.
 
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
+use std::time::Duration;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use super::verifier::Async as AsyncVerifier;
 use super::x509_certificate::{Certificate as X509Certificate, SignatureAlgorithm};
+use super::x509_policy;
 use super::{AsyncCryptoBackend, AsyncReportSignatureVerifier, CertificateBackend, Result};
 
 pub struct Crypto;
@@ -154,31 +156,49 @@ impl AsyncCryptoBackend for Crypto {
         untrusted_chain: &[&Self::Certificate],
         leaf: &Self::Certificate,
     ) -> Result<()> {
-        let untrusted_chain = untrusted_chain.iter().chain(std::iter::once(&leaf));
+        let mut policy_path = Vec::with_capacity(untrusted_chain.len() + 2);
         let mut prev: Option<&Certificate> = None;
 
-        for &cert in untrusted_chain {
+        for &cert in untrusted_chain.iter().chain(std::iter::once(&leaf)) {
             if let Some(issuer) = prev {
                 issuer.verify(cert).await?;
             } else {
-                let mut verified = false;
+                let mut trusted_issuer = None;
                 for &trusted in trusted_certs {
                     if trusted.verify(cert).await.is_ok() {
-                        verified = true;
+                        trusted_issuer = Some(trusted);
                         break;
                     }
                 }
 
-                if !verified {
+                let Some(trusted_issuer) = trusted_issuer else {
                     return Err("Failed to verify certificate: no matching trusted issuer".into());
+                };
+
+                policy_path.push(trusted_issuer);
+                if trusted_issuer == cert {
+                    prev = Some(cert);
+                    continue;
                 }
             }
 
+            policy_path.push(cert);
             prev = Some(cert);
         }
 
+        x509_policy::rfc5280_policy::<Crypto>(&policy_path, unix_time_now()?)?;
+
         Ok(())
     }
+}
+
+fn unix_time_now() -> Result<Duration> {
+    let millis = js_sys::Date::now();
+    if !millis.is_finite() || millis < 0.0 || millis > u64::MAX as f64 {
+        return Err("Failed to read current Unix time from JavaScript Date".into());
+    }
+
+    Ok(Duration::from_millis(millis as u64))
 }
 
 #[derive(Clone, Copy)]

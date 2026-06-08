@@ -15,9 +15,11 @@ use rsa::{
     RsaPublicKey,
 };
 use sha2::Sha384;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::verifier::{Async as AsyncVerifier, Sync as Verifier};
 use super::x509_certificate::{Certificate, SignatureAlgorithm};
+use super::x509_policy;
 use super::{CertificateBackend, CryptoBackend, ReportSignatureVerifier, Result};
 
 pub struct Crypto;
@@ -129,23 +131,39 @@ impl CryptoBackend for Crypto {
         untrusted_chain: &[&Certificate],
         leaf: &Certificate,
     ) -> Result<()> {
+        let mut policy_path = Vec::with_capacity(untrusted_chain.len() + 2);
         let untrusted_chain = untrusted_chain.iter().chain(std::iter::once(&leaf));
         let mut prev: Option<&Certificate> = None;
         for cert in untrusted_chain {
             if let Some(issuer) = prev {
                 <Certificate as Verifier<Certificate>>::verify(issuer, *cert)?;
             } else {
-                trusted_certs
+                let trusted_issuer = trusted_certs
                     .iter()
                     .find(|trusted| {
                         <Certificate as Verifier<Certificate>>::verify(*trusted, *cert).is_ok()
                     })
                     .ok_or("Failed to verify certificate: no matching trusted issuer")?;
+
+                policy_path.push(*trusted_issuer);
+                if *trusted_issuer == *cert {
+                    prev = Some(cert);
+                    continue;
+                }
             }
+
+            policy_path.push(*cert);
             prev = Some(cert);
         }
+
+        x509_policy::rfc5280_policy::<Crypto>(&policy_path, unix_time_now()?)?;
+
         Ok(())
     }
+}
+
+fn unix_time_now() -> Result<Duration> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?)
 }
 
 fn verify_report_sig_ecdsa_p384_sha384(
