@@ -56,12 +56,22 @@ impl Certificate {
     }
 
     pub fn public_key_algorithm(&self) -> String {
-        self.inner
+        let oid = self
+            .inner
             .tbs_certificate
             .subject_public_key_info
             .algorithm
             .oid
-            .to_string()
+            .to_string();
+
+        match oid.as_str() {
+            "1.2.840.113549.1.1.1" => "RSA".to_string(),
+            "1.2.840.113549.1.1.10" => "RSA-PSS".to_string(),
+            "1.2.840.10045.2.1" => "EC".to_string(),
+            "1.3.101.112" => "Ed25519".to_string(),
+            "1.3.101.113" => "Ed448".to_string(),
+            _ => oid,
+        }
     }
 
     pub fn get_extension_value_by_oid(&self, oid: &str) -> Result<Option<Vec<u8>>> {

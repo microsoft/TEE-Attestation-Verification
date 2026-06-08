@@ -11,6 +11,7 @@
 use foreign_types::{ForeignType, ForeignTypeRef};
 use openssl::asn1::{Asn1Object, Asn1ObjectRef, Asn1Time};
 use openssl::ecdsa::EcdsaSig;
+use openssl::pkey::Id as PKeyId;
 use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
 use openssl_sys::{
@@ -61,7 +62,11 @@ impl CertificateBackend for Crypto {
     }
 
     fn public_key_algorithm(cert: &Self::Certificate) -> Result<String> {
-        Ok(format!("{:?}", cert.public_key()?.id()))
+        Ok(match cert.public_key()?.id() {
+            PKeyId::RSA => "RSA".to_string(),
+            PKeyId::EC => "EC".to_string(),
+            other => format!("EVP_PKEY:{}", other.as_raw()),
+        })
     }
 
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
