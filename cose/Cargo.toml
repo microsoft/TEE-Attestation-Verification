@@ -8,6 +8,9 @@ description = "COSE verification helpers for TEE attestation verification"
 authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]

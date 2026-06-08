@@ -14,28 +14,31 @@ permissions:
 
 jobs:
   wasm:
-    name: WASM pure-Rust build and test
+    name: WASM64 pure-Rust build and test
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
       - name: Install rust
         run: |
-          rustup update stable && rustup default stable
+          rustup update nightly
+          rustup +nightly component add rust-src
 
       - name: Setup WASM tooling
         run: |
-          rustup target add wasm32-unknown-unknown
           cargo install wasm-bindgen-cli
-          cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build WASM with pure-Rust backend
-        working-directory: cose
-        run: wasm-pack build --target web --no-default-features --features "crypto_pure_rust"
+      # COSE depends on EverParse CBOR code that requires 64-bit usize, so it
+      # must be compiled as wasm64 with Cargo nightly build-std. wasm-bindgen
+      # only generates JS bindings from the already-built wasm artifact.
+      - name: Build WASM64 with pure-Rust backend
+        run: cargo +nightly build -Z build-std=std,panic_abort --manifest-path cose/Cargo.toml --target wasm64-unknown-unknown --no-default-features --features "crypto_pure_rust" --release
 
-      - name: Test WASM with pure-Rust backend
-        working-directory: cose
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
+      - name: Generate WASM bindings
+        run: wasm-bindgen --target web --out-dir cose/pkg target/wasm64-unknown-unknown/release/tee_attestation_verification_cose.wasm
+
+      - name: Compile WASM64 tests with pure-Rust backend
+        run: cargo +nightly test -Z build-std=std,panic_abort --manifest-path cose/Cargo.toml --target wasm64-unknown-unknown --no-default-features --features "crypto_pure_rust" --no-run
 
   native:
     name: Native pure-Rust build and test
