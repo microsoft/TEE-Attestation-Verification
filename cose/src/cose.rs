@@ -1,7 +1,7 @@
 use crate::cbor::{serialize_array, CborSlice};
 use crypto::{
-    AsyncCryptoBackend, CryptoBackend, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm,
-    SignatureBackend, SignatureKeyAlgorithm,
+    compatible_key_and_signature, AsyncCryptoBackend, CryptoBackend, EcSignatureKeyAlgorithm,
+    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
@@ -49,7 +49,7 @@ pub fn cose_verify1(
     sig: &[u8],
 ) -> Result<(), String> {
     let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
-    if key.algorithm() != algorithm {
+    if !compatible_key_and_signature(key.algorithm(), algorithm) {
         return Err("Algorithm mismatch between supplied alg and key".into());
     }
     let signature = signature_from_cose_bytes(sig, algorithm)?;
@@ -70,7 +70,7 @@ pub async fn cose_verify1_async(
     sig: &[u8],
 ) -> Result<(), String> {
     let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
-    if key.algorithm() != algorithm {
+    if !compatible_key_and_signature(key.algorithm(), algorithm) {
         return Err("Algorithm mismatch between supplied alg and key".into());
     }
     let signature = signature_from_cose_bytes(sig, algorithm)?;
@@ -189,6 +189,15 @@ mod tests {
     fn cose_verify1_rsa_ps256_vector() {
         let algorithm = SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256);
         let key = key(RSA_PSS_SPKI, algorithm);
+
+        cose_verify1(&key, -37, RSA_PSS_PHDR, PAYLOAD, RSA_PSS_SIG).unwrap();
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_rsa_key_imported_with_different_pss_algorithm() {
+        let key_algorithm = SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384);
+        let key = key(RSA_PSS_SPKI, key_algorithm);
 
         cose_verify1(&key, -37, RSA_PSS_PHDR, PAYLOAD, RSA_PSS_SIG).unwrap();
     }

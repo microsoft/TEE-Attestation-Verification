@@ -94,3 +94,55 @@ impl SignatureKeyAlgorithm {
         }
     }
 }
+
+/// Return whether key material imported for `key_algorithm` can verify a
+/// signature using `signature_algorithm`.
+///
+/// ECDSA keys are curve-specific, so the curve must match exactly. RSA keys are
+/// not intrinsically bound to a specific RSA-PSS hash/salt choice, so any
+/// RSA-PSS key algorithm is compatible with any RSA-PSS signature algorithm.
+pub const fn compatible_key_and_signature(
+    key_algorithm: SignatureKeyAlgorithm,
+    signature_algorithm: SignatureKeyAlgorithm,
+) -> bool {
+    match (key_algorithm, signature_algorithm) {
+        (SignatureKeyAlgorithm::Ec(key), SignatureKeyAlgorithm::Ec(signature)) => {
+            key as u8 == signature as u8
+        }
+        (SignatureKeyAlgorithm::RsaPss(_), SignatureKeyAlgorithm::RsaPss(_)) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ecdsa_compatibility_requires_matching_curve() {
+        assert!(compatible_key_and_signature(
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+        ));
+        assert!(!compatible_key_and_signature(
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
+        ));
+    }
+
+    #[test]
+    fn rsa_pss_compatibility_allows_different_parameters() {
+        assert!(compatible_key_and_signature(
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256),
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384),
+        ));
+    }
+
+    #[test]
+    fn mixed_key_types_are_not_compatible() {
+        assert!(!compatible_key_and_signature(
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256),
+        ));
+    }
+}
