@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Check Cargo versions match changelog
-        run: python3 scripts/check-version-sync.py
+        run: python3 scripts/check-version-sync.py --root-path $(realpath .)
 
   format:
     name: Format check
