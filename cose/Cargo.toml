@@ -1,16 +1,16 @@
 [package]
-name = "cose-openssl"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-crate-type = ["lib"]
+name = "tee-attestation-verification-cose"
+version = "1.0.2"
+edition = "2021"
+repository = "https://github.com/microsoft/TEE-Attestation-Verification"
+keywords = ["confidentiality", "sev-snp", "tpm"]
+description = "COSE signing and verification helpers for TEE attestation verification"
+authors = ["Max Tropets", "Chris Jensen"]
+license = "MIT"
 
 [features]
+default = []
 pqc = []
-
-[lints.rust]
-warnings = "deny"
 
 [dependencies]
 openssl-sys = "0.9"

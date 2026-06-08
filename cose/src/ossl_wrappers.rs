@@ -5,10 +5,8 @@ use std::ptr;
 
 // Not exposed by openssl-sys 0.9, but available at link time (OpenSSL 3.0+).
 unsafe extern "C" {
-    fn EVP_PKEY_is_a(
-        pkey: *const ossl::EVP_PKEY,
-        name: *const std::ffi::c_char,
-    ) -> std::ffi::c_int;
+    fn EVP_PKEY_is_a(pkey: *const ossl::EVP_PKEY, name: *const std::ffi::c_char)
+        -> std::ffi::c_int;
 
     fn EVP_PKEY_get_group_name(
         pkey: *const ossl::EVP_PKEY,
@@ -17,11 +15,7 @@ unsafe extern "C" {
         gname_len: *mut usize,
     ) -> std::ffi::c_int;
 
-    fn ERR_error_string_n(
-        e: std::ffi::c_ulong,
-        buf: *mut std::ffi::c_char,
-        len: usize,
-    );
+    fn ERR_error_string_n(e: std::ffi::c_ulong, buf: *mut std::ffi::c_char, len: usize);
 }
 
 /// Drain the OpenSSL error queue and return the last (newest) error.
@@ -154,19 +148,12 @@ impl EvpKey {
                 #[cfg(feature = "pqc")]
                 KeyType::MLDSA(which) => {
                     let alg = CString::new(which.openssl_str()).unwrap();
-                    ossl::EVP_PKEY_Q_keygen(
-                        ptr::null_mut(),
-                        ptr::null_mut(),
-                        alg.as_ptr(),
-                    )
+                    ossl::EVP_PKEY_Q_keygen(ptr::null_mut(), ptr::null_mut(), alg.as_ptr())
                 }
             };
 
             if key.is_null() {
-                return Err(format!(
-                    "EVP_PKEY_Q_keygen failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("EVP_PKEY_Q_keygen failed: {}", ossl_err_string()));
             }
 
             Ok(EvpKey { key, typ })
@@ -178,13 +165,9 @@ impl EvpKey {
     pub fn from_der_public(der: &[u8]) -> Result<Self, String> {
         let key = unsafe {
             let mut ptr = der.as_ptr();
-            let key =
-                ossl::d2i_PUBKEY(ptr::null_mut(), &mut ptr, der.len() as i64);
+            let key = ossl::d2i_PUBKEY(ptr::null_mut(), &mut ptr, der.len() as i64);
             if key.is_null() {
-                return Err(format!(
-                    "d2i_PUBKEY failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("d2i_PUBKEY failed: {}", ossl_err_string()));
             }
             key
         };
@@ -208,16 +191,9 @@ impl EvpKey {
     pub fn from_der_private(der: &[u8]) -> Result<Self, String> {
         let key = unsafe {
             let mut ptr = der.as_ptr();
-            let key = ossl::d2i_AutoPrivateKey(
-                ptr::null_mut(),
-                &mut ptr,
-                der.len() as i64,
-            );
+            let key = ossl::d2i_AutoPrivateKey(ptr::null_mut(), &mut ptr, der.len() as i64);
             if key.is_null() {
-                return Err(format!(
-                    "d2i_AutoPrivateKey failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("d2i_AutoPrivateKey failed: {}", ossl_err_string()));
             }
             key
         };
@@ -235,9 +211,7 @@ impl EvpKey {
         Ok(EvpKey { key, typ })
     }
 
-    fn detect_key_type_raw(
-        pkey: *mut ossl::EVP_PKEY,
-    ) -> Result<KeyType, String> {
+    fn detect_key_type_raw(pkey: *mut ossl::EVP_PKEY) -> Result<KeyType, String> {
         unsafe {
             let rsa = CString::new("RSA").unwrap();
             if EVP_PKEY_is_a(pkey as *const _, rsa.as_ptr()) == 1 {
@@ -344,32 +318,19 @@ impl EvpKey {
 
     /// Create an `EvpKey` from a PEM-encoded public key.
     pub fn from_pem_public(pem: &[u8]) -> Result<Self, String> {
-        let pem_len: std::ffi::c_int = pem.len().try_into().map_err(|_| {
-            format!("PEM input too large ({} bytes)", pem.len())
-        })?;
+        let pem_len: std::ffi::c_int = pem
+            .len()
+            .try_into()
+            .map_err(|_| format!("PEM input too large ({} bytes)", pem.len()))?;
         let key = unsafe {
-            let bio = ossl::BIO_new_mem_buf(
-                pem.as_ptr() as *const std::ffi::c_void,
-                pem_len,
-            );
+            let bio = ossl::BIO_new_mem_buf(pem.as_ptr() as *const std::ffi::c_void, pem_len);
             if bio.is_null() {
-                return Err(format!(
-                    "BIO_new_mem_buf failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("BIO_new_mem_buf failed: {}", ossl_err_string()));
             }
-            let key = ossl::PEM_read_bio_PUBKEY(
-                bio,
-                ptr::null_mut(),
-                None,
-                ptr::null_mut(),
-            );
+            let key = ossl::PEM_read_bio_PUBKEY(bio, ptr::null_mut(), None, ptr::null_mut());
             ossl::BIO_free_all(bio);
             if key.is_null() {
-                return Err(format!(
-                    "PEM_read_bio_PUBKEY failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("PEM_read_bio_PUBKEY failed: {}", ossl_err_string()));
             }
             key
         };
@@ -387,26 +348,16 @@ impl EvpKey {
 
     /// Create an `EvpKey` from a PEM-encoded private key.
     pub fn from_pem_private(pem: &[u8]) -> Result<Self, String> {
-        let pem_len: std::ffi::c_int = pem.len().try_into().map_err(|_| {
-            format!("PEM input too large ({} bytes)", pem.len())
-        })?;
+        let pem_len: std::ffi::c_int = pem
+            .len()
+            .try_into()
+            .map_err(|_| format!("PEM input too large ({} bytes)", pem.len()))?;
         let key = unsafe {
-            let bio = ossl::BIO_new_mem_buf(
-                pem.as_ptr() as *const std::ffi::c_void,
-                pem_len,
-            );
+            let bio = ossl::BIO_new_mem_buf(pem.as_ptr() as *const std::ffi::c_void, pem_len);
             if bio.is_null() {
-                return Err(format!(
-                    "BIO_new_mem_buf failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("BIO_new_mem_buf failed: {}", ossl_err_string()));
             }
-            let key = ossl::PEM_read_bio_PrivateKey(
-                bio,
-                ptr::null_mut(),
-                None,
-                ptr::null_mut(),
-            );
+            let key = ossl::PEM_read_bio_PrivateKey(bio, ptr::null_mut(), None, ptr::null_mut());
             ossl::BIO_free_all(bio);
             if key.is_null() {
                 return Err(format!(
@@ -430,33 +381,20 @@ impl EvpKey {
 
     /// Extract the public key from a PEM-encoded X.509 certificate.
     pub fn from_pem_cert(pem: &[u8]) -> Result<Self, String> {
-        let pem_len: std::ffi::c_int = pem.len().try_into().map_err(|_| {
-            format!("Certificate too large ({} bytes)", pem.len())
-        })?;
+        let pem_len: std::ffi::c_int = pem
+            .len()
+            .try_into()
+            .map_err(|_| format!("Certificate too large ({} bytes)", pem.len()))?;
 
         unsafe {
-            let bio = ossl::BIO_new_mem_buf(
-                pem.as_ptr() as *const std::ffi::c_void,
-                pem_len,
-            );
+            let bio = ossl::BIO_new_mem_buf(pem.as_ptr() as *const std::ffi::c_void, pem_len);
             if bio.is_null() {
-                return Err(format!(
-                    "BIO_new_mem_buf failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("BIO_new_mem_buf failed: {}", ossl_err_string()));
             }
-            let cert = ossl::PEM_read_bio_X509(
-                bio,
-                ptr::null_mut(),
-                None,
-                ptr::null_mut(),
-            );
+            let cert = ossl::PEM_read_bio_X509(bio, ptr::null_mut(), None, ptr::null_mut());
             ossl::BIO_free_all(bio);
             if cert.is_null() {
-                return Err(format!(
-                    "PEM_read_bio_X509 failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("PEM_read_bio_X509 failed: {}", ossl_err_string()));
             }
 
             Self::pubkey_from_x509(cert)
@@ -467,11 +405,7 @@ impl EvpKey {
     pub fn from_der_cert(der: &[u8]) -> Result<Self, String> {
         unsafe {
             let mut ptr = der.as_ptr();
-            let cert = ossl::d2i_X509(
-                ptr::null_mut(),
-                &mut ptr,
-                der.len() as std::ffi::c_long,
-            );
+            let cert = ossl::d2i_X509(ptr::null_mut(), &mut ptr, der.len() as std::ffi::c_long);
             if cert.is_null() {
                 return Err(format!("d2i_X509 failed: {}", ossl_err_string()));
             }
@@ -486,10 +420,7 @@ impl EvpKey {
             let key = ossl::X509_get_pubkey(cert);
             ossl::X509_free(cert);
             if key.is_null() {
-                return Err(format!(
-                    "X509_get_pubkey failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("X509_get_pubkey failed: {}", ossl_err_string()));
             }
 
             let typ = match Self::detect_key_type_raw(key) {
@@ -528,9 +459,7 @@ impl EvpKey {
                     ossl_err_string()
                 ));
             }
-            let pem =
-                std::slice::from_raw_parts(data_ptr as *const u8, len as usize)
-                    .to_vec();
+            let pem = std::slice::from_raw_parts(data_ptr as *const u8, len as usize).to_vec();
             ossl::BIO_free_all(bio);
             Ok(pem)
         }
@@ -569,9 +498,7 @@ impl EvpKey {
                     ossl_err_string()
                 ));
             }
-            let pem =
-                std::slice::from_raw_parts(data_ptr as *const u8, len as usize)
-                    .to_vec();
+            let pem = std::slice::from_raw_parts(data_ptr as *const u8, len as usize).to_vec();
             ossl::BIO_free_all(bio);
             Ok(pem)
         }
@@ -586,10 +513,7 @@ impl EvpKey {
         unsafe {
             let bits = ossl::EVP_PKEY_bits(self.key);
             if bits <= 0 {
-                return Err(format!(
-                    "EVP_PKEY_bits failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("EVP_PKEY_bits failed: {}", ossl_err_string()));
             }
             Ok(((bits + 7) / 8) as usize)
         }
@@ -635,17 +559,10 @@ impl Drop for EvpKey {
 // ---------------------------------------------------------------------------
 
 /// Convert a DER-encoded ECDSA signature to fixed-size (r || s).
-pub fn ecdsa_der_to_fixed(
-    der: &[u8],
-    field_size: usize,
-) -> Result<Vec<u8>, String> {
+pub fn ecdsa_der_to_fixed(der: &[u8], field_size: usize) -> Result<Vec<u8>, String> {
     unsafe {
         let mut p = der.as_ptr();
-        let sig = ossl::d2i_ECDSA_SIG(
-            ptr::null_mut(),
-            &mut p,
-            der.len() as std::ffi::c_long,
-        );
+        let sig = ossl::d2i_ECDSA_SIG(ptr::null_mut(), &mut p, der.len() as std::ffi::c_long);
         if sig.is_null() {
             return Err(format!("d2i_ECDSA_SIG failed: {}", ossl_err_string()));
         }
@@ -655,11 +572,7 @@ pub fn ecdsa_der_to_fixed(
         ossl::ECDSA_SIG_get0(sig, &mut r, &mut s);
 
         let mut fixed = vec![0u8; field_size * 2];
-        let rc_r = ossl::BN_bn2binpad(
-            r,
-            fixed.as_mut_ptr(),
-            field_size as std::ffi::c_int,
-        );
+        let rc_r = ossl::BN_bn2binpad(r, fixed.as_mut_ptr(), field_size as std::ffi::c_int);
         let rc_s = ossl::BN_bn2binpad(
             s,
             fixed[field_size..].as_mut_ptr(),
@@ -667,9 +580,7 @@ pub fn ecdsa_der_to_fixed(
         );
         ossl::ECDSA_SIG_free(sig);
 
-        if rc_r != field_size as std::ffi::c_int
-            || rc_s != field_size as std::ffi::c_int
-        {
+        if rc_r != field_size as std::ffi::c_int || rc_s != field_size as std::ffi::c_int {
             return Err(format!("BN_bn2binpad failed: {}", ossl_err_string()));
         }
 
@@ -678,10 +589,7 @@ pub fn ecdsa_der_to_fixed(
 }
 
 /// Convert a fixed-size (r || s) ECDSA signature to DER.
-pub fn ecdsa_fixed_to_der(
-    fixed: &[u8],
-    field_size: usize,
-) -> Result<Vec<u8>, String> {
+pub fn ecdsa_fixed_to_der(fixed: &[u8], field_size: usize) -> Result<Vec<u8>, String> {
     if fixed.len() != field_size * 2 {
         return Err(format!(
             "Expected {} byte ECDSA signature, got {}",
@@ -721,10 +629,7 @@ pub fn ecdsa_fixed_to_der(
             ossl::ECDSA_SIG_free(sig);
             ossl::BN_free(r);
             ossl::BN_free(s);
-            return Err(format!(
-                "ECDSA_SIG_set0 failed: {}",
-                ossl_err_string()
-            ));
+            return Err(format!("ECDSA_SIG_set0 failed: {}", ossl_err_string()));
         }
         // ECDSA_SIG_set0 takes ownership of r and s on success.
 
@@ -774,13 +679,7 @@ impl ContextInit for SignOp {
         pctx_out: *mut *mut ossl::EVP_PKEY_CTX,
     ) -> Result<(), i32> {
         unsafe {
-            let rc = ossl::EVP_DigestSignInit(
-                ctx,
-                pctx_out,
-                md,
-                ptr::null_mut(),
-                key,
-            );
+            let rc = ossl::EVP_DigestSignInit(ctx, pctx_out, md, ptr::null_mut(), key);
             match rc {
                 1 => Ok(()),
                 err => Err(err),
@@ -800,13 +699,7 @@ impl ContextInit for VerifyOp {
         pctx_out: *mut *mut ossl::EVP_PKEY_CTX,
     ) -> Result<(), i32> {
         unsafe {
-            let rc = ossl::EVP_DigestVerifyInit(
-                ctx,
-                pctx_out,
-                md,
-                ptr::null_mut(),
-                key,
-            );
+            let rc = ossl::EVP_DigestVerifyInit(ctx, pctx_out, md, ptr::null_mut(), key);
             match rc {
                 1 => Ok(()),
                 err => Err(err),
@@ -825,17 +718,11 @@ impl<T: ContextInit> EvpMdContext<T> {
 
     /// Create a context with an explicit digest, allowing the caller
     /// to override the digest that `key.digest()` would return.
-    pub fn new_with_md(
-        key: &EvpKey,
-        md: *const ossl::EVP_MD,
-    ) -> Result<Self, String> {
+    pub fn new_with_md(key: &EvpKey, md: *const ossl::EVP_MD) -> Result<Self, String> {
         unsafe {
             let ctx = ossl::EVP_MD_CTX_new();
             if ctx.is_null() {
-                return Err(format!(
-                    "EVP_MD_CTX_new failed: {}",
-                    ossl_err_string()
-                ));
+                return Err(format!("EVP_MD_CTX_new failed: {}", ossl_err_string()));
             }
             let mut pctx: *mut ossl::EVP_PKEY_CTX = ptr::null_mut();
             if let Err(err) = T::init(ctx, md, key.key, &mut pctx) {
@@ -850,22 +737,14 @@ impl<T: ContextInit> EvpMdContext<T> {
             // For RSA keys, configure PSS padding.
             if matches!(key.typ, KeyType::RSA(_)) && !pctx.is_null() {
                 const RSA_PSS_SALTLEN_DIGEST: std::ffi::c_int = -1;
-                if ossl::EVP_PKEY_CTX_set_rsa_padding(
-                    pctx,
-                    ossl::RSA_PKCS1_PSS_PADDING,
-                ) != 1
-                {
+                if ossl::EVP_PKEY_CTX_set_rsa_padding(pctx, ossl::RSA_PKCS1_PSS_PADDING) != 1 {
                     ossl::EVP_MD_CTX_free(ctx);
                     return Err(format!(
                         "EVP_PKEY_CTX_set_rsa_padding failed: {}",
                         ossl_err_string()
                     ));
                 }
-                if ossl::EVP_PKEY_CTX_set_rsa_pss_saltlen(
-                    pctx,
-                    RSA_PSS_SALTLEN_DIGEST,
-                ) != 1
-                {
+                if ossl::EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST) != 1 {
                     ossl::EVP_MD_CTX_free(ctx);
                     return Err(format!(
                         "EVP_PKEY_CTX_set_rsa_pss_saltlen failed: {}",
@@ -882,9 +761,7 @@ impl<T: ContextInit> EvpMdContext<T> {
 }
 
 /// Return the OpenSSL digest for the given COSE RSA-PSS algorithm ID.
-pub fn rsa_pss_md_for_cose_alg(
-    alg: i64,
-) -> Result<*const ossl::EVP_MD, String> {
+pub fn rsa_pss_md_for_cose_alg(alg: i64) -> Result<*const ossl::EVP_MD, String> {
     unsafe {
         match alg {
             -37 => Ok(ossl::EVP_sha256()),
@@ -992,8 +869,7 @@ mod tests {
 
     #[test]
     fn from_der_rejects_garbage() {
-        let err =
-            EvpKey::from_der_public(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
+        let err = EvpKey::from_der_public(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
         assert!(
             err.starts_with("d2i_PUBKEY failed: error:"),
             "unexpected error: {err}"
@@ -1002,8 +878,7 @@ mod tests {
 
     #[test]
     fn from_der_private_rejects_garbage() {
-        let err =
-            EvpKey::from_der_private(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
+        let err = EvpKey::from_der_private(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
         assert!(
             err.starts_with("d2i_AutoPrivateKey failed: error:"),
             "unexpected error: {err}"
@@ -1086,8 +961,7 @@ mod tests {
 
     #[test]
     fn from_der_public_error_has_ossl_detail() {
-        let err =
-            EvpKey::from_der_public(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
+        let err = EvpKey::from_der_public(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
         assert!(
             err.starts_with("d2i_PUBKEY failed: error:"),
             "unexpected error: {err}"
@@ -1096,8 +970,7 @@ mod tests {
 
     #[test]
     fn from_der_private_error_has_ossl_detail() {
-        let err =
-            EvpKey::from_der_private(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
+        let err = EvpKey::from_der_private(&[0xde, 0xad, 0xbe, 0xef]).unwrap_err();
         assert!(
             err.starts_with("d2i_AutoPrivateKey failed: error:"),
             "unexpected error: {err}"
@@ -1246,10 +1119,7 @@ mod tests {
 
             ossl::ASN1_INTEGER_set(ossl::X509_get_serialNumber(cert), 1);
             ossl::X509_gmtime_adj(ossl::X509_getm_notBefore(cert), 0);
-            ossl::X509_gmtime_adj(
-                ossl::X509_getm_notAfter(cert),
-                365 * 24 * 3600,
-            );
+            ossl::X509_gmtime_adj(ossl::X509_getm_notAfter(cert), 365 * 24 * 3600);
             ossl::X509_set_pubkey(cert, key.key);
             ossl::X509_set_issuer_name(cert, ossl::X509_get_subject_name(cert));
             let rc = ossl::X509_sign(cert, key.key, key.digest());
@@ -1259,8 +1129,7 @@ mod tests {
             let mut der_ptr: *mut u8 = ptr::null_mut();
             let der_len = ossl::i2d_X509(cert, &mut der_ptr);
             assert!(der_len > 0);
-            let der =
-                std::slice::from_raw_parts(der_ptr, der_len as usize).to_vec();
+            let der = std::slice::from_raw_parts(der_ptr, der_len as usize).to_vec();
             ossl::CRYPTO_free(
                 der_ptr as *mut std::ffi::c_void,
                 concat!(file!(), "\0").as_ptr() as *const i8,
@@ -1274,11 +1143,7 @@ mod tests {
             let mut data_ptr: *mut std::ffi::c_char = ptr::null_mut();
             let pem_len = ossl::BIO_get_mem_data(bio, &mut data_ptr);
             assert!(pem_len > 0);
-            let pem = std::slice::from_raw_parts(
-                data_ptr as *const u8,
-                pem_len as usize,
-            )
-            .to_vec();
+            let pem = std::slice::from_raw_parts(data_ptr as *const u8, pem_len as usize).to_vec();
             ossl::BIO_free_all(bio);
 
             ossl::X509_free(cert);

@@ -118,6 +118,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
+name = "cborrs"
+version = "0.1.0"
+source = "git+https://github.com/project-everest/everparse.git?rev=f4cd5ffa183edd5cc824d66588012bcf8d0bdccd#f4cd5ffa183edd5cc824d66588012bcf8d0bdccd"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
+name = "cborrs-nondet"
+version = "0.1.0"
+source = "git+https://github.com/project-everest/everparse.git?rev=f4cd5ffa183edd5cc824d66588012bcf8d0bdccd#f4cd5ffa183edd5cc824d66588012bcf8d0bdccd"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1009,6 +1025,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1023,6 +1045,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tee-attestation-verification-cose"
+version = "1.0.2"
+dependencies = [
+ "cborrs",
+ "cborrs-nondet",
+ "openssl-sys",
 ]
 
 [[package]]

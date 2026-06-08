@@ -1,7 +1,7 @@
-use crate::cbor::{CborSlice, CborValue, serialize_array};
+use crate::cbor::{serialize_array, CborSlice, CborValue};
 use crate::ossl_wrappers::{
-    EvpKey, KeyType, WhichEC, WhichRSA, ecdsa_der_to_fixed, ecdsa_fixed_to_der,
-    rsa_pss_md_for_cose_alg,
+    ecdsa_der_to_fixed, ecdsa_fixed_to_der, rsa_pss_md_for_cose_alg, EvpKey, KeyType, WhichEC,
+    WhichRSA,
 };
 
 #[cfg(feature = "pqc")]
@@ -32,10 +32,7 @@ fn cose_alg(key: &EvpKey) -> Result<i64, String> {
 }
 
 /// Insert alg(1) into a CborValue map, return error if already exists.
-fn insert_alg_value(
-    key: &EvpKey,
-    phdr: CborValue,
-) -> Result<CborValue, String> {
+fn insert_alg_value(key: &EvpKey, phdr: CborValue) -> Result<CborValue, String> {
     let mut entries = match phdr {
         CborValue::Map(entries) => entries,
         _ => {
@@ -127,9 +124,7 @@ pub fn cose_verify1(
         _ => {
             let expected_alg = cose_alg(key)?;
             if alg != expected_alg {
-                return Err(
-                    "Algorithm mismatch between supplied alg and key".into()
-                );
+                return Err("Algorithm mismatch between supplied alg and key".into());
             }
         }
     }
@@ -287,8 +282,7 @@ mod tests {
         let uhdr = CborValue::Map(vec![]);
         let payload = b"test with DER-imported key";
 
-        let envelope =
-            cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
+        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
 
         let parsed = CborValue::from_bytes(&envelope).unwrap();
         let inner = match parsed {
@@ -309,10 +303,7 @@ mod tests {
         };
 
         let alg = cose_alg(&verification_key).unwrap();
-        assert!(
-            cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw)
-                .unwrap()
-        );
+        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
     }
 
     #[test]
@@ -345,8 +336,7 @@ mod tests {
         let uhdr = CborValue::Map(vec![]);
         let payload = b"RSA with DER-imported key";
 
-        let envelope =
-            cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
+        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
 
         let parsed = CborValue::from_bytes(&envelope).unwrap();
         let inner = match parsed {
@@ -367,10 +357,7 @@ mod tests {
         };
 
         let alg = cose_alg(&verification_key).unwrap();
-        assert!(
-            cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw)
-                .unwrap()
-        );
+        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
     }
 
     #[test]
@@ -419,10 +406,7 @@ mod tests {
         let phdr_bytes = hex_decode(TEST_PHDR);
         let mut phdr = CborValue::from_bytes(&phdr_bytes).unwrap();
         if let CborValue::Map(ref mut entries) = phdr {
-            entries.insert(
-                0,
-                (CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-38)),
-            );
+            entries.insert(0, (CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-38)));
         }
         let phdr_ser = phdr.to_bytes().unwrap();
 
@@ -492,13 +476,9 @@ mod tests {
     #[test]
     fn cose_sign1_rejects_duplicate_alg() {
         let key = EvpKey::new(KeyType::EC(WhichEC::P256)).unwrap();
-        let phdr = CborValue::Map(vec![(
-            CborValue::Int(COSE_HEADER_ALG),
-            CborValue::Int(-7),
-        )]);
+        let phdr = CborValue::Map(vec![(CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-7))]);
         assert_eq!(
-            cose_sign1(&key, phdr, CborValue::Map(vec![]), b"msg", false)
-                .unwrap_err(),
+            cose_sign1(&key, phdr, CborValue::Map(vec![]), b"msg", false).unwrap_err(),
             "Algorithm already set in protected header"
         );
     }
@@ -552,8 +532,7 @@ mod tests {
             key: std::ptr::null_mut(),
             typ: KeyType::RSA(WhichRSA::PS256),
         };
-        let err =
-            cose_verify1(&null_key, -37, b"", b"", &[0u8; 256]).unwrap_err();
+        let err = cose_verify1(&null_key, -37, b"", b"", &[0u8; 256]).unwrap_err();
         assert!(
             err.starts_with("EVP_DigestVerifyInit returned 0: error:"),
             "unexpected error: {err}"
@@ -575,8 +554,7 @@ mod tests {
         let uhdr = CborValue::Map(vec![]);
         let payload = b"signed with PEM-imported key";
 
-        let envelope =
-            cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
+        let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
 
         let parsed = CborValue::from_bytes(&envelope).unwrap();
         let inner = match parsed {
@@ -597,10 +575,7 @@ mod tests {
         };
 
         let alg = cose_alg(&verification_key).unwrap();
-        assert!(
-            cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw)
-                .unwrap()
-        );
+        assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
     }
 
     #[cfg(feature = "pqc")]
@@ -621,8 +596,7 @@ mod tests {
 
         #[test]
         fn cose_mldsa_with_der_imported_key() {
-            let original_key =
-                EvpKey::new(KeyType::MLDSA(WhichMLDSA::P65)).unwrap();
+            let original_key = EvpKey::new(KeyType::MLDSA(WhichMLDSA::P65)).unwrap();
 
             let priv_der = original_key.to_der_private().unwrap();
             let signing_key = EvpKey::from_der_private(&priv_der).unwrap();
@@ -635,8 +609,7 @@ mod tests {
             let uhdr = CborValue::Map(vec![]);
             let payload = b"ML-DSA with DER-imported key";
 
-            let envelope =
-                cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
+            let envelope = cose_sign1(&signing_key, phdr, uhdr, payload, false).unwrap();
 
             let parsed = CborValue::from_bytes(&envelope).unwrap();
             let inner = match parsed {
@@ -657,16 +630,7 @@ mod tests {
             };
 
             let alg = cose_alg(&verification_key).unwrap();
-            assert!(
-                cose_verify1(
-                    &verification_key,
-                    alg,
-                    &phdr_raw,
-                    payload,
-                    &sig_raw
-                )
-                .unwrap()
-            );
+            assert!(cose_verify1(&verification_key, alg, &phdr_raw, payload, &sig_raw).unwrap());
         }
     }
 }
