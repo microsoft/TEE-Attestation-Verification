@@ -10,21 +10,38 @@
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-pub mod verifier {
-    use super::Result;
+mod signature;
 
-    /// Verifies that data was signed by the implementor's private key.
-    pub trait Sync<T> {
-        fn verify(&self, data: &T) -> Result<()>;
-    }
+pub use signature::{
+    DigestAlgorithm, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+};
 
-    /// Asynchronously verifies that data was signed by the implementor's private key.
-    pub trait Async<T> {
-        fn verify(&self, data: &T) -> impl std::future::Future<Output = Result<()>>;
+pub trait SignatureBackend: Sized {
+    fn from_bytes(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self>;
+    fn from_ec_components(r: &[u8], s: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Self>;
+}
+
+pub trait KeyBackend: Sized {
+    fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self>;
+}
+
+pub trait AsyncKeyBackend: Sized {
+    fn from_spki_der(
+        spki_der: &[u8],
+        algorithm: SignatureKeyAlgorithm,
+    ) -> impl std::future::Future<Output = Result<Self>>;
+}
+
+impl<K> AsyncKeyBackend for K
+where
+    K: KeyBackend,
+{
+    async fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        <K as KeyBackend>::from_spki_der(spki_der, algorithm)
     }
 }
 
-/// Backend-internal trait for certificate parsing, encoding, and inspection.
+/// API for the certificate types of the backend
 pub trait CertificateBackend {
     type Certificate: Clone;
 
@@ -50,80 +67,69 @@ pub trait CertificateBackend {
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
 }
 
-/// Backend-internal trait for certificate verification operations.
-pub trait CryptoBackend: CertificateBackend
-where
-    <Self as CertificateBackend>::Certificate:
-        verifier::Sync<<Self as CertificateBackend>::Certificate>,
-{
-    /// Verify a certificate chain from `trusted_certs` through `untrusted_chain` to `leaf`.
+/// Synchronous API for a cryptographic backend
+pub trait CryptoBackend: CertificateBackend {
+    type Key: KeyBackend;
+    type Signature: SignatureBackend;
+
+    /// Verify a signature over `signed_bytes` with `key`.
+    fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> Result<()>;
+
+    /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
     fn verify_chain(
-        trusted_certs: &[&<Self as CertificateBackend>::Certificate],
+        trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
     ) -> Result<()>;
 }
 
-/// Backend-internal trait for asynchronous certificate verification operations.
-pub trait AsyncCryptoBackend {
-    type Certificate: Clone + verifier::Async<Self::Certificate>;
+/// Asynchronous API for a cryptographic backend
+pub trait AsyncCryptoBackend: CertificateBackend {
+    type Key: AsyncKeyBackend;
+    type Signature: SignatureBackend;
 
-    /// Verify a certificate chain from `trusted_certs` through `untrusted_chain` to `leaf`.
+    /// Verify a signature over `signed_bytes` with `key`.
+    fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> impl std::future::Future<Output = Result<()>>;
+
+    /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
     fn verify_chain(
-        trusted_certs: &[&Self::Certificate],
-        untrusted_chain: &[&Self::Certificate],
-        leaf: &Self::Certificate,
+        trusted_cert: &<Self as CertificateBackend>::Certificate,
+        untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
+        leaf: &<Self as CertificateBackend>::Certificate,
     ) -> impl std::future::Future<Output = Result<()>>;
 }
 
+/// Any synchronous `CryptoBackend` also implements `AsyncCryptoBackend` by blocking on the synchronous verification.
 impl<C> AsyncCryptoBackend for C
 where
     C: CryptoBackend,
-    <C as CertificateBackend>::Certificate: verifier::Sync<<C as CertificateBackend>::Certificate>
-        + verifier::Async<<C as CertificateBackend>::Certificate>,
+    <C as CryptoBackend>::Key: AsyncKeyBackend,
 {
-    type Certificate = <C as CertificateBackend>::Certificate;
+    type Key = <C as CryptoBackend>::Key;
+    type Signature = <C as CryptoBackend>::Signature;
+
+    async fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
+        signed_bytes: &[u8],
+    ) -> Result<()> {
+        <C as CryptoBackend>::verify_signature(key, signature, signed_bytes)
+    }
 
     async fn verify_chain(
-        trusted_certs: &[&Self::Certificate],
-        untrusted_chain: &[&Self::Certificate],
-        leaf: &Self::Certificate,
+        trusted_cert: &<Self as CertificateBackend>::Certificate,
+        untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
+        leaf: &<Self as CertificateBackend>::Certificate,
     ) -> Result<()> {
-        <C as CryptoBackend>::verify_chain(trusted_certs, untrusted_chain, leaf)
-    }
-}
-
-/// Backend operation for verifying SEV-SNP report ECDSA P-384/SHA-384 signatures.
-pub trait ReportSignatureVerifier: CertificateBackend {
-    fn verify_ecdsa_p384_sha384_signature(
-        cert: &Self::Certificate,
-        signed_bytes: &[u8],
-        r: [u8; 72],
-        s: [u8; 72],
-    ) -> Result<()>;
-}
-
-/// Asynchronous backend operation for verifying SEV-SNP report ECDSA P-384/SHA-384 signatures.
-pub trait AsyncReportSignatureVerifier: CertificateBackend {
-    fn verify_ecdsa_p384_sha384_signature(
-        cert: &Self::Certificate,
-        signed_bytes: &[u8],
-        r: [u8; 72],
-        s: [u8; 72],
-    ) -> impl std::future::Future<Output = Result<()>>;
-}
-
-impl<C> AsyncReportSignatureVerifier for C
-where
-    C: ReportSignatureVerifier,
-{
-    async fn verify_ecdsa_p384_sha384_signature(
-        cert: &Self::Certificate,
-        signed_bytes: &[u8],
-        r: [u8; 72],
-        s: [u8; 72],
-    ) -> Result<()> {
-        <C as ReportSignatureVerifier>::verify_ecdsa_p384_sha384_signature(cert, signed_bytes, r, s)
+        <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf)
     }
 }
 
@@ -147,163 +153,11 @@ pub type Crypto = crypto_pure_rust::Crypto;
 pub type Crypto = crypto_webcrypto::Crypto;
 
 /// The certificate type for the active crypto backend.
+pub type Key = <Crypto as AsyncCryptoBackend>::Key;
+/// The signature type for the active crypto backend.
+pub type Signature = <Crypto as AsyncCryptoBackend>::Signature;
+/// The certificate type for the active crypto backend.
 pub type Certificate = <Crypto as CertificateBackend>::Certificate;
 
 #[cfg(test)]
-mod test {
-    use super::Crypto;
-    use super::*;
-
-    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
-    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
-    const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
-    fn cert(pem: &[u8]) -> Certificate {
-        Crypto::from_pem(pem).unwrap()
-    }
-
-    #[test]
-    fn certificate_parse_and_encode_wrappers_round_trip() {
-        let pem_chain = [MILAN_ASK, b"\n", MILAN_ARK].concat();
-        let chain = Crypto::from_pem_chain(&pem_chain).expect("PEM chain should parse");
-        assert_eq!(chain.len(), 2);
-
-        let cert = cert(MILAN_VCEK);
-        let der = Crypto::to_der(&cert).expect("DER encoding should succeed");
-        let from_der = Crypto::from_der(&der).expect("DER parsing should succeed");
-        assert_eq!(
-            Crypto::to_der(&from_der).expect("Reparsed DER should encode"),
-            der
-        );
-
-        let pem = Crypto::to_pem(&cert).expect("PEM encoding should succeed");
-        let from_pem = Crypto::from_pem(pem.as_bytes()).expect("PEM parsing should succeed");
-        assert_eq!(
-            Crypto::to_der(&from_pem).expect("Reparsed PEM should encode as DER"),
-            der
-        );
-    }
-
-    #[test]
-    fn certificate_parse_wrappers_reject_invalid_input() {
-        let malformed_pem = b"-----BEGIN CERTIFICATE-----\nnot-base64\n-----END CERTIFICATE-----\n";
-
-        Crypto::from_pem(b"not a pem").expect_err("Invalid PEM should fail");
-        Crypto::from_pem_chain(malformed_pem).expect_err("Invalid PEM chain should fail");
-        Crypto::from_der(b"not der").expect_err("Invalid DER should fail");
-    }
-
-    #[test]
-    fn extension_lookup_rejects_malformed_oid() {
-        let cert = cert(MILAN_VCEK);
-
-        Crypto::get_extension_value_by_oid(&cert, "not-an-oid")
-            .expect_err("Malformed OID should fail");
-    }
-
-    #[cfg(sync_crypto)]
-    mod sync_tests {
-        use super::super::verifier::Sync as Verifier;
-        use super::*;
-
-        #[test]
-        fn full_chain_verifies() {
-            <Crypto as CryptoBackend>::verify_chain(
-                &[&cert(MILAN_ARK)],
-                &[&cert(MILAN_ASK)],
-                &cert(MILAN_VCEK),
-            )
-            .unwrap();
-        }
-
-        #[test]
-        fn empty_trust_store_fails() {
-            <Crypto as CryptoBackend>::verify_chain(&[], &[], &cert(MILAN_VCEK))
-                .expect_err("Should fail with no trusted certs");
-        }
-
-        #[test]
-        fn untrusted_intermediates_are_required() {
-            <Crypto as CryptoBackend>::verify_chain(&[&cert(MILAN_ARK)], &[], &cert(MILAN_VCEK))
-                .expect_err("VCEK should not verify without ASK intermediate");
-        }
-
-        #[test]
-        fn self_signed_certificates() {
-            <Crypto as CryptoBackend>::verify_chain(&[&cert(MILAN_ARK)], &[], &cert(MILAN_ARK))
-                .unwrap();
-        }
-
-        #[test]
-        fn verifier_trait_impl() {
-            let ark = cert(MILAN_ARK);
-            let ask = cert(MILAN_ASK);
-
-            ark.verify(&ark).unwrap();
-            ark.verify(&ask).unwrap();
-        }
-    }
-
-    #[cfg(async_crypto)]
-    mod async_tests {
-        use super::super::verifier::Async as Verifier;
-        use super::super::AsyncCryptoBackend;
-        use super::*;
-
-        #[cfg(target_arch = "wasm32")]
-        use wasm_bindgen_test::wasm_bindgen_test;
-
-        #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-        async fn full_chain_verifies() {
-            <Crypto as AsyncCryptoBackend>::verify_chain(
-                &[&cert(MILAN_ARK)],
-                &[&cert(MILAN_ASK)],
-                &cert(MILAN_VCEK),
-            )
-            .await
-            .unwrap();
-        }
-
-        #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-        async fn empty_trust_store_fails() {
-            <Crypto as AsyncCryptoBackend>::verify_chain(&[], &[], &cert(MILAN_VCEK))
-                .await
-                .expect_err("Should fail with no trusted certs");
-        }
-
-        #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-        async fn untrusted_intermediates_are_required() {
-            <Crypto as AsyncCryptoBackend>::verify_chain(
-                &[&cert(MILAN_ARK)],
-                &[],
-                &cert(MILAN_VCEK),
-            )
-            .await
-            .expect_err("VCEK should not verify without ASK intermediate");
-        }
-
-        #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-        async fn self_signed_certificates() {
-            <Crypto as AsyncCryptoBackend>::verify_chain(
-                &[&cert(MILAN_ARK)],
-                &[],
-                &cert(MILAN_ARK),
-            )
-            .await
-            .unwrap();
-        }
-
-        #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-        async fn verifier_trait_impl() {
-            let ark = cert(MILAN_ARK);
-            let ask = cert(MILAN_ASK);
-
-            ark.verify(&ark).await.unwrap();
-            ark.verify(&ask).await.unwrap();
-        }
-    }
-}
+mod tests;

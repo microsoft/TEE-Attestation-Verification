@@ -7,15 +7,18 @@
 //! asynchronous certificate-chain and SEV-SNP attestation report signature
 //! verification. Certificate parsing, encoding, and extension inspection use
 //! the shared pure-Rust X.509 parser. The runtime must provide WebCrypto with
-//! RSA-PSS/SHA-384 and ECDSA P-384/SHA-384 verification support.
+//! RSA-PSS/SHA-384 and ECDSA P-256/P-384/P-521 verification support.
 
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use super::verifier::Async as AsyncVerifier;
-use super::x509_certificate::{Certificate as X509Certificate, SignatureAlgorithm};
-use super::{AsyncCryptoBackend, AsyncReportSignatureVerifier, CertificateBackend, Result};
+use super::x509_certificate::{self, Certificate as X509Certificate};
+use super::{
+    AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend, DigestAlgorithm,
+    EcSignatureKeyAlgorithm, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend,
+    SignatureKeyAlgorithm,
+};
 
 pub struct Crypto;
 
@@ -24,32 +27,69 @@ pub struct Certificate {
     inner: X509Certificate,
 }
 
-impl Certificate {
-    fn from_inner(inner: X509Certificate) -> Self {
-        Self { inner }
+pub struct Key {
+    key: CryptoKey,
+    algorithm: SignatureKeyAlgorithm,
+}
+
+pub enum Signature {
+    Ecdsa {
+        algorithm: EcSignatureKeyAlgorithm,
+        fixed: Vec<u8>,
+    },
+    RsaPss {
+        algorithm: RsaPssSignatureKeyAlgorithm,
+        raw: Vec<u8>,
+    },
+}
+
+impl SignatureBackend for Signature {
+    fn from_bytes(signature: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
+        match algorithm {
+            SignatureKeyAlgorithm::Ec(algorithm) => Ok(Signature::Ecdsa {
+                algorithm,
+                fixed: ecdsa_der_to_fixed(signature, algorithm)?,
+            }),
+            SignatureKeyAlgorithm::RsaPss(algorithm) => Ok(Signature::RsaPss {
+                algorithm,
+                raw: signature.to_vec(),
+            }),
+        }
+    }
+
+    fn from_ec_components(r: &[u8], s: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Self> {
+        let expected_len = algorithm.scalar_byte_len();
+        if r.len() != expected_len || s.len() != expected_len {
+            return Err(format!(
+                "Invalid ECDSA {} component length: expected {}, got r={} s={}",
+                algorithm.name(),
+                expected_len,
+                r.len(),
+                s.len()
+            )
+            .into());
+        }
+
+        let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
+        fixed.extend_from_slice(r);
+        fixed.extend_from_slice(s);
+        Ok(Signature::Ecdsa { algorithm, fixed })
     }
 }
 
-impl AsyncVerifier<Certificate> for Certificate {
-    async fn verify(&self, subject: &Certificate) -> Result<()> {
+impl AsyncKeyBackend for Key {
+    async fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         let subtle = subtle_crypto()?;
-        let key = import_certificate_signing_key(
-            &subtle,
-            &self.inner,
-            subject.inner.signature_algorithm()?,
-        )
-        .await?;
-        let signature = subject.inner.signature_bytes().to_vec();
-        let data = subject.inner.tbs_certificate_der()?;
+        let params = import_params(algorithm)?;
+        let key = import_spki_key(&subtle, spki_der, &params).await?;
 
-        verify_signature(
-            &subtle,
-            &key,
-            WebCryptoVerifyAlgorithm::RsaPssSha384,
-            &signature,
-            &data,
-        )
-        .await
+        Ok(Key { key, algorithm })
+    }
+}
+
+impl Certificate {
+    fn from_inner(inner: X509Certificate) -> Self {
+        Self { inner }
     }
 }
 
@@ -89,89 +129,60 @@ impl CertificateBackend for Crypto {
     }
 }
 
-impl AsyncReportSignatureVerifier for Crypto {
-    async fn verify_ecdsa_p384_sha384_signature(
-        cert: &Self::Certificate,
+impl Key {
+    pub fn algorithm(&self) -> SignatureKeyAlgorithm {
+        self.algorithm
+    }
+}
+
+impl AsyncCryptoBackend for Crypto {
+    type Key = Key;
+    type Signature = Signature;
+
+    async fn verify_signature(
+        key: &Self::Key,
+        signature: &Self::Signature,
         signed_bytes: &[u8],
-        r: [u8; 72],
-        s: [u8; 72],
     ) -> Result<()> {
         let subtle = subtle_crypto()?;
-        let key = import_attestation_key(&subtle, &cert.inner).await?;
-        let signature = attestation_signature_p1363(r, s)?;
+        let params = verify_params(key.algorithm)?;
+        let signature = webcrypto_signature_bytes(key.algorithm, signature)?;
 
-        verify_signature(
-            &subtle,
-            &key,
-            WebCryptoVerifyAlgorithm::EcdsaP384Sha384,
-            &signature,
-            signed_bytes,
+        verify_with_subtle(&subtle, &key.key, &params, &signature, signed_bytes).await
+    }
+
+    async fn verify_chain(
+        trusted_cert: &Self::Certificate,
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+    ) -> Result<()> {
+        let untrusted_x509 = untrusted_chain
+            .iter()
+            .map(|cert| &cert.inner)
+            .collect::<Vec<_>>();
+
+        x509_certificate::verify_certificate_path_async(
+            |issuer, subject| Box::pin(verify_x509_certificate_signature(issuer, subject)),
+            &trusted_cert.inner,
+            &untrusted_x509,
+            &leaf.inner,
         )
         .await
     }
 }
 
-impl AsyncCryptoBackend for Crypto {
-    type Certificate = Certificate;
+async fn verify_x509_certificate_signature(
+    issuer: &X509Certificate,
+    subject: &X509Certificate,
+) -> Result<()> {
+    let spki_der = issuer.public_key_spki_der()?;
+    let algorithm = subject.signature_algorithm()?;
+    let key = <Key as AsyncKeyBackend>::from_spki_der(&spki_der, algorithm).await?;
+    let data = subject.tbs_certificate_der()?;
+    let signature =
+        <Signature as SignatureBackend>::from_bytes(subject.signature_bytes(), algorithm)?;
 
-    async fn verify_chain(
-        trusted_certs: &[&Self::Certificate],
-        untrusted_chain: &[&Self::Certificate],
-        leaf: &Self::Certificate,
-    ) -> Result<()> {
-        let untrusted_chain = untrusted_chain.iter().chain(std::iter::once(&leaf));
-        let mut prev: Option<&Certificate> = None;
-
-        for &cert in untrusted_chain {
-            if let Some(issuer) = prev {
-                issuer.verify(cert).await?;
-            } else {
-                let mut verified = false;
-                for &trusted in trusted_certs {
-                    if trusted.verify(cert).await.is_ok() {
-                        verified = true;
-                        break;
-                    }
-                }
-
-                if !verified {
-                    return Err("Failed to verify certificate: no matching trusted issuer".into());
-                }
-            }
-
-            prev = Some(cert);
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy)]
-enum WebCryptoVerifyAlgorithm {
-    RsaPssSha384,
-    EcdsaP384Sha384,
-}
-
-async fn import_certificate_signing_key(
-    subtle: &SubtleCrypto,
-    cert: &X509Certificate,
-    signature_algorithm: SignatureAlgorithm,
-) -> Result<CryptoKey> {
-    let spki_der = cert.public_key_spki_der()?;
-    let params = match signature_algorithm {
-        SignatureAlgorithm::RsaPss => rsa_pss_import_params()?,
-    };
-
-    import_spki_key(subtle, &spki_der, &params).await
-}
-
-async fn import_attestation_key(
-    subtle: &SubtleCrypto,
-    cert: &X509Certificate,
-) -> Result<CryptoKey> {
-    let spki_der = cert.public_key_spki_der()?;
-    let params = ecdsa_import_params()?;
-    import_spki_key(subtle, &spki_der, &params).await
+    <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, &data).await
 }
 
 async fn import_spki_key(
@@ -193,20 +204,15 @@ async fn import_spki_key(
         .map_err(|_| "WebCrypto importKey did not return a CryptoKey".into())
 }
 
-async fn verify_signature(
+async fn verify_with_subtle(
     subtle: &SubtleCrypto,
     key: &CryptoKey,
-    algorithm: WebCryptoVerifyAlgorithm,
+    params: &Object,
     signature: &[u8],
     data: &[u8],
 ) -> Result<()> {
-    let params = match algorithm {
-        WebCryptoVerifyAlgorithm::RsaPssSha384 => rsa_pss_verify_params()?,
-        WebCryptoVerifyAlgorithm::EcdsaP384Sha384 => ecdsa_verify_params()?,
-    };
-
     let promise = subtle
-        .verify_with_object_and_u8_array_and_u8_array(&params, key, signature, data)
+        .verify_with_object_and_u8_array_and_u8_array(params, key, signature, data)
         .map_err(js_error)?;
     let verified = JsFuture::from(promise).await.map_err(js_error)?;
 
@@ -215,30 +221,6 @@ async fn verify_signature(
     } else {
         Err("WebCrypto signature verification failed".into())
     }
-}
-
-fn attestation_signature_p1363(r: [u8; 72], s: [u8; 72]) -> Result<Vec<u8>> {
-    let mut p1363 = Vec::with_capacity(96);
-
-    if r[48..].iter().any(|byte| *byte != 0) {
-        return Err(
-            "Invalid r scalar padding: upper 24 bytes must be zero for P-384 signatures".into(),
-        );
-    }
-    let mut r_bytes: [u8; 48] = r[..48].try_into().map_err(|_| "Invalid r scalar length")?;
-    r_bytes.reverse();
-
-    if s[48..].iter().any(|byte| *byte != 0) {
-        return Err(
-            "Invalid s scalar padding: upper 24 bytes must be zero for P-384 signatures".into(),
-        );
-    }
-    let mut s_bytes: [u8; 48] = s[..48].try_into().map_err(|_| "Invalid s scalar length")?;
-    s_bytes.reverse();
-
-    p1363.extend_from_slice(&r_bytes);
-    p1363.extend_from_slice(&s_bytes);
-    Ok(p1363)
 }
 
 fn subtle_crypto() -> Result<SubtleCrypto> {
@@ -258,37 +240,196 @@ fn subtle_crypto() -> Result<SubtleCrypto> {
         .map_err(|_| "globalThis.crypto.subtle is not a SubtleCrypto object".into())
 }
 
-fn rsa_pss_import_params() -> Result<Object> {
+fn import_params(algorithm: SignatureKeyAlgorithm) -> Result<Object> {
+    match algorithm {
+        SignatureKeyAlgorithm::Ec(algorithm) => ecdsa_import_params(algorithm),
+        SignatureKeyAlgorithm::RsaPss(algorithm) => rsa_pss_import_params(algorithm.digest()),
+    }
+}
+
+fn verify_params(algorithm: SignatureKeyAlgorithm) -> Result<Object> {
+    match algorithm {
+        SignatureKeyAlgorithm::Ec(algorithm) => ecdsa_verify_params(algorithm.digest()),
+        SignatureKeyAlgorithm::RsaPss(algorithm) => rsa_pss_verify_params(algorithm.salt_len()),
+    }
+}
+
+fn ecdsa_der_to_fixed(signature: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec<u8>> {
+    let mut index = 0;
+    if signature.get(index) != Some(&0x30) {
+        return Err("ECDSA signature must be a DER SEQUENCE".into());
+    }
+    index += 1;
+
+    let sequence_len = read_der_len(signature, &mut index)?;
+    let sequence_end = index
+        .checked_add(sequence_len)
+        .ok_or("ECDSA signature DER length overflow")?;
+    if sequence_end != signature.len() {
+        return Err("ECDSA signature DER SEQUENCE length does not match input".into());
+    }
+
+    let r = read_der_integer_fixed(signature, &mut index, sequence_end, "r", algorithm)?;
+    let s = read_der_integer_fixed(signature, &mut index, sequence_end, "s", algorithm)?;
+    if index != sequence_end {
+        return Err("ECDSA signature DER SEQUENCE has trailing data".into());
+    }
+
+    let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
+    fixed.extend_from_slice(&r);
+    fixed.extend_from_slice(&s);
+    Ok(fixed)
+}
+
+fn read_der_len(input: &[u8], index: &mut usize) -> Result<usize> {
+    let first = *input
+        .get(*index)
+        .ok_or("Unexpected end of DER while reading length")?;
+    *index += 1;
+
+    if first & 0x80 == 0 {
+        return Ok(first as usize);
+    }
+
+    let len_len = (first & 0x7f) as usize;
+    if len_len == 0 {
+        return Err("Indefinite DER lengths are not supported".into());
+    }
+    if len_len > std::mem::size_of::<usize>() {
+        return Err("DER length is too large".into());
+    }
+    if input.len().saturating_sub(*index) < len_len {
+        return Err("Unexpected end of DER while reading long-form length".into());
+    }
+
+    let mut len = 0usize;
+    for byte in &input[*index..*index + len_len] {
+        len = len
+            .checked_mul(256)
+            .and_then(|len| len.checked_add(*byte as usize))
+            .ok_or("DER length overflow")?;
+    }
+    *index += len_len;
+    Ok(len)
+}
+
+fn read_der_integer_fixed(
+    input: &[u8],
+    index: &mut usize,
+    limit: usize,
+    name: &str,
+    algorithm: EcSignatureKeyAlgorithm,
+) -> Result<Vec<u8>> {
+    if *index >= limit || input.get(*index) != Some(&0x02) {
+        return Err(format!("ECDSA signature DER missing INTEGER {name}").into());
+    }
+    *index += 1;
+
+    let len = read_der_len(input, index)?;
+    let end = index
+        .checked_add(len)
+        .ok_or("ECDSA signature DER INTEGER length overflow")?;
+    if len == 0 || end > limit {
+        return Err(format!("Invalid ECDSA signature DER INTEGER {name} length").into());
+    }
+
+    let mut component = &input[*index..end];
+    *index = end;
+
+    if component[0] & 0x80 != 0 {
+        return Err(format!("ECDSA signature DER INTEGER {name} is negative").into());
+    }
+    if component.len() > 1 && component[0] == 0 {
+        component = &component[1..];
+    }
+
+    let expected_len = algorithm.scalar_byte_len();
+    if component.len() > expected_len {
+        return Err(format!(
+            "Invalid ECDSA {} {name} component length: expected <= {}, got {}",
+            algorithm.name(),
+            expected_len,
+            component.len()
+        )
+        .into());
+    }
+
+    let mut fixed = vec![0; expected_len];
+    fixed[expected_len - component.len()..].copy_from_slice(component);
+    Ok(fixed)
+}
+
+fn webcrypto_signature_bytes(
+    algorithm: SignatureKeyAlgorithm,
+    signature: &Signature,
+) -> Result<Vec<u8>> {
+    match (algorithm, signature) {
+        (SignatureKeyAlgorithm::Ec(key_algorithm), Signature::Ecdsa { algorithm, fixed })
+            if key_algorithm == *algorithm =>
+        {
+            Ok(fixed.clone())
+        }
+        (SignatureKeyAlgorithm::RsaPss(key_algorithm), Signature::RsaPss { algorithm, raw })
+            if key_algorithm == *algorithm =>
+        {
+            Ok(raw.clone())
+        }
+        _ => Err(format!(
+            "WebCrypto signature algorithm {:?} does not match key algorithm {algorithm:?}",
+            signature.algorithm()
+        )
+        .into()),
+    }
+}
+
+impl Signature {
+    fn algorithm(&self) -> SignatureKeyAlgorithm {
+        match self {
+            Self::Ecdsa { algorithm, .. } => SignatureKeyAlgorithm::Ec(*algorithm),
+            Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
+        }
+    }
+}
+
+fn rsa_pss_import_params(digest: DigestAlgorithm) -> Result<Object> {
     let params = Object::new();
     set_string(&params, "name", "RSA-PSS")?;
-    set_string(&params, "hash", "SHA-384")?;
+    set_string(&params, "hash", digest_algorithm_name(digest))?;
     Ok(params)
 }
 
-fn rsa_pss_verify_params() -> Result<Object> {
+fn rsa_pss_verify_params(salt_len: usize) -> Result<Object> {
     let params = Object::new();
     set_string(&params, "name", "RSA-PSS")?;
     Reflect::set(
         &params,
         &JsValue::from_str("saltLength"),
-        &JsValue::from_f64(48.0),
+        &JsValue::from_f64(salt_len as f64),
     )
     .map_err(js_error)?;
     Ok(params)
 }
 
-fn ecdsa_import_params() -> Result<Object> {
+fn ecdsa_import_params(algorithm: EcSignatureKeyAlgorithm) -> Result<Object> {
     let params = Object::new();
     set_string(&params, "name", "ECDSA")?;
-    set_string(&params, "namedCurve", "P-384")?;
+    set_string(&params, "namedCurve", algorithm.name())?;
     Ok(params)
 }
 
-fn ecdsa_verify_params() -> Result<Object> {
+fn ecdsa_verify_params(digest: DigestAlgorithm) -> Result<Object> {
     let params = Object::new();
     set_string(&params, "name", "ECDSA")?;
-    set_string(&params, "hash", "SHA-384")?;
+    set_string(&params, "hash", digest_algorithm_name(digest))?;
     Ok(params)
+}
+
+fn digest_algorithm_name(digest: DigestAlgorithm) -> &'static str {
+    match digest {
+        DigestAlgorithm::Sha256 => "SHA-256",
+        DigestAlgorithm::Sha384 => "SHA-384",
+        DigestAlgorithm::Sha512 => "SHA-512",
+    }
 }
 
 fn set_string(target: &Object, key: &str, value: &str) -> Result<()> {

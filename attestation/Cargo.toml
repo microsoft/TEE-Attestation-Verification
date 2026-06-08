@@ -10,14 +10,14 @@ license = "MIT"
 
 [package.metadata.docs.rs]
 features = ["crypto_openssl", "crypto_webcrypto", "kds"]
-targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown", "wasm64-unknown-unknown"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["crypto_openssl", "crypto_webcrypto"]
+default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]
 crypto_pure_rust = ["crypto/crypto_pure_rust"]
 crypto_webcrypto = ["crypto/crypto_webcrypto"]
@@ -33,7 +33,7 @@ required-features = ["kds"]
 wasm-bindgen-test = "0.3"
 env_logger = "0.11"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dependencies]
@@ -44,12 +44,12 @@ zerocopy = {version = "0.8.31", features = ["derive"]}
 log = { version = "0.4" }
 
 # Native deps
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true}
 curl = { version = "0.4", optional = true }
 
 # WASM deps
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
