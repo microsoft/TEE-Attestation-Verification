@@ -55,6 +55,15 @@ impl Certificate {
             .to_der()?)
     }
 
+    pub fn public_key_algorithm(&self) -> String {
+        self.inner
+            .tbs_certificate
+            .subject_public_key_info
+            .algorithm
+            .oid
+            .to_string()
+    }
+
     pub fn get_extension_value_by_oid(&self, oid: &str) -> Result<Option<Vec<u8>>> {
         let oid = ObjectIdentifier::new(oid)?;
 
@@ -88,6 +97,52 @@ impl Certificate {
             .subject_public_key_info
             .subject_public_key
             .raw_bytes()
+    }
+    pub fn subject_name(&self) -> String {
+        self.inner.tbs_certificate.subject.to_string()
+    }
+
+    pub fn issuer_name(&self) -> String {
+        self.inner.tbs_certificate.issuer.to_string()
+    }
+
+    pub fn issuer_name_matches_subject(&self, issuer: &Self) -> Result<bool> {
+        Ok(self.inner.tbs_certificate.issuer == issuer.inner.tbs_certificate.subject)
+    }
+
+    pub fn is_valid_at(&self, unix_time: std::time::Duration) -> Result<bool> {
+        let validity = self.inner.tbs_certificate.validity;
+        Ok(validity.not_before.to_unix_duration() <= unix_time
+            && unix_time <= validity.not_after.to_unix_duration())
+    }
+
+    pub fn version(&self) -> u8 {
+        self.inner.tbs_certificate.version as u8
+    }
+
+    pub fn extension_criticality(&self, oid: &str) -> Result<Option<bool>> {
+        let oid = ObjectIdentifier::new(oid)?;
+
+        Ok(self
+            .inner
+            .tbs_certificate
+            .extensions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .find(|extension| extension.extn_id == oid)
+            .map(|extension| extension.critical))
+    }
+
+    pub fn critical_extension_oids(&self) -> Vec<String> {
+        self.inner
+            .tbs_certificate
+            .extensions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|extension| extension.critical.then(|| extension.extn_id.to_string()))
+            .collect()
     }
 }
 

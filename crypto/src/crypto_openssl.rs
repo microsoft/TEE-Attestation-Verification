@@ -8,15 +8,17 @@
 //! verification. It is the native backend selected when `crypto_openssl` is
 //! enabled for a non-`wasm32` target.
 
-use foreign_types::ForeignType;
-use openssl::asn1::Asn1Object;
+use foreign_types::{ForeignType, ForeignTypeRef};
+use openssl::asn1::{Asn1Object, Asn1ObjectRef, Asn1Time};
 use openssl::ecdsa::EcdsaSig;
 use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
 use openssl_sys::{
-    ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_data, X509_get_ext,
-    X509_get_ext_by_OBJ,
+    ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_critical,
+    X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
+    X509_get_ext_count,
 };
+use std::cmp::Ordering;
 
 use super::verifier::{Async as AsyncVerifier, Sync as Verifier};
 use super::{CertificateBackend, CryptoBackend, ReportSignatureVerifier, Result};
@@ -58,6 +60,10 @@ impl CertificateBackend for Crypto {
         Ok(pub_key.public_key_to_der()?)
     }
 
+    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String> {
+        Ok(format!("{:?}", cert.public_key()?.id()))
+    }
+
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         let oid = Asn1Object::from_str(oid)
             .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
@@ -91,6 +97,88 @@ impl CertificateBackend for Crypto {
             let bytes = std::slice::from_raw_parts(data_ptr, len as usize).to_vec();
             Ok(Some(bytes))
         }
+    }
+
+    fn subject_name(cert: &Self::Certificate) -> String {
+        format!("{:?}", cert.subject_name())
+    }
+
+    fn issuer_name(cert: &Self::Certificate) -> String {
+        format!("{:?}", cert.issuer_name())
+    }
+
+    fn issuer_name_matches_subject(
+        cert: &Self::Certificate,
+        issuer: &Self::Certificate,
+    ) -> Result<bool> {
+        Ok(cert
+            .issuer_name()
+            .try_cmp(issuer.subject_name())
+            .map(|ordering| ordering == Ordering::Equal)?)
+    }
+
+    fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {
+        let unix_time = unix_time
+            .as_secs()
+            .try_into()
+            .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
+        let unix_time = Asn1Time::from_unix(unix_time)?;
+
+        Ok(cert.not_before().compare(&unix_time)? != Ordering::Greater
+            && cert.not_after().compare(&unix_time)? != Ordering::Less)
+    }
+
+    fn version(cert: &Self::Certificate) -> Result<u8> {
+        cert.version()
+            .try_into()
+            .map_err(|_| "OpenSSL returned a negative certificate version".into())
+    }
+
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
+        let oid = Asn1Object::from_str(oid)
+            .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
+
+        unsafe {
+            let index = X509_get_ext_by_OBJ(cert.as_ptr(), oid.as_ptr(), -1);
+            if index == -1 {
+                return Ok(None);
+            }
+
+            let extension = X509_get_ext(cert.as_ptr(), index);
+            if extension.is_null() {
+                return Err("OpenSSL returned null extension pointer".into());
+            }
+
+            Ok(Some(X509_EXTENSION_get_critical(extension) != 0))
+        }
+    }
+
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String> {
+        let count = unsafe { X509_get_ext_count(cert.as_ptr()) };
+        if count <= 0 {
+            return Vec::new();
+        }
+
+        (0..count)
+            .filter_map(|index| {
+                let extension = unsafe { X509_get_ext(cert.as_ptr(), index) };
+                if extension.is_null() {
+                    return None;
+                }
+
+                let critical = unsafe { X509_EXTENSION_get_critical(extension) != 0 };
+                if !critical {
+                    return None;
+                }
+
+                let object = unsafe { X509_EXTENSION_get_object(extension) };
+                if object.is_null() {
+                    return None;
+                }
+
+                Some(unsafe { Asn1ObjectRef::from_ptr(object) }.to_string())
+            })
+            .collect()
     }
 }
 

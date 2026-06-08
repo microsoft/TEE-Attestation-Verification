@@ -8,6 +8,10 @@
 //! - `crypto_pure_rust` - Pure Rust
 //! - `crypto_webcrypto` - WebCrypto-based async verification for WASM
 
+use std::time::Duration;
+
+mod x509_policy;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub mod verifier {
@@ -46,8 +50,40 @@ pub trait CertificateBackend {
     /// Extract the SubjectPublicKeyInfo (DER-encoded) from the certificate.
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>>;
 
+    /// Return a stable identifier for the subject public key algorithm.
+    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String>;
+
     /// Extract an extension value by dotted-decimal OID.
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Return the certificate subject distinguished name for diagnostics.
+    fn subject_name(cert: &Self::Certificate) -> String;
+
+    /// Return the certificate issuer distinguished name for diagnostics.
+    fn issuer_name(cert: &Self::Certificate) -> String;
+
+    /// Return whether `cert`'s issuer name matches `issuer`'s subject name.
+    fn issuer_name_matches_subject(
+        cert: &Self::Certificate,
+        issuer: &Self::Certificate,
+    ) -> Result<bool>;
+
+    /// Return whether the certificate validity interval includes `unix_time`.
+    fn is_valid_at(cert: &Self::Certificate, unix_time: Duration) -> Result<bool>;
+
+    /// Return the zero-based X.509 version number: 0 = v1, 1 = v2, 2 = v3.
+    fn version(cert: &Self::Certificate) -> Result<u8>;
+
+    /// Return the criticality of an extension by dotted-decimal OID if present.
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>>;
+
+    /// Return dotted-decimal OIDs for critical extensions in the certificate.
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String>;
+
+    /// Return whether the certificate is self-issued.
+    fn is_self_issued(cert: &Self::Certificate) -> Result<bool> {
+        Self::issuer_name_matches_subject(cert, cert)
+    }
 }
 
 /// Backend-internal trait for certificate verification operations.

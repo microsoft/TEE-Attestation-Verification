@@ -84,8 +84,43 @@ impl CertificateBackend for Crypto {
         cert.inner.public_key_spki_der()
     }
 
+    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String> {
+        Ok(cert.inner.public_key_algorithm())
+    }
+
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         cert.inner.get_extension_value_by_oid(oid)
+    }
+
+    fn subject_name(cert: &Self::Certificate) -> String {
+        cert.inner.subject_name()
+    }
+
+    fn issuer_name(cert: &Self::Certificate) -> String {
+        cert.inner.issuer_name()
+    }
+
+    fn issuer_name_matches_subject(
+        cert: &Self::Certificate,
+        issuer: &Self::Certificate,
+    ) -> Result<bool> {
+        cert.inner.issuer_name_matches_subject(&issuer.inner)
+    }
+
+    fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {
+        cert.inner.is_valid_at(unix_time)
+    }
+
+    fn version(cert: &Self::Certificate) -> Result<u8> {
+        Ok(cert.inner.version())
+    }
+
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
+        cert.inner.extension_criticality(oid)
+    }
+
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String> {
+        cert.inner.critical_extension_oids()
     }
 }
 
