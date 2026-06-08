@@ -38,7 +38,7 @@ These features are forwarded by `tee-attestation-verification-lib` to the crypto
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { version = "X.X.X", features = ["crypto_openssl"] }
+tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-X.X.X", features = ["crypto_openssl"] }
 ```
 
 ```rust
@@ -51,13 +51,6 @@ let vcek = certificate_from_pem(vcek_pem)?;
 let ask = certificate_from_pem(ask_pem)?;
 
 sync::verify_attestation(&report, &vcek, &ChainVerification::WithPinnedArk { ask: &ask })?;
-```
-
-Enable `kds` to fetch AMD certificate collateral automatically:
-
-```toml
-[dependencies]
-tee-attestation-verification-lib = { version = "X.X.X", features = ["crypto_pure_rust", "kds"] }
 ```
 
 ## Trademarks
