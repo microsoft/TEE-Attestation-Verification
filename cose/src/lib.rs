@@ -55,7 +55,7 @@
 mod cbor;
 mod cose;
 
-pub use cbor::CborValue;
+pub use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
 pub use cose::signature_key_algorithm_for_cose_alg;
 
 #[cfg(sync_crypto)]

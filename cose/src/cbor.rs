@@ -1,6 +1,13 @@
 use cborrs::cbordet::*;
 use cborrs_nondet::cbornondet::*;
 
+/// Default maximum nesting depth for CBOR parse and serialization.
+///
+/// Depth 0 is the root item. Containers (arrays, maps, and tags) increment the
+/// depth of their children. This mirrors CCF's CBOR wrapper default and prevents
+/// deeply nested untrusted inputs from exhausting the Rust call stack.
+pub const MAX_CBOR_NESTING_DEPTH: usize = 16;
+
 struct SimpleArena<T>(std::cell::RefCell<Vec<Box<[T]>>>);
 
 impl<T> SimpleArena<T> {
@@ -54,6 +61,7 @@ impl CborValue {
     /// Parse CBOR bytes into an owned [`CborValue`].
     ///
     /// The entire input must be consumed. Trailing bytes are rejected.
+    /// Inputs nested deeper than [`MAX_CBOR_NESTING_DEPTH`] are rejected.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let (item, remainder) =
             cbor_nondet_parse(None, false, bytes).ok_or("Failed to parse CBOR bytes")?;
@@ -63,14 +71,16 @@ impl CborValue {
                 remainder.len()
             ));
         }
-        Self::from_raw(item)
+        Self::from_raw(item, MAX_CBOR_NESTING_DEPTH)
     }
 
     /// Serialize this value to deterministic CBOR bytes.
+    ///
+    /// Values nested deeper than [`MAX_CBOR_NESTING_DEPTH`] are rejected.
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
         let item_arena: SimpleArena<CborDet<'_>> = SimpleArena::new();
         let entry_arena: SimpleArena<CborDetMapEntry<'_>> = SimpleArena::new();
-        let raw = self.to_raw(&item_arena, &entry_arena)?;
+        let raw = self.to_raw(&item_arena, &entry_arena, MAX_CBOR_NESTING_DEPTH)?;
         serialize_det(raw)
     }
 
@@ -83,6 +93,7 @@ impl CborValue {
         &'a self,
         items: &'a SimpleArena<CborDet<'a>>,
         entries: &'a SimpleArena<CborDetMapEntry<'a>>,
+        budget: usize,
     ) -> Result<CborDet<'a>, String> {
         match self {
             CborValue::Int(v) => {
@@ -99,20 +110,22 @@ impl CborValue {
                 cbor_det_mk_text_string(s).ok_or("Failed to make CBOR text string".to_string())
             }
             CborValue::Array(children) => {
+                let child_budget = Self::child_budget(budget)?;
                 let raw_children: Vec<CborDet<'a>> = children
                     .iter()
-                    .map(|c| c.to_raw(items, entries))
+                    .map(|c| c.to_raw(items, entries, child_budget))
                     .collect::<Result<_, _>>()?;
                 let slice = items.alloc_extend(raw_children);
                 cbor_det_mk_array(slice).ok_or("Failed to build CBOR array".to_string())
             }
             CborValue::Map(map_entries) => {
+                let child_budget = Self::child_budget(budget)?;
                 let raw: Vec<CborDetMapEntry<'a>> = map_entries
                     .iter()
                     .map(|(k, v)| {
                         Ok(cbor_det_mk_map_entry(
-                            k.to_raw(items, entries)?,
-                            v.to_raw(items, entries)?,
+                            k.to_raw(items, entries, child_budget)?,
+                            v.to_raw(items, entries, child_budget)?,
                         ))
                     })
                     .collect::<Result<_, String>>()?;
@@ -120,7 +133,7 @@ impl CborValue {
                 cbor_det_mk_map(slice).ok_or("Failed to build CBOR map".to_string())
             }
             CborValue::Tagged { tag, payload } => {
-                let inner = payload.to_raw(items, entries)?;
+                let inner = payload.to_raw(items, entries, Self::child_budget(budget)?)?;
                 let inner_ref = items.alloc(inner);
                 Ok(cbor_det_mk_tagged(*tag, inner_ref))
             }
@@ -244,7 +257,13 @@ impl CborValue {
         }
     }
 
-    fn from_raw(item: CborNondet) -> Result<Self, String> {
+    fn child_budget(budget: usize) -> Result<usize, String> {
+        budget.checked_sub(1).ok_or_else(|| {
+            format!("Maximum CBOR nesting depth ({MAX_CBOR_NESTING_DEPTH}) exceeded")
+        })
+    }
+
+    fn from_raw(item: CborNondet, budget: usize) -> Result<Self, String> {
         match cbor_nondet_destruct(item) {
             CborNondetView::Int64 { kind, value } => {
                 Ok(CborValue::Int(Self::nondet_int_to_i64(kind, value)?))
@@ -257,24 +276,26 @@ impl CborValue {
             CborNondetView::Array { _0: arr } => {
                 let len = cbor_nondet_get_array_length(arr);
                 let mut items = Vec::with_capacity(len as usize);
+                let child_budget = Self::child_budget(budget)?;
                 for i in 0..len {
                     let child =
                         cbor_nondet_get_array_item(arr, i).ok_or("Failed to get array item")?;
-                    items.push(Self::from_raw(child)?);
+                    items.push(Self::from_raw(child, child_budget)?);
                 }
                 Ok(CborValue::Array(items))
             }
             CborNondetView::Map { _0: map } => {
                 let mut entries = Vec::with_capacity(cbor_nondet_get_map_length(map) as usize);
+                let child_budget = Self::child_budget(budget)?;
                 for entry in map {
-                    let k = Self::from_raw(cbor_nondet_map_entry_key(entry))?;
-                    let v = Self::from_raw(cbor_nondet_map_entry_value(entry))?;
+                    let k = Self::from_raw(cbor_nondet_map_entry_key(entry), child_budget)?;
+                    let v = Self::from_raw(cbor_nondet_map_entry_value(entry), child_budget)?;
                     entries.push((k, v));
                 }
                 Ok(CborValue::Map(entries))
             }
             CborNondetView::Tagged { tag, payload } => {
-                let inner = Self::from_raw(payload)?;
+                let inner = Self::from_raw(payload, Self::child_budget(budget)?)?;
                 Ok(CborValue::Tagged {
                     tag,
                     payload: Box::new(inner),
@@ -516,6 +537,50 @@ mod tests {
             ]),
             CborValue::Int(-100),
         ]));
+    }
+
+    #[test]
+    fn from_bytes_rejects_excessive_array_nesting() {
+        let mut value = CborValue::Int(42);
+        for _ in 0..=MAX_CBOR_NESTING_DEPTH {
+            value = CborValue::Array(vec![value]);
+        }
+        let bytes = value.to_bytes().expect_err("serialization should fail");
+        assert!(bytes.contains("Maximum CBOR nesting depth"));
+
+        let mut bytes = vec![0];
+        for _ in 0..=MAX_CBOR_NESTING_DEPTH {
+            let mut nested = vec![0x81];
+            nested.extend_from_slice(&bytes);
+            bytes = nested;
+        }
+        let err = CborValue::from_bytes(&bytes).expect_err("parse should fail");
+        assert!(err.contains("Maximum CBOR nesting depth"));
+    }
+
+    #[test]
+    fn to_bytes_rejects_excessive_map_nesting() {
+        let mut value = CborValue::Int(42);
+        for _ in 0..=MAX_CBOR_NESTING_DEPTH {
+            value = CborValue::Map(vec![(CborValue::Int(1), value)]);
+        }
+
+        let err = value.to_bytes().expect_err("serialization should fail");
+        assert!(err.contains("Maximum CBOR nesting depth"));
+    }
+
+    #[test]
+    fn to_bytes_rejects_excessive_tag_nesting() {
+        let mut value = CborValue::Int(42);
+        for _ in 0..=MAX_CBOR_NESTING_DEPTH {
+            value = CborValue::Tagged {
+                tag: 1,
+                payload: Box::new(value),
+            };
+        }
+
+        let err = value.to_bytes().expect_err("serialization should fail");
+        assert!(err.contains("Maximum CBOR nesting depth"));
     }
 
     // --- Accessor: get (array index) ---
