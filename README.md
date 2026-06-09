@@ -12,6 +12,7 @@ and returning authenticated report claims to callers.
 | Path | Package | Purpose |
 |---|---|---|
 | `crypto/` | `tee-attestation-verification-crypto` | Backend abstraction for certificate handling, certificate-chain verification, and signature verification. |
+| `cose/` | `tee-attestation-verification-cose` | COSE signing and verification helpers. |
 | `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, KDS support, C ABI, and WASM bindings. |
 | `demos/web-verify-kernel/` | n/a | Browser demo that exercises the WASM attestation bindings. |
 
@@ -56,4 +57,3 @@ sync::verify_attestation(&report, &vcek, &ChainVerification::WithPinnedArk { ask
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.
-

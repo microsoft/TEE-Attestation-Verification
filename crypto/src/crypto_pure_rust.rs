@@ -20,8 +20,8 @@ use sha2::{Sha256, Sha384, Sha512};
 
 use super::x509_certificate::{self, Certificate};
 use super::{
-    CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm, KeyBackend, Result,
-    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
+    compatible_key_and_signature, CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm,
+    KeyBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -30,9 +30,10 @@ pub enum Key {
     EcdsaP256(EcdsaP256VerifyingKey),
     EcdsaP384(EcdsaP384VerifyingKey),
     EcdsaP521(EcdsaP521VerifyingKey),
-    RsaPssSha256(PssVerifyingKey<Sha256>),
-    RsaPssSha384(PssVerifyingKey<Sha384>),
-    RsaPssSha512(PssVerifyingKey<Sha512>),
+    RsaPss {
+        algorithm: RsaPssSignatureKeyAlgorithm,
+        key: RsaPublicKey,
+    },
 }
 
 pub enum Signature {
@@ -127,20 +128,13 @@ impl KeyBackend for Key {
                         .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
                 Ok(Key::EcdsaP521(key))
             }
-            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256) => {
+            SignatureKeyAlgorithm::RsaPss(algorithm) => {
                 let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
-                Ok(Key::RsaPssSha256(PssVerifyingKey::<Sha256>::new(rsa_pub)))
-            }
-            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => {
-                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
-                Ok(Key::RsaPssSha384(PssVerifyingKey::<Sha384>::new(rsa_pub)))
-            }
-            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps512) => {
-                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
-                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
-                Ok(Key::RsaPssSha512(PssVerifyingKey::<Sha512>::new(rsa_pub)))
+                Ok(Key::RsaPss {
+                    algorithm,
+                    key: rsa_pub,
+                })
             }
         }
     }
@@ -187,6 +181,15 @@ impl CryptoBackend for Crypto {
         signature: &Self::Signature,
         signed_bytes: &[u8],
     ) -> Result<()> {
+        if !compatible_key_and_signature(key.algorithm(), signature.algorithm()) {
+            return Err(format!(
+                "Signature algorithm {:?} does not match key algorithm {:?}",
+                signature.algorithm(),
+                key.algorithm()
+            )
+            .into());
+        }
+
         match (key, signature) {
             (Key::EcdsaP256(key), Signature::EcdsaP256(signature)) => {
                 verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P256)
@@ -198,32 +201,29 @@ impl CryptoBackend for Crypto {
                 verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P521)
             }
             (
-                Key::RsaPssSha256(key),
+                Key::RsaPss { key, .. },
                 Signature::RsaPss {
-                    algorithm: RsaPssSignatureKeyAlgorithm::Ps256,
+                    algorithm,
                     signature,
                 },
-            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
-            (
-                Key::RsaPssSha384(key),
-                Signature::RsaPss {
-                    algorithm: RsaPssSignatureKeyAlgorithm::Ps384,
+            ) => match algorithm {
+                RsaPssSignatureKeyAlgorithm::Ps256 => verify_rsa_pss_signature(
+                    &PssVerifyingKey::<Sha256>::new(key.clone()),
+                    signed_bytes,
                     signature,
-                },
-            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
-            (
-                Key::RsaPssSha512(key),
-                Signature::RsaPss {
-                    algorithm: RsaPssSignatureKeyAlgorithm::Ps512,
+                ),
+                RsaPssSignatureKeyAlgorithm::Ps384 => verify_rsa_pss_signature(
+                    &PssVerifyingKey::<Sha384>::new(key.clone()),
+                    signed_bytes,
                     signature,
-                },
-            ) => verify_rsa_pss_signature(key, signed_bytes, signature),
-            _ => Err(format!(
-                "Signature algorithm {:?} does not match key algorithm {:?}",
-                signature.algorithm(),
-                key.algorithm()
-            )
-            .into()),
+                ),
+                RsaPssSignatureKeyAlgorithm::Ps512 => verify_rsa_pss_signature(
+                    &PssVerifyingKey::<Sha512>::new(key.clone()),
+                    signed_bytes,
+                    signature,
+                ),
+            },
+            _ => unreachable!("incompatible key and signature algorithms were rejected"),
         }
     }
 
@@ -258,15 +258,7 @@ impl Key {
             Key::EcdsaP256(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
             Key::EcdsaP384(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
             Key::EcdsaP521(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521),
-            Key::RsaPssSha256(_) => {
-                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256)
-            }
-            Key::RsaPssSha384(_) => {
-                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
-            }
-            Key::RsaPssSha512(_) => {
-                SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps512)
-            }
+            Key::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
         }
     }
 }

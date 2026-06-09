@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install rust
         run: |
           rustup update stable && rustup default stable
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install rust
         run: |
           rustup update stable && rustup default stable
@@ -54,65 +54,3 @@ jobs:
 
       - name: WASM build docs
         run: cargo doc -p tee-attestation-verification-lib --target wasm32-unknown-unknown
-
-  coverage:
-    name: Workspace test coverage
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install rust
-        run: |
-          rustup update stable && rustup default stable
-          rustup component add llvm-tools-preview
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Clean coverage artifacts
-        run: cargo llvm-cov clean --workspace
-
-      - name: Collect coverage data (OpenSSL backend)
-        run: |
-          cargo llvm-cov --workspace --no-default-features --features "crypto_openssl" \
-            --no-report
-
-      - name: Collect coverage and combine LCOV report (pure-Rust backend)
-        run: |
-          # --no-clean preserves the OpenSSL profile data so the report
-          # summarizes coverage across both workspace test suites and native backends.
-          cargo llvm-cov --workspace --no-default-features --features "crypto_pure_rust" \
-            --no-clean --lcov --output-path lcov-combined.info \
-            --ignore-filename-regex '(^|/)(test_data|tests|demos)(/|$)|(^|/)src/bin/'
-
-      - name: Generate combined coverage summary
-        run: |
-          cargo llvm-cov report --summary-only \
-            --ignore-filename-regex '(^|/)(test_data|tests|demos)(/|$)|(^|/)src/bin/' \
-            | tee coverage-summary.txt
-          line_coverage=$(awk '/^TOTAL/ { print $10 }' coverage-summary.txt)
-          region_coverage=$(awk '/^TOTAL/ { print $4 }' coverage-summary.txt)
-          function_coverage=$(awk '/^TOTAL/ { print $7 }' coverage-summary.txt)
-          {
-            echo '## Workspace test coverage (combined native backends)';
-            echo '';
-            echo "**Overall:** ${line_coverage} lines, ${region_coverage} regions, ${function_coverage} functions";
-            echo '';
-            echo '<details open>';
-            echo '<summary>Per-file coverage</summary>';
-            echo '';
-            echo '```';
-            cat coverage-summary.txt;
-            echo '```';
-            echo '';
-            echo '</details>';
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage reports
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-reports
-          path: |
-            lcov-combined.info
-            coverage-summary.txt
