@@ -28,6 +28,7 @@ pub struct Certificate {
 }
 
 pub struct Key {
+    key: CryptoKey,
     spki_der: Vec<u8>,
     algorithm: SignatureKeyAlgorithm,
 }
@@ -81,9 +82,10 @@ impl AsyncKeyBackend for Key {
     async fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         let subtle = subtle_crypto()?;
         let params = import_params(algorithm)?;
-        import_spki_key(&subtle, spki_der, &params).await?;
+        let key = import_spki_key(&subtle, spki_der, &params).await?;
 
         Ok(Key {
+            key,
             spki_der: spki_der.to_vec(),
             algorithm,
         })
@@ -157,12 +159,17 @@ impl AsyncCryptoBackend for Crypto {
         }
 
         let subtle = subtle_crypto()?;
-        let import_params = import_params(signature_algorithm)?;
-        let key = import_spki_key(&subtle, &key.spki_der, &import_params).await?;
+        let temporary_key = if key.algorithm == signature_algorithm {
+            None
+        } else {
+            let import_params = import_params(signature_algorithm)?;
+            Some(import_spki_key(&subtle, &key.spki_der, &import_params).await?)
+        };
+        let verification_key = temporary_key.as_ref().unwrap_or(&key.key);
         let params = verify_params(signature_algorithm)?;
         let signature = webcrypto_signature_bytes(signature_algorithm, signature)?;
 
-        verify_with_subtle(&subtle, &key, &params, &signature, signed_bytes).await
+        verify_with_subtle(&subtle, verification_key, &params, &signature, signed_bytes).await
     }
 
     async fn verify_chain(
