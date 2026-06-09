@@ -12,7 +12,7 @@ and returning authenticated report claims to callers.
 | Path | Package | Purpose |
 |---|---|---|
 | `crypto/` | `tee-attestation-verification-crypto` | Backend abstraction for certificate handling, certificate-chain verification, and signature verification. |
-| `cose/` | `tee-attestation-verification-cose` | COSE signing and verification helpers backed by OpenSSL. |
+| `cose/` | `tee-attestation-verification-cose` | COSE signing and verification helpers. |
 | `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, KDS support, C ABI, and WASM bindings. |
 | `demos/web-verify-kernel/` | n/a | Browser demo that exercises the WASM attestation bindings. |
 
