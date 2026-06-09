@@ -6,7 +6,7 @@
 //! [`crate::snp::ffi::ErrorCode`] and [`crate::snp::ffi::VerifyError`] classify
 //! verification failures in a form suitable for non-Rust callers.
 //! Target-specific bindings live under submodules; the `wasm` submodule is
-//! compiled only for `wasm32` and exposes the caller-provided-certificate
+//! compiled only for WASM targets and exposes the caller-provided-certificate
 //! WebAssembly API.
 //!
 //! A sync `verify_attestation` for C FFI consumers will be added alongside the
@@ -14,7 +14,7 @@
 
 use crate::snp::verify::VerificationError;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasm_bindgen::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ use wasm_bindgen::prelude::*;
 /// `TAVErrorCode` values when that surface is added:
 /// - 1: input parsing / validation
 /// - 101–105: attestation verification (mapped from [`VerificationError`])
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen)]
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
@@ -46,23 +46,23 @@ pub enum ErrorCode {
 }
 
 /// An error returned by the verify functions.
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen)]
 #[derive(Debug)]
 pub struct VerifyError {
     code: ErrorCode,
     message: String,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen)]
 impl VerifyError {
     /// The error category.
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen(getter))]
     pub fn code(&self) -> ErrorCode {
         self.code
     }
 
     /// The human-readable error message.
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen(getter))]
     pub fn message(&self) -> String {
         self.message.clone()
     }
@@ -71,7 +71,7 @@ impl VerifyError {
 impl VerifyError {
     // Only used by the wasm module today; the C FFI layer will use it too
     // when it lands. Silence dead_code on builds without any consumer.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
     pub(crate) fn invalid_argument(message: String) -> Self {
         Self {
             code: ErrorCode::InvalidArgument,
@@ -165,7 +165,7 @@ mod tests {
 // WASM bindings
 // ---------------------------------------------------------------------------
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub mod wasm {
     //! `wasm_bindgen` bindings exposing verified SNP attestation reports to JS.
     //!

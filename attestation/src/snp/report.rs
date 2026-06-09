@@ -5,23 +5,23 @@
 //!
 //! [`crate::snp::report::AttestationReport`] mirrors the AMD SEV-SNP ABI report
 //! layout and can be parsed directly from the raw 1184-byte report buffer using
-//! `zerocopy`'s [`zerocopy::FromBytes`] trait.
+//! `zerocopy`'s [`zerocopy::TryFromBytes`] trait.
 //!
 //! # Example
 //!
 //! Verify an attestation report before returning the authenticated claims to the caller:
 //!
 //! ```no_run
+//! use tee_attestation_verification_lib::certificate_from_pem;
+//! use tee_attestation_verification_lib::snp::report::{AttestationReport, TryFromBytes};
 //! use tee_attestation_verification_lib::snp::verify::{self, ChainVerification};
-//! use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
-//! use zerocopy::FromBytes;
 //!
 //! # async fn example<'a>(
 //! #     attestation_bytes: &'a [u8],
 //! #     vcek_pem: &'a [u8],
 //! #     ask_pem: &'a [u8],
 //! # ) -> Result<AttestationReport, Box<dyn std::error::Error + 'a>> {
-//! let report = AttestationReport::read_from_bytes(attestation_bytes)?;
+//! let report = AttestationReport::try_read_from_bytes(attestation_bytes)?;
 //! let vcek = certificate_from_pem(vcek_pem)?;
 //! let ask = certificate_from_pem(ask_pem)?;
 //!
@@ -36,7 +36,11 @@
 //! # }
 //! ```
 
-use zerocopy::{byteorder::little_endian as le, *};
+pub use zerocopy::TryFromBytes;
+use zerocopy::{
+    byteorder::little_endian as le, try_transmute, FromBytes, Immutable, IntoBytes, KnownLayout,
+    Unaligned,
+};
 
 // ---------------------------------------------------------------------------
 // Decoded bitfield types
@@ -261,11 +265,46 @@ impl TcbVersionRaw {
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct Signature {
-    /// Signature `r` component in the report's fixed-width encoding.
+    /// Signature `r` component in the report's little-endian padded encoding.
     pub r: [u8; 72],
-    /// Signature `s` component in the report's fixed-width encoding.
+    /// Signature `s` component in the report's little-endian padded encoding.
     pub s: [u8; 72],
     reserved: [u8; 512 - 144],
+}
+
+const ECDSA_P384_SCALAR_SIZE: usize = 48;
+const SNP_ECDSA_P384_SCALAR_SIZE: usize = 72;
+
+impl Signature {
+    fn to_ecdsa_components(
+        self,
+    ) -> crypto::Result<([u8; ECDSA_P384_SCALAR_SIZE], [u8; ECDSA_P384_SCALAR_SIZE])> {
+        let r = snp_ecdsa_p384_scalar_to_fixed("r", &self.r)?;
+        let s = snp_ecdsa_p384_scalar_to_fixed("s", &self.s)?;
+
+        Ok((r, s))
+    }
+}
+
+fn snp_ecdsa_p384_scalar_to_fixed(
+    name: &str,
+    scalar: &[u8; SNP_ECDSA_P384_SCALAR_SIZE],
+) -> crypto::Result<[u8; ECDSA_P384_SCALAR_SIZE]> {
+    if scalar[ECDSA_P384_SCALAR_SIZE..]
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return Err(format!(
+            "Invalid {name} scalar padding: upper 24 bytes must be zero for P-384 signatures"
+        )
+        .into());
+    }
+
+    let mut fixed: [u8; ECDSA_P384_SCALAR_SIZE] = scalar[..ECDSA_P384_SCALAR_SIZE]
+        .try_into()
+        .map_err(|_| format!("Invalid {name} scalar length"))?;
+    fixed.reverse();
+    Ok(fixed)
 }
 
 /// SEV-SNP attestation report (0x4A0 = 1184 bytes).
@@ -419,45 +458,68 @@ impl AttestationReport {
 }
 
 #[cfg(sync_crypto)]
-impl crypto::verifier::Sync<AttestationReport> for crate::Certificate {
-    fn verify(&self, report: &AttestationReport) -> crypto::Result<()> {
-        match report.signature_algo.get() {
-            0x0001 => {
-                <crypto::Crypto as crypto::ReportSignatureVerifier>::verify_ecdsa_p384_sha384_signature(
-                    self,
-                    report.signed_bytes(),
-                    report.signature.r,
-                    report.signature.s,
-                )
-            }
-            _ => Err(format!(
-                "Unsupported signature algorithm: 0x{:04X}",
-                report.signature_algo.get()
+pub(crate) fn verify_report_signature(
+    cert: &crate::Certificate,
+    report: &AttestationReport,
+) -> crypto::Result<()> {
+    match report.signature_algo.get() {
+        0x0001 => {
+            let (r, s) = report.signature.to_ecdsa_components()?;
+            let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
+            let signature = <crypto::Signature as crypto::SignatureBackend>::from_ec_components(
+                &r, &s, algorithm,
+            )?;
+            let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
+            let key = <crypto::Key as crypto::KeyBackend>::from_spki_der(
+                &spki_der,
+                crypto::SignatureKeyAlgorithm::Ec(algorithm),
+            )?;
+
+            <crypto::Crypto as crypto::CryptoBackend>::verify_signature(
+                &key,
+                &signature,
+                report.signed_bytes(),
             )
-            .into()),
         }
+        _ => Err(format!(
+            "Unsupported signature algorithm: 0x{:04X}",
+            report.signature_algo.get()
+        )
+        .into()),
     }
 }
 
 #[cfg(async_crypto)]
-impl crypto::verifier::Async<AttestationReport> for crate::Certificate {
-    async fn verify(&self, report: &AttestationReport) -> crypto::Result<()> {
-        match report.signature_algo.get() {
-            0x0001 => {
-                <crypto::Crypto as crypto::AsyncReportSignatureVerifier>::verify_ecdsa_p384_sha384_signature(
-                    self,
-                    report.signed_bytes(),
-                    report.signature.r,
-                    report.signature.s,
-                )
-                .await
-            }
-            _ => Err(format!(
-                "Unsupported signature algorithm: 0x{:04X}",
-                report.signature_algo.get()
+pub(crate) async fn verify_report_signature_async(
+    cert: &crate::Certificate,
+    report: &AttestationReport,
+) -> crypto::Result<()> {
+    match report.signature_algo.get() {
+        0x0001 => {
+            let (r, s) = report.signature.to_ecdsa_components()?;
+            let algorithm = crypto::EcSignatureKeyAlgorithm::P384;
+            let signature = <crypto::Signature as crypto::SignatureBackend>::from_ec_components(
+                &r, &s, algorithm,
+            )?;
+            let spki_der = <crypto::Crypto as crypto::CertificateBackend>::get_public_key(cert)?;
+            let key = <crypto::Key as crypto::AsyncKeyBackend>::from_spki_der(
+                &spki_der,
+                crypto::SignatureKeyAlgorithm::Ec(algorithm),
             )
-            .into()),
+            .await?;
+
+            <crypto::Crypto as crypto::AsyncCryptoBackend>::verify_signature(
+                &key,
+                &signature,
+                report.signed_bytes(),
+            )
+            .await
         }
+        _ => Err(format!(
+            "Unsupported signature algorithm: 0x{:04X}",
+            report.signature_algo.get()
+        )
+        .into()),
     }
 }
 
@@ -490,11 +552,10 @@ mod tests {
     #[cfg(sync_crypto)]
     mod sync_verifier_tests {
         use super::*;
-        use crate::crypto::verifier::Sync as Verifier;
 
         #[test]
         fn attestation_report_signature_verifies() {
-            cert(MILAN_VCEK).verify(&report()).unwrap();
+            verify_report_signature(&cert(MILAN_VCEK), &report()).unwrap();
         }
 
         #[test]
@@ -505,7 +566,7 @@ mod tests {
             let report_bytes = report.as_mut_bytes();
             report_bytes[100] ^= 0xFF;
 
-            vcek.verify(&report)
+            verify_report_signature(&vcek, &report)
                 .expect_err("Corrupted report should not verify");
         }
 
@@ -516,7 +577,7 @@ mod tests {
 
             report.signature.r[0] ^= 0xFF;
 
-            vcek.verify(&report)
+            verify_report_signature(&vcek, &report)
                 .expect_err("Corrupt signature should not verify");
         }
 
@@ -528,7 +589,7 @@ mod tests {
             report.signature.r.fill(0);
             report.signature.s.fill(0);
 
-            vcek.verify(&report)
+            verify_report_signature(&vcek, &report)
                 .expect_err("Zeroed signature should not verify");
         }
 
@@ -540,8 +601,7 @@ mod tests {
 
             report.signature.r[48] = 1;
 
-            let err = vcek
-                .verify(&report)
+            let err = verify_report_signature(&vcek, &report)
                 .expect_err("Nonzero r scalar padding should not verify");
             assert!(
                 err.to_string().contains("Invalid r scalar padding"),
@@ -557,8 +617,7 @@ mod tests {
 
             report.signature.s[48] = 1;
 
-            let err = vcek
-                .verify(&report)
+            let err = verify_report_signature(&vcek, &report)
                 .expect_err("Nonzero s scalar padding should not verify");
             assert!(
                 err.to_string().contains("Invalid s scalar padding"),
@@ -568,8 +627,7 @@ mod tests {
 
         #[test]
         fn wrong_cert_rejects_signature() {
-            cert(GENOA_VCEK)
-                .verify(&report())
+            verify_report_signature(&cert(GENOA_VCEK), &report())
                 .expect_err("Wrong cert should not verify report");
         }
     }
@@ -577,7 +635,6 @@ mod tests {
     #[cfg(all(async_crypto, not(sync_crypto)))]
     mod async_verifier_tests {
         use super::*;
-        use crate::crypto::verifier::Async as Verifier;
 
         #[cfg(target_arch = "wasm32")]
         use wasm_bindgen_test::wasm_bindgen_test;
@@ -585,7 +642,9 @@ mod tests {
         #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
         #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
         async fn attestation_report_signature_verifies() {
-            cert(MILAN_VCEK).verify(&report()).await.unwrap();
+            verify_report_signature_async(&cert(MILAN_VCEK), &report())
+                .await
+                .unwrap();
         }
 
         #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
@@ -597,7 +656,7 @@ mod tests {
             let report_bytes = report.as_mut_bytes();
             report_bytes[100] ^= 0xFF;
 
-            vcek.verify(&report)
+            verify_report_signature_async(&vcek, &report)
                 .await
                 .expect_err("Corrupted report should not verify");
         }
@@ -610,7 +669,7 @@ mod tests {
 
             report.signature.r[0] ^= 0xFF;
 
-            vcek.verify(&report)
+            verify_report_signature_async(&vcek, &report)
                 .await
                 .expect_err("Corrupt signature should not verify");
         }
@@ -624,7 +683,7 @@ mod tests {
             report.signature.r.fill(0);
             report.signature.s.fill(0);
 
-            vcek.verify(&report)
+            verify_report_signature_async(&vcek, &report)
                 .await
                 .expect_err("Zeroed signature should not verify");
         }
@@ -637,8 +696,7 @@ mod tests {
 
             report.signature.r[60] = 1;
 
-            let error = vcek
-                .verify(&report)
+            let error = verify_report_signature_async(&vcek, &report)
                 .await
                 .expect_err("Non-zero scalar padding should not verify");
 
@@ -651,8 +709,7 @@ mod tests {
         #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
         #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
         async fn wrong_cert_rejects_signature() {
-            cert(GENOA_VCEK)
-                .verify(&report())
+            verify_report_signature_async(&cert(GENOA_VCEK), &report())
                 .await
                 .expect_err("Wrong cert should not verify report");
         }

@@ -5,10 +5,10 @@
 compile_error!("certificate_chain module requires the 'kds' feature");
 
 #[cfg(async_crypto)]
-use crate::crypto::verifier::Async as AsyncVerifier;
+use crate::crypto::AsyncCryptoBackend;
 #[cfg(sync_crypto)]
-use crate::crypto::verifier::Sync as SyncVerifier;
-use crate::crypto::Certificate;
+use crate::crypto::CryptoBackend;
+use crate::crypto::{Certificate, Crypto as ActiveCrypto};
 use crate::kds::KdsFetcher;
 #[cfg(sync_crypto)]
 use crate::pinned_arks;
@@ -91,13 +91,8 @@ impl AmdCertificates {
         // Get pinned ARK for this processor generation
         let ark = pinned_arks::get_ark(processor_model)?;
 
-        // Verify chain: ARK signs ASK
-        SyncVerifier::verify(&ark, &ask)
-            .map_err(|e| format!("Failed to verify ASK signature against pinned ARK: {}", e))?;
-
-        // Verify chain: ASK signs VCEK
-        SyncVerifier::verify(&ask, &vcek)
-            .map_err(|e| format!("Failed to verify VCEK signature against ASK: {}", e))?;
+        <ActiveCrypto as CryptoBackend>::verify_chain(&ark, &[&ask], &vcek)
+            .map_err(|e| format!("Failed to verify certificate chain: {}", e))?;
 
         info!(
             "Certificate chain verified successfully for {} (using pinned ARK)",
@@ -161,7 +156,7 @@ impl AmdCertificates {
             .await
             .map_err(|e| format!("Error fetching chain: {}", e))?;
 
-        verify_certificate_signature_async(&ark, &ask)
+        <ActiveCrypto as AsyncCryptoBackend>::verify_chain(&ark, &[], &ask)
             .await
             .map_err(|e| format!("Failed to verify ASK signature: {}", e))?;
 
@@ -194,9 +189,9 @@ impl AmdCertificates {
 
             // Verify that VCEK is signed by ASK
             let chain = self.get_chain(processor_model).await?;
-            verify_certificate_signature_async(&chain.ask, &vcek)
+            <ActiveCrypto as AsyncCryptoBackend>::verify_chain(&chain.ark, &[&chain.ask], &vcek)
                 .await
-                .map_err(|e| format!("Failed to verify VCEK signature: {}", e))?;
+                .map_err(|e| format!("Failed to verify certificate chain: {}", e))?;
 
             info!(
                 "VCEK certificate verified successfully for {}",
@@ -220,14 +215,6 @@ impl AmdCertificates {
         );
         self.vcek_cache.contains_key(&cache_key)
     }
-}
-
-#[cfg(async_crypto)]
-async fn verify_certificate_signature_async(
-    issuer: &Certificate,
-    subject: &Certificate,
-) -> Result<(), Box<dyn std::error::Error>> {
-    AsyncVerifier::verify(issuer, subject).await
 }
 
 /// Trait for fetching AMD certificates from a certificate source
