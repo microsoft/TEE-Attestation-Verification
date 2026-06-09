@@ -235,27 +235,11 @@ impl AsyncCryptoBackend for Crypto {
         )
         .await?;
 
-        let policy_path = policy_path(trusted_cert, untrusted_chain, leaf);
-        x509_policy::rfc5280_policy::<Crypto>(&policy_path, unix_time_now()?)
+        let policy_path = std::iter::once(trusted_cert)
+            .chain(untrusted_chain.iter().copied())
+            .chain(std::iter::once(leaf));
+        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time_now()?)
     }
-}
-
-fn policy_path<'a>(
-    trusted_cert: &'a Certificate,
-    untrusted_chain: &[&'a Certificate],
-    leaf: &'a Certificate,
-) -> Vec<&'a Certificate> {
-    let mut path = Vec::with_capacity(untrusted_chain.len() + 2);
-    path.push(trusted_cert);
-    for cert in untrusted_chain {
-        if path.last().copied() != Some(*cert) {
-            path.push(*cert);
-        }
-    }
-    if path.last().copied() != Some(leaf) {
-        path.push(leaf);
-    }
-    path
 }
 
 fn unix_time_now() -> Result<Duration> {

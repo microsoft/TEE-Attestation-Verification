@@ -11,20 +11,22 @@ use super::CertificateBackend;
 /// does not include a final `[C, None, None]` window.
 ///
 /// Maximum window size is 127, as the padding is encoded in a signed integer.
-pub(crate) fn padded_windows<'path, 'cert, Certificate, const WINDOW_SIZE: usize>(
-    path: &'path [&'cert Certificate],
-) -> impl Iterator<Item = [Option<&'cert Certificate>; WINDOW_SIZE]> + 'path {
+pub(crate) fn padded_windows<'cert, Certificate: 'cert, Path, const WINDOW_SIZE: usize>(
+    path: Path,
+) -> impl Iterator<Item = [Option<&'cert Certificate>; WINDOW_SIZE]>
+where
+    Path: Clone + Iterator<Item = &'cert Certificate>,
+{
     assert!(WINDOW_SIZE > 0, "window size must be non-zero");
 
-    let roots = 1 - WINDOW_SIZE as isize..path.len() as isize - 1;
-    roots.map(|window_index| {
+    let path_len = path.clone().count();
+    let roots = 1 - WINDOW_SIZE as isize..path_len as isize - 1;
+    roots.map(move |window_index| {
         std::array::from_fn(|offset| {
             let path_index = window_index + offset as isize;
-            if path_index < 0 || path_index >= path.len() as isize {
-                None
-            } else {
-                Some(path[path_index as usize])
-            }
+            usize::try_from(path_index)
+                .ok()
+                .and_then(|path_index| path.clone().nth(path_index))
         })
     })
 }
@@ -33,16 +35,22 @@ pub(crate) fn padded_windows<'path, 'cert, Certificate, const WINDOW_SIZE: usize
 ///
 /// This assumes the path has already passed signature verification and is
 /// ordered from the trusted root toward the target certificate.
-pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
-    path: &[&Backend::Certificate],
+pub(crate) fn rfc5280_policy<'cert, Backend, Path>(
+    path: Path,
     unix_time: Duration,
-) -> super::Result<()> {
-    if path.is_empty() {
+) -> super::Result<()>
+where
+    Backend: CertificateBackend,
+    Backend::Certificate: 'cert,
+    Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
+{
+    let path_len = path.clone().count();
+    if path_len == 0 {
         return Err("Certificate path must not be empty".into());
     }
 
     // Issuer validation
-    for window in padded_windows::<_, 2>(path) {
+    for window in padded_windows::<_, _, 2>(path.clone()) {
         match window {
             [None, Some(cert)] => {
                 if !Backend::is_self_issued(cert)? {
@@ -68,7 +76,7 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
         }
     }
 
-    for window in padded_windows::<_, 1>(path) {
+    for window in padded_windows::<_, _, 1>(path.clone()) {
         let cert = window[0].unwrap();
         let cert_subject = Backend::subject_name(cert);
         if !Backend::is_valid_at(cert, unix_time)? {
@@ -87,7 +95,7 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
     }
 
     // assert basic_constraints and key usage for all certs with a child - ie a non-leaf cert
-    for window in padded_windows::<_, 2>(path) {
+    for window in padded_windows::<_, _, 2>(path.clone()) {
         match window {
             [Some(cert), Some(_)] => {
                 if Backend::version(cert)? != 2 {
@@ -134,8 +142,8 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
         }
     }
 
-    let mut max_path_length = path.len();
-    for window in padded_windows::<_, 2>(path) {
+    let mut max_path_length = path_len;
+    for window in padded_windows::<_, _, 2>(path) {
         match window {
             [Some(cert), Some(_)] => {
                 if !Backend::is_self_issued(cert)? {
@@ -225,12 +233,16 @@ mod tests {
     use super::{padded_windows, rfc5280_policy};
     use crate::{BasicConstraints, CertificateBackend, KeyUsage, Result};
 
+    fn policy(path: &[&TestCertificate], unix_time: Duration) -> Result<()> {
+        rfc5280_policy::<TestBackend, _>(path.iter().copied(), unix_time)
+    }
+
     #[test]
     fn padded_windows_evaluates_padded_windows() {
         let certificates = ["A", "B", "C"];
         let path = certificates.iter().collect::<Vec<_>>();
 
-        let windows = padded_windows::<_, 3>(&path)
+        let windows = padded_windows::<_, _, 3>(path.iter().copied())
             .map(|window| window.map(|entry| entry.copied()))
             .collect::<Vec<_>>();
 
@@ -251,7 +263,7 @@ mod tests {
         let path = certificates.iter().collect::<Vec<_>>();
 
         let mut sum = 0;
-        for [cert] in padded_windows::<_, 1>(&path) {
+        for [cert] in padded_windows::<_, _, 1>(path.iter().copied()) {
             sum += *cert.expect("window should contain one certificate");
         }
 
@@ -265,7 +277,7 @@ mod tests {
         let mut count = 0;
 
         let error = (|| {
-            for [cert] in padded_windows::<_, 1>(&path) {
+            for [cert] in padded_windows::<_, _, 1>(path.iter().copied()) {
                 if *cert.expect("window should contain one certificate") == 2 {
                     return Err("stop");
                 }
@@ -284,7 +296,7 @@ mod tests {
         let certificates = ["A", "B"];
         let path = certificates.iter().collect::<Vec<_>>();
 
-        for window in padded_windows::<_, 2>(&path) {
+        for window in padded_windows::<_, _, 2>(path.iter().copied()) {
             match window.map(|entry| entry.copied()) {
                 [None, Some("A")] | [Some("A"), Some("B")] | [Some("B"), None] => {}
                 unexpected => panic!("unexpected window: {:?}", unexpected),
@@ -298,7 +310,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10)).unwrap();
+        policy(&path, Duration::from_secs(10)).unwrap();
     }
 
     #[test]
@@ -307,8 +319,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
-            .expect_err("first certificate must be self-issued");
+        policy(&path, Duration::from_secs(10)).expect_err("first certificate must be self-issued");
     }
 
     #[test]
@@ -317,7 +328,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Other");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
+        policy(&path, Duration::from_secs(10))
             .expect_err("issuer subject must match subject issuer");
     }
 
@@ -327,7 +338,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(200))
+        policy(&path, Duration::from_secs(200))
             .expect_err("certificate must be valid at evaluation time");
     }
 
@@ -338,7 +349,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
+        policy(&path, Duration::from_secs(10))
             .expect_err("unsupported skipped extension must fail");
     }
 
@@ -349,7 +360,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
+        policy(&path, Duration::from_secs(10))
             .expect_err("unsupported skipped extension must fail even when non-critical");
     }
 
@@ -360,8 +371,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
-            .expect_err("unknown critical extension must fail");
+        policy(&path, Duration::from_secs(10)).expect_err("unknown critical extension must fail");
     }
 
     #[test]
@@ -375,8 +385,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
-            .expect_err("issuer must assert basicConstraints cA");
+        policy(&path, Duration::from_secs(10)).expect_err("issuer must assert basicConstraints cA");
     }
 
     #[test]
@@ -388,7 +397,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
+        policy(&path, Duration::from_secs(10))
             .expect_err("issuer keyUsage must allow certificate signing");
     }
 
@@ -404,7 +413,7 @@ mod tests {
         let leaf = TestCertificate::leaf("Leaf", "Intermediate");
         let path = [&root, &intermediate, &leaf];
 
-        rfc5280_policy::<TestBackend>(&path, Duration::from_secs(10))
+        policy(&path, Duration::from_secs(10))
             .expect_err("root pathLenConstraint should reject intermediate CA");
     }
 
