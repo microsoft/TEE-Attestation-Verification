@@ -29,8 +29,9 @@ use openssl_sys::{
 use std::cmp::Ordering;
 
 use super::{
-    CertificateBackend, CryptoBackend, DigestAlgorithm, EcSignatureKeyAlgorithm, KeyBackend,
-    Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
+    compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
+    EcSignatureKeyAlgorithm, KeyBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend,
+    SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -56,11 +57,9 @@ pub enum Signature {
 enum OpenSslKeyVerification {
     Ecdsa {
         algorithm: EcSignatureKeyAlgorithm,
-        digest: MessageDigest,
     },
     RsaPss {
         algorithm: RsaPssSignatureKeyAlgorithm,
-        digest: MessageDigest,
     },
 }
 
@@ -301,9 +300,11 @@ impl CryptoBackend for Crypto {
         signature: &Self::Signature,
         signed_bytes: &[u8],
     ) -> Result<()> {
-        key.verification.ensure_signature_algorithm(signature)?;
+        let signature_algorithm = signature.algorithm();
+        key.verification
+            .ensure_signature_algorithm(signature_algorithm)?;
         let signature = signature.as_openssl_bytes();
-        let mut verifier = key.verification.verifier(&key.key)?;
+        let mut verifier = key.verification.verifier(&key.key, signature_algorithm)?;
 
         match verifier.verify_oneshot(signature, signed_bytes) {
             Ok(true) => Ok(()),
@@ -360,33 +361,26 @@ impl OpenSslKeyVerification {
                     .into());
                 }
 
-                Ok(Self::Ecdsa {
-                    algorithm,
-                    digest: message_digest(algorithm.digest()),
-                })
+                Ok(Self::Ecdsa { algorithm })
             }
             SignatureKeyAlgorithm::RsaPss(algorithm) => {
                 key.rsa()
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
-                Ok(Self::RsaPss {
-                    algorithm,
-                    digest: message_digest(algorithm.digest()),
-                })
+                Ok(Self::RsaPss { algorithm })
             }
         }
     }
 
     fn algorithm(&self) -> SignatureKeyAlgorithm {
         match self {
-            Self::Ecdsa { algorithm, .. } => SignatureKeyAlgorithm::Ec(*algorithm),
-            Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
+            Self::Ecdsa { algorithm } => SignatureKeyAlgorithm::Ec(*algorithm),
+            Self::RsaPss { algorithm } => SignatureKeyAlgorithm::RsaPss(*algorithm),
         }
     }
 
-    fn ensure_signature_algorithm(&self, signature: &Signature) -> Result<()> {
+    fn ensure_signature_algorithm(&self, actual: SignatureKeyAlgorithm) -> Result<()> {
         let expected = self.algorithm();
-        let actual = signature.algorithm();
-        if actual != expected {
+        if !compatible_key_and_signature(expected, actual) {
             return Err(format!(
                 "Signature algorithm {actual:?} does not match key algorithm {expected:?}"
             )
@@ -396,11 +390,15 @@ impl OpenSslKeyVerification {
         Ok(())
     }
 
-    fn verifier<'key>(&self, key: &'key PKey<Public>) -> Result<OpenSslVerifier<'key>> {
-        let digest = self.digest();
+    fn verifier<'key>(
+        &self,
+        key: &'key PKey<Public>,
+        signature_algorithm: SignatureKeyAlgorithm,
+    ) -> Result<OpenSslVerifier<'key>> {
+        let digest = message_digest(signature_algorithm.digest());
         let mut verifier = OpenSslVerifier::new(digest, key)?;
 
-        if matches!(self, Self::RsaPss { .. }) {
+        if matches!(signature_algorithm, SignatureKeyAlgorithm::RsaPss(_)) {
             verifier.set_rsa_padding(Padding::PKCS1_PSS)?;
             verifier.set_rsa_pss_saltlen(RsaPssSaltlen::DIGEST_LENGTH)?;
             verifier.set_rsa_mgf1_md(digest)?;
@@ -409,16 +407,10 @@ impl OpenSslKeyVerification {
         Ok(verifier)
     }
 
-    fn digest(&self) -> MessageDigest {
-        match *self {
-            Self::Ecdsa { digest, .. } | Self::RsaPss { digest, .. } => digest,
-        }
-    }
-
     fn failure_message(&self) -> &'static str {
         match self {
-            Self::Ecdsa { .. } => "ECDSA signature verification failed",
-            Self::RsaPss { .. } => "RSA-PSS signature verification failed",
+            Self::Ecdsa { algorithm: _ } => "ECDSA signature verification failed",
+            Self::RsaPss { algorithm: _ } => "RSA-PSS signature verification failed",
         }
     }
 }

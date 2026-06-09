@@ -17,9 +17,9 @@ use wasm_bindgen_futures::JsFuture;
 use super::x509_certificate::{self, Certificate as X509Certificate};
 use super::x509_policy;
 use super::{
-    AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend, DigestAlgorithm,
-    EcSignatureKeyAlgorithm, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend,
-    SignatureKeyAlgorithm,
+    compatible_key_and_signature, AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend,
+    DigestAlgorithm, EcSignatureKeyAlgorithm, Result, RsaPssSignatureKeyAlgorithm,
+    SignatureBackend, SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -31,6 +31,7 @@ pub struct Certificate {
 
 pub struct Key {
     key: CryptoKey,
+    spki_der: Vec<u8>,
     algorithm: SignatureKeyAlgorithm,
 }
 
@@ -85,7 +86,11 @@ impl AsyncKeyBackend for Key {
         let params = import_params(algorithm)?;
         let key = import_spki_key(&subtle, spki_der, &params).await?;
 
-        Ok(Key { key, algorithm })
+        Ok(Key {
+            key,
+            spki_der: spki_der.to_vec(),
+            algorithm,
+        })
     }
 }
 
@@ -189,11 +194,27 @@ impl AsyncCryptoBackend for Crypto {
         signature: &Self::Signature,
         signed_bytes: &[u8],
     ) -> Result<()> {
-        let subtle = subtle_crypto()?;
-        let params = verify_params(key.algorithm)?;
-        let signature = webcrypto_signature_bytes(key.algorithm, signature)?;
+        let signature_algorithm = signature.algorithm();
+        if !compatible_key_and_signature(key.algorithm, signature_algorithm) {
+            return Err(format!(
+                "WebCrypto signature algorithm {signature_algorithm:?} does not match key algorithm {:?}",
+                key.algorithm
+            )
+            .into());
+        }
 
-        verify_with_subtle(&subtle, &key.key, &params, &signature, signed_bytes).await
+        let subtle = subtle_crypto()?;
+        let temporary_key = if key.algorithm == signature_algorithm {
+            None
+        } else {
+            let import_params = import_params(signature_algorithm)?;
+            Some(import_spki_key(&subtle, &key.spki_der, &import_params).await?)
+        };
+        let verification_key = temporary_key.as_ref().unwrap_or(&key.key);
+        let params = verify_params(signature_algorithm)?;
+        let signature = webcrypto_signature_bytes(signature_algorithm, signature)?;
+
+        verify_with_subtle(&subtle, verification_key, &params, &signature, signed_bytes).await
     }
 
     async fn verify_chain(

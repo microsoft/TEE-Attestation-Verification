@@ -17,7 +17,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 mod signature;
 
 pub use signature::{
-    DigestAlgorithm, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+    compatible_key_and_signature, DigestAlgorithm, EcSignatureKeyAlgorithm,
+    RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
 
 pub trait SignatureBackend: Sized {
