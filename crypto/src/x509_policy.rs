@@ -8,7 +8,7 @@ use super::CertificateBackend;
 ///
 /// For a window size of 3 over `[A, B, C]`, the windows are
 /// `[None, None, A]`, `[None, A, B]`, `[A, B, C]`, `[B, C, None]`, and
-/// does not include a final `[C, None, None]` window.
+/// `[C, None, None]`.
 ///
 /// Maximum window size is 127, as the padding is encoded in a signed integer.
 pub(crate) fn padded_windows<'cert, Certificate: 'cert, Path, const WINDOW_SIZE: usize>(
@@ -20,7 +20,7 @@ where
     assert!(WINDOW_SIZE > 0, "window size must be non-zero");
 
     let path_len = path.clone().count();
-    let roots = 1 - WINDOW_SIZE as isize..path_len as isize - 1;
+    let roots = 1 - WINDOW_SIZE as isize..path_len as isize;
     roots.map(move |window_index| {
         std::array::from_fn(|offset| {
             let path_index = window_index + offset as isize;
@@ -255,6 +255,7 @@ mod tests {
                 [None, Some("A"), Some("B")],
                 [Some("A"), Some("B"), Some("C")],
                 [Some("B"), Some("C"), None],
+                [Some("C"), None, None],
             ]
         );
     }
@@ -269,7 +270,7 @@ mod tests {
             sum += *cert.expect("window should contain one certificate");
         }
 
-        assert_eq!(sum, 3);
+        assert_eq!(sum, 6);
     }
 
     #[test]
