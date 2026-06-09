@@ -4,20 +4,6 @@ use std::time::Duration;
 
 use super::CertificateBackend;
 
-/// Policy evaluation.
-///
-/// After evaluating that the certificate path signatures match, we need to evaluate policies against that.
-///
-/// Policies evaluate a borrowed certificate path and return typed errors for validation failures.
-/// Within that I can see two useful primitives: windowing and folding.
-///
-/// Windowing allows us to evaluate a predicate over a sliding window of certificates.
-/// e.g. we might want to check that the issuer and subject of adjacent certificate match
-/// This should be controlled by a window size parameter, and for a window size of 3 over [A, B, C] we expect to see [None, None, A], [None, A, B], [A, B, C], [B, C, None], [C, None, None].
-///
-/// Folding works similarly but it also has an accumulator
-/// Windowing is a special case of folding where the accumulator is ignored.
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct BasicConstraints {
     critical: bool,
@@ -30,46 +16,35 @@ struct KeyUsage {
     key_cert_sign: bool,
 }
 
-pub(crate) fn fold_policy<'a, Certificate, Accumulator, Error, const WINDOW_SIZE: usize>(
-    path: &[&'a Certificate],
-    initial_accumulator: Accumulator,
-    predicate: impl Fn(
-        [Option<&'a Certificate>; WINDOW_SIZE],
-        Accumulator,
-    ) -> std::result::Result<Accumulator, Error>,
-) -> std::result::Result<Accumulator, Error> {
+/// Iterates over a path with padded sliding windows.
+///
+/// For a window size of 3 over `[A, B, C]`, the windows are
+/// `[None, None, A]`, `[None, A, B]`, `[A, B, C]`, `[B, C, None]`, and
+/// does not include a final `[C, None, None]` window.
+///
+/// Maximum window size is 127, as the padding is encoded in a signed integer.
+pub(crate) fn padded_windows<'path, 'cert, Certificate, const WINDOW_SIZE: usize>(
+    path: &'path [&'cert Certificate],
+) -> impl Iterator<Item = [Option<&'cert Certificate>; WINDOW_SIZE]> + 'path {
     assert!(WINDOW_SIZE > 0, "window size must be non-zero");
 
-    let mut accumulator = initial_accumulator;
-
-    for window_index in 0..path.len() + WINDOW_SIZE - 1 {
-        let window = std::array::from_fn(|offset| {
-            (window_index + offset)
-                .checked_sub(WINDOW_SIZE - 1)
-                .and_then(|path_index| path.get(path_index).copied())
-        });
-
-        accumulator = predicate(window, accumulator)?;
-    }
-
-    Ok(accumulator)
+    let roots = 1 - WINDOW_SIZE as isize..path.len() as isize - 1;
+    roots.map(|window_index| {
+        std::array::from_fn(|offset| {
+            let path_index = window_index + offset as isize;
+            if path_index < 0 || path_index >= path.len() as isize {
+                None
+            } else {
+                Some(path[path_index as usize])
+            }
+        })
+    })
 }
 
-#[allow(dead_code)]
-pub(crate) fn window_policy<'a, Certificate, Error, const WINDOW_SIZE: usize>(
-    path: &[&'a Certificate],
-    predicate: impl Fn([Option<&'a Certificate>; WINDOW_SIZE]) -> std::result::Result<(), Error>,
-) -> std::result::Result<(), Error> {
-    fold_policy(path, (), |window, ()| predicate(window))
-}
-
-pub(crate) fn window_policy_1<'a, Certificate, Error>(
-    path: &[&'a Certificate],
-    predicate: impl Fn([Option<&'a Certificate>; 1]) -> std::result::Result<(), Error>,
-) -> std::result::Result<(), Error> {
-    window_policy::<_, Error, 1>(path, predicate)
-}
-
+/// Evaluates the implemented RFC 5280 path policy subset for an ordered path.
+///
+/// This assumes the path has already passed signature verification and is
+/// ordered from the trusted root toward the target certificate.
 pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
     path: &[&Backend::Certificate],
     unix_time: Duration,
@@ -78,37 +53,34 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
         return Err("Certificate path must not be empty".into());
     }
 
-    // Subject and issuer name constraints
-    window_policy::<_, Box<dyn std::error::Error>, 2>(path, |window| match window {
-        [None, Some(cert)] => {
-            if !Backend::is_self_issued(cert)? {
-                return Err(format!(
-                    "First certificate {} is not self-issued",
-                    Backend::subject_name(cert)
-                )
-                .into());
+    // Issuer validation
+    for window in padded_windows::<_, 2>(path) {
+        match window {
+            [None, Some(cert)] => {
+                if !Backend::is_self_issued(cert)? {
+                    return Err(format!(
+                        "First certificate {} is not self-issued",
+                        Backend::subject_name(cert)
+                    )
+                    .into());
+                }
             }
-
-            Ok(())
-        }
-        [Some(issuer), Some(subject)] => {
-            if !Backend::issuer_name_matches_subject(subject, issuer)? {
-                return Err(format!(
-                    "Issuer name {} does not match issuing certificate subject name {}",
-                    Backend::issuer_name(subject),
-                    Backend::subject_name(issuer)
-                )
-                .into());
+            [Some(issuer), Some(subject)] => {
+                if !Backend::issuer_name_matches_subject(subject, issuer)? {
+                    return Err(format!(
+                        "Issuer name {} does not match issuing certificate subject name {}",
+                        Backend::issuer_name(subject),
+                        Backend::subject_name(issuer)
+                    )
+                    .into());
+                }
             }
-
-            Ok(())
+            [Some(_), None] => {}
+            [None, None] => return Err("Certificate path must not be empty".into()),
         }
-        [Some(_), None] => Ok(()),
-        [None, None] => Err("Certificate path must not be empty".into()),
-    })?;
+    }
 
-    // Validity
-    window_policy_1::<_, Box<dyn std::error::Error>>(path, |window| {
+    for window in padded_windows::<_, 1>(path) {
         let cert = window[0].unwrap();
         let cert_subject = Backend::subject_name(cert);
         if !Backend::is_valid_at(cert, unix_time)? {
@@ -124,64 +96,60 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
         assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_CONSTRAINTS)?;
         assert_skipped_extension_not_present::<Backend>(cert, oid::INHIBIT_ANY_POLICY)?;
         assert_no_unhandled_critical_extensions::<Backend>(cert)?;
-        Ok(())
-    })?;
+    }
 
-    // CA constraints
-    window_policy::<_, Box<dyn std::error::Error>, 2>(path, |window| match window {
-        [Some(cert), Some(_)] => {
-            if Backend::version(cert)? != 2 {
-                return Err(format!(
-                    "Issuer certificate {} must be a v3 certificate",
-                    Backend::subject_name(cert)
-                )
-                .into());
-            }
-
-            let basic_constraints = basic_constraints::<Backend>(cert)?.ok_or_else(|| {
-                format!(
-                    "Issuer certificate {} is missing basicConstraints",
-                    Backend::subject_name(cert)
-                )
-            })?;
-            if !basic_constraints.critical {
-                return Err(format!(
-                    "Issuer certificate {} basicConstraints extension must be critical",
-                    Backend::subject_name(cert)
-                )
-                .into());
-            }
-            if !basic_constraints.ca {
-                return Err(format!(
-                    "Issuer certificate {} basicConstraints cA must be asserted",
-                    Backend::subject_name(cert)
-                )
-                .into());
-            }
-
-            if let Some(key_usage) = key_usage::<Backend>(cert)? {
-                if !key_usage.key_cert_sign {
+    // assert basic_constraints and key usage for all certs with a child - ie a non-leaf cert
+    for window in padded_windows::<_, 2>(path) {
+        match window {
+            [Some(cert), Some(_)] => {
+                if Backend::version(cert)? != 2 {
                     return Err(format!(
-                        "Issuer certificate {} keyUsage must allow certificate signing",
+                        "Issuer certificate {} must be a v3 certificate",
                         Backend::subject_name(cert)
                     )
                     .into());
                 }
+
+                let basic_constraints = basic_constraints::<Backend>(cert)?.ok_or_else(|| {
+                    format!(
+                        "Issuer certificate {} is missing basicConstraints",
+                        Backend::subject_name(cert)
+                    )
+                })?;
+                if !basic_constraints.critical {
+                    return Err(format!(
+                        "Issuer certificate {} basicConstraints extension must be critical",
+                        Backend::subject_name(cert)
+                    )
+                    .into());
+                }
+                if !basic_constraints.ca {
+                    return Err(format!(
+                        "Issuer certificate {} basicConstraints cA must be asserted",
+                        Backend::subject_name(cert)
+                    )
+                    .into());
+                }
+
+                if let Some(key_usage) = key_usage::<Backend>(cert)? {
+                    if !key_usage.key_cert_sign {
+                        return Err(format!(
+                            "Issuer certificate {} keyUsage must allow certificate signing",
+                            Backend::subject_name(cert)
+                        )
+                        .into());
+                    }
+                }
             }
-
-            Ok(())
+            [None, Some(_)] | [Some(_), None] => {}
+            [None, None] => return Err("Certificate path must not be empty".into()),
         }
-        [None, Some(_)] | [Some(_), None] => Ok(()),
-        [None, None] => Err("Certificate path must not be empty".into()),
-    })?;
+    }
 
-    fold_policy::<_, _, Box<dyn std::error::Error>, 2>(
-        path,
-        path.len(),
-        |window, max_path_length| match window {
+    let mut max_path_length = path.len();
+    for window in padded_windows::<_, 2>(path) {
+        match window {
             [Some(cert), Some(_)] => {
-                let mut max_path_length = max_path_length;
-
                 if !Backend::is_self_issued(cert)? {
                     if max_path_length == 0 {
                         return Err(format!(
@@ -205,17 +173,16 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
                 {
                     max_path_length = max_path_length.min(path_len_constraint);
                 }
-
-                Ok(max_path_length)
             }
-            [None, Some(_)] | [Some(_), None] => Ok(max_path_length),
-            [None, None] => Err("Certificate path must not be empty".into()),
-        },
-    )?;
+            [None, Some(_)] | [Some(_), None] => {}
+            [None, None] => return Err("Certificate path must not be empty".into()),
+        }
+    }
 
     Ok(())
 }
 
+/// Decodes the RFC 5280 `basicConstraints` extension from a certificate.
 fn basic_constraints<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
 ) -> super::Result<Option<BasicConstraints>> {
@@ -247,6 +214,7 @@ fn basic_constraints<Backend: CertificateBackend>(
     }))
 }
 
+/// Decodes the RFC 5280 `keyUsage` extension fields used by path validation.
 fn key_usage<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
 ) -> super::Result<Option<KeyUsage>> {
@@ -273,19 +241,23 @@ fn key_usage<Backend: CertificateBackend>(
     }))
 }
 
+/// Minimal DER TLV reader for the extension shapes used in this module.
 struct DerReader<'a> {
     input: &'a [u8],
 }
 
 impl<'a> DerReader<'a> {
+    /// Creates a reader over the provided DER bytes.
     fn new(input: &'a [u8]) -> Self {
         Self { input }
     }
 
+    /// Returns the next tag without advancing the reader.
     fn peek_tag(&self) -> Option<u8> {
         self.input.first().copied()
     }
 
+    /// Reads a DER BOOLEAN value.
     fn read_bool(&mut self) -> super::Result<bool> {
         let value = self.read_tagged(0x01)?;
         if value.len() != 1 {
@@ -295,6 +267,7 @@ impl<'a> DerReader<'a> {
         Ok(value[0] != 0)
     }
 
+    /// Reads a non-negative DER INTEGER value into `usize`.
     fn read_usize(&mut self) -> super::Result<usize> {
         let value = self.read_tagged(0x02)?;
         if value.is_empty() {
@@ -313,6 +286,7 @@ impl<'a> DerReader<'a> {
         })
     }
 
+    /// Reads a TLV value with the expected tag and advances the reader.
     fn read_tagged(&mut self, expected_tag: u8) -> super::Result<&'a [u8]> {
         let Some((&tag, rest)) = self.input.split_first() else {
             return Err("Unexpected end of DER input".into());
@@ -331,6 +305,7 @@ impl<'a> DerReader<'a> {
         Ok(value)
     }
 
+    /// Fails if any unread bytes remain.
     fn finish(&self) -> super::Result<()> {
         if self.input.is_empty() {
             Ok(())
@@ -340,6 +315,7 @@ impl<'a> DerReader<'a> {
     }
 }
 
+/// Reads a DER length and returns the decoded length plus remaining bytes.
 fn read_der_length(input: &[u8]) -> super::Result<(usize, &[u8])> {
     let Some((&first, rest)) = input.split_first() else {
         return Err("Unexpected end of DER length".into());
@@ -367,6 +343,7 @@ fn read_der_length(input: &[u8]) -> super::Result<(usize, &[u8])> {
     Ok((length, rest))
 }
 
+/// Rejects an extension that this partial policy does not implement.
 fn assert_skipped_extension_not_present<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
     oid: &str,
@@ -383,6 +360,7 @@ fn assert_skipped_extension_not_present<Backend: CertificateBackend>(
     Ok(())
 }
 
+/// Rejects critical extensions outside the subset handled by this module.
 fn assert_no_unhandled_critical_extensions<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
 ) -> super::Result<()> {
@@ -417,19 +395,17 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use super::{fold_policy, rfc5280_policy, window_policy, BasicConstraints, KeyUsage};
+    use super::{padded_windows, rfc5280_policy, BasicConstraints, KeyUsage};
     use crate::{CertificateBackend, Result};
 
     #[test]
-    fn fold_policy_evaluates_padded_windows() {
+    fn padded_windows_evaluates_padded_windows() {
         let certificates = ["A", "B", "C"];
         let path = certificates.iter().collect::<Vec<_>>();
 
-        let windows = fold_policy::<_, _, (), 3>(&path, Vec::new(), |window, mut windows| {
-            windows.push(window.map(|entry| entry.copied()));
-            Ok(windows)
-        })
-        .unwrap();
+        let windows = padded_windows::<_, 3>(&path)
+            .map(|window| window.map(|entry| entry.copied()))
+            .collect::<Vec<_>>();
 
         assert_eq!(
             windows,
@@ -438,51 +414,55 @@ mod tests {
                 [None, Some("A"), Some("B")],
                 [Some("A"), Some("B"), Some("C")],
                 [Some("B"), Some("C"), None],
-                [Some("C"), None, None],
             ]
         );
     }
 
     #[test]
-    fn fold_policy_returns_final_accumulator() {
+    fn padded_windows_can_drive_accumulation() {
         let certificates = [1, 2, 3];
         let path = certificates.iter().collect::<Vec<_>>();
 
-        let sum = fold_policy::<_, _, (), 1>(&path, 0, |[cert], sum| {
-            Ok(sum + *cert.expect("window should contain one certificate"))
-        })
-        .unwrap();
+        let mut sum = 0;
+        for [cert] in padded_windows::<_, 1>(&path) {
+            sum += *cert.expect("window should contain one certificate");
+        }
 
-        assert_eq!(sum, 6);
+        assert_eq!(sum, 3);
     }
 
     #[test]
-    fn fold_policy_short_circuits_on_first_error() {
+    fn padded_windows_can_drive_fallible_loops() {
         let certificates = [1, 2, 3];
         let path = certificates.iter().collect::<Vec<_>>();
+        let mut count = 0;
 
-        let error = fold_policy::<_, _, &str, 1>(&path, 0, |[cert], count| {
-            if *cert.expect("window should contain one certificate") == 2 {
-                return Err("stop");
+        let error = (|| {
+            for [cert] in padded_windows::<_, 1>(&path) {
+                if *cert.expect("window should contain one certificate") == 2 {
+                    return Err("stop");
+                }
+                count += 1;
             }
-
-            Ok(count + 1)
-        })
+            Ok(())
+        })()
         .expect_err("policy should stop at failing certificate");
 
         assert_eq!(error, "stop");
+        assert_eq!(count, 1);
     }
 
     #[test]
-    fn window_policy_discards_accumulator() {
+    fn padded_windows_supports_pairwise_checks() {
         let certificates = ["A", "B"];
         let path = certificates.iter().collect::<Vec<_>>();
 
-        window_policy::<_, (), 2>(&path, |window| match window.map(|entry| entry.copied()) {
-            [None, Some("A")] | [Some("A"), Some("B")] | [Some("B"), None] => Ok(()),
-            unexpected => panic!("unexpected window: {:?}", unexpected),
-        })
-        .unwrap();
+        for window in padded_windows::<_, 2>(&path) {
+            match window.map(|entry| entry.copied()) {
+                [None, Some("A")] | [Some("A"), Some("B")] | [Some("B"), None] => {}
+                unexpected => panic!("unexpected window: {:?}", unexpected),
+            }
+        }
     }
 
     #[test]
