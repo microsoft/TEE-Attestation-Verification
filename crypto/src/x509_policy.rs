@@ -4,18 +4,6 @@ use std::time::Duration;
 
 use super::CertificateBackend;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct BasicConstraints {
-    critical: bool,
-    ca: bool,
-    path_len_constraint: Option<usize>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct KeyUsage {
-    key_cert_sign: bool,
-}
-
 /// Iterates over a path with padded sliding windows.
 ///
 /// For a window size of 3 over `[A, B, C]`, the windows are
@@ -110,7 +98,7 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
                     .into());
                 }
 
-                let basic_constraints = basic_constraints::<Backend>(cert)?.ok_or_else(|| {
+                let basic_constraints = Backend::basic_constraints(cert)?.ok_or_else(|| {
                     format!(
                         "Issuer certificate {} is missing basicConstraints",
                         Backend::subject_name(cert)
@@ -131,7 +119,7 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
                     .into());
                 }
 
-                if let Some(key_usage) = key_usage::<Backend>(cert)? {
+                if let Some(key_usage) = Backend::key_usage(cert)? {
                     if !key_usage.key_cert_sign {
                         return Err(format!(
                             "Issuer certificate {} keyUsage must allow certificate signing",
@@ -163,7 +151,7 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
                 }
 
                 if let Some(path_len_constraint) =
-                    basic_constraints::<Backend>(cert)?.and_then(|bc| {
+                    Backend::basic_constraints(cert)?.and_then(|bc| {
                         if bc.ca {
                             bc.path_len_constraint
                         } else {
@@ -180,167 +168,6 @@ pub(crate) fn rfc5280_policy<Backend: CertificateBackend>(
     }
 
     Ok(())
-}
-
-/// Decodes the RFC 5280 `basicConstraints` extension from a certificate.
-fn basic_constraints<Backend: CertificateBackend>(
-    cert: &Backend::Certificate,
-) -> super::Result<Option<BasicConstraints>> {
-    let Some(value) = Backend::get_extension_value_by_oid(cert, oid::BASIC_CONSTRAINTS)? else {
-        return Ok(None);
-    };
-    let critical = Backend::extension_criticality(cert, oid::BASIC_CONSTRAINTS)?.unwrap_or(false);
-    let mut reader = DerReader::new(&value);
-    let sequence = reader.read_tagged(0x30)?;
-    reader.finish()?;
-
-    let mut sequence = DerReader::new(sequence);
-    let ca = if sequence.peek_tag() == Some(0x01) {
-        sequence.read_bool()?
-    } else {
-        false
-    };
-    let path_len_constraint = if sequence.peek_tag() == Some(0x02) {
-        Some(sequence.read_usize()?)
-    } else {
-        None
-    };
-    sequence.finish()?;
-
-    Ok(Some(BasicConstraints {
-        critical,
-        ca,
-        path_len_constraint,
-    }))
-}
-
-/// Decodes the RFC 5280 `keyUsage` extension fields used by path validation.
-fn key_usage<Backend: CertificateBackend>(
-    cert: &Backend::Certificate,
-) -> super::Result<Option<KeyUsage>> {
-    let Some(value) = Backend::get_extension_value_by_oid(cert, oid::KEY_USAGE)? else {
-        return Ok(None);
-    };
-    let mut reader = DerReader::new(&value);
-    let bit_string = reader.read_tagged(0x03)?;
-    reader.finish()?;
-
-    if bit_string.is_empty() {
-        return Err("keyUsage BIT STRING missing unused-bit count".into());
-    }
-    let unused_bits = bit_string[0];
-    if unused_bits > 7 {
-        return Err("keyUsage BIT STRING has invalid unused-bit count".into());
-    }
-
-    Ok(Some(KeyUsage {
-        key_cert_sign: bit_string
-            .get(1)
-            .map(|first_byte| first_byte & 0x04 != 0)
-            .unwrap_or(false),
-    }))
-}
-
-/// Minimal DER TLV reader for the extension shapes used in this module.
-struct DerReader<'a> {
-    input: &'a [u8],
-}
-
-impl<'a> DerReader<'a> {
-    /// Creates a reader over the provided DER bytes.
-    fn new(input: &'a [u8]) -> Self {
-        Self { input }
-    }
-
-    /// Returns the next tag without advancing the reader.
-    fn peek_tag(&self) -> Option<u8> {
-        self.input.first().copied()
-    }
-
-    /// Reads a DER BOOLEAN value.
-    fn read_bool(&mut self) -> super::Result<bool> {
-        let value = self.read_tagged(0x01)?;
-        if value.len() != 1 {
-            return Err("BOOLEAN value must contain exactly one byte".into());
-        }
-
-        Ok(value[0] != 0)
-    }
-
-    /// Reads a non-negative DER INTEGER value into `usize`.
-    fn read_usize(&mut self) -> super::Result<usize> {
-        let value = self.read_tagged(0x02)?;
-        if value.is_empty() {
-            return Err("INTEGER value must not be empty".into());
-        }
-        if value[0] & 0x80 != 0 {
-            return Err("INTEGER value must be non-negative".into());
-        }
-
-        value.iter().try_fold(0usize, |acc, byte| {
-            acc.checked_mul(256)
-                .and_then(|acc| acc.checked_add(usize::from(*byte)))
-                .ok_or_else(|| {
-                    Box::<dyn std::error::Error>::from("INTEGER value does not fit usize")
-                })
-        })
-    }
-
-    /// Reads a TLV value with the expected tag and advances the reader.
-    fn read_tagged(&mut self, expected_tag: u8) -> super::Result<&'a [u8]> {
-        let Some((&tag, rest)) = self.input.split_first() else {
-            return Err("Unexpected end of DER input".into());
-        };
-        if tag != expected_tag {
-            return Err(format!("Unexpected DER tag {tag:#x}, expected {expected_tag:#x}").into());
-        }
-
-        let (length, rest) = read_der_length(rest)?;
-        if rest.len() < length {
-            return Err("DER length exceeds remaining input".into());
-        }
-
-        let (value, remaining) = rest.split_at(length);
-        self.input = remaining;
-        Ok(value)
-    }
-
-    /// Fails if any unread bytes remain.
-    fn finish(&self) -> super::Result<()> {
-        if self.input.is_empty() {
-            Ok(())
-        } else {
-            Err("Unexpected trailing DER input".into())
-        }
-    }
-}
-
-/// Reads a DER length and returns the decoded length plus remaining bytes.
-fn read_der_length(input: &[u8]) -> super::Result<(usize, &[u8])> {
-    let Some((&first, rest)) = input.split_first() else {
-        return Err("Unexpected end of DER length".into());
-    };
-
-    if first & 0x80 == 0 {
-        return Ok((usize::from(first), rest));
-    }
-
-    let length_bytes = usize::from(first & 0x7f);
-    if length_bytes == 0 {
-        return Err("Indefinite DER lengths are not allowed".into());
-    }
-    if rest.len() < length_bytes {
-        return Err("DER length byte count exceeds remaining input".into());
-    }
-
-    let (length, rest) = rest.split_at(length_bytes);
-    let length = length.iter().try_fold(0usize, |acc, byte| {
-        acc.checked_mul(256)
-            .and_then(|acc| acc.checked_add(usize::from(*byte)))
-            .ok_or_else(|| Box::<dyn std::error::Error>::from("DER length does not fit usize"))
-    })?;
-
-    Ok((length, rest))
 }
 
 /// Rejects an extension that this partial policy does not implement.
@@ -395,8 +222,8 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use super::{padded_windows, rfc5280_policy, BasicConstraints, KeyUsage};
-    use crate::{CertificateBackend, Result};
+    use super::{padded_windows, rfc5280_policy};
+    use crate::{BasicConstraints, CertificateBackend, KeyUsage, Result};
 
     #[test]
     fn padded_windows_evaluates_padded_windows() {
@@ -665,14 +492,10 @@ mod tests {
         }
 
         fn get_extension_value_by_oid(
-            cert: &Self::Certificate,
-            oid: &str,
+            _cert: &Self::Certificate,
+            _oid: &str,
         ) -> Result<Option<Vec<u8>>> {
-            match oid {
-                "2.5.29.19" => Ok(cert.basic_constraints.map(encode_basic_constraints)),
-                "2.5.29.15" => Ok(cert.key_usage.map(encode_key_usage)),
-                _ => Ok(None),
-            }
+            unimplemented!("test backend does not expose raw extensions")
         }
 
         fn subject_name(cert: &Self::Certificate) -> String {
@@ -698,6 +521,14 @@ mod tests {
             Ok(if cert.v3 { 2 } else { 0 })
         }
 
+        fn basic_constraints(cert: &Self::Certificate) -> Result<Option<BasicConstraints>> {
+            Ok(cert.basic_constraints)
+        }
+
+        fn key_usage(cert: &Self::Certificate) -> Result<Option<KeyUsage>> {
+            Ok(cert.key_usage)
+        }
+
         fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
             Ok(cert.extensions.get(oid).copied())
         }
@@ -707,37 +538,6 @@ mod tests {
                 .iter()
                 .filter_map(|(oid, critical)| critical.then(|| oid.clone()))
                 .collect()
-        }
-    }
-
-    fn encode_basic_constraints(basic_constraints: BasicConstraints) -> Vec<u8> {
-        let mut value = Vec::new();
-        if basic_constraints.ca {
-            value.extend([0x01, 0x01, 0xff]);
-        }
-        if let Some(path_len_constraint) = basic_constraints.path_len_constraint {
-            value.push(0x02);
-            value.push(0x01);
-            value.push(
-                path_len_constraint
-                    .try_into()
-                    .expect("test path len fits u8"),
-            );
-        }
-
-        let mut der = vec![
-            0x30,
-            value.len().try_into().expect("test DER length fits u8"),
-        ];
-        der.extend(value);
-        der
-    }
-
-    fn encode_key_usage(key_usage: KeyUsage) -> Vec<u8> {
-        if key_usage.key_cert_sign {
-            vec![0x03, 0x02, 0x02, 0x04]
-        } else {
-            vec![0x03, 0x01, 0x00]
         }
     }
 }

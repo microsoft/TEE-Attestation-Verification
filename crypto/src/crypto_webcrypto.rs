@@ -157,6 +157,14 @@ impl CertificateBackend for Crypto {
         Ok(cert.inner.version())
     }
 
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<super::BasicConstraints>> {
+        cert.inner.basic_constraints()
+    }
+
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
+        cert.inner.key_usage()
+    }
+
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
         cert.inner.extension_criticality(oid)
     }

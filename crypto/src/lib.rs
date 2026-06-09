@@ -45,6 +45,18 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BasicConstraints {
+    pub critical: bool,
+    pub ca: bool,
+    pub path_len_constraint: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyUsage {
+    pub key_cert_sign: bool,
+}
+
 /// API for the certificate types of the backend
 pub trait CertificateBackend {
     type Certificate: Clone;
@@ -90,6 +102,12 @@ pub trait CertificateBackend {
 
     /// Return the zero-based X.509 version number: 0 = v1, 1 = v2, 2 = v3.
     fn version(cert: &Self::Certificate) -> Result<u8>;
+
+    /// Return decoded RFC 5280 basicConstraints metadata if present.
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<BasicConstraints>>;
+
+    /// Return decoded RFC 5280 keyUsage metadata if present.
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<KeyUsage>>;
 
     /// Return the criticality of an extension by dotted-decimal OID if present.
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>>;

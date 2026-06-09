@@ -23,7 +23,8 @@ use openssl::x509::verify::X509VerifyFlags;
 use openssl_sys::{
     ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_critical,
     X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
-    X509_get_ext_count,
+    X509_get_ext_count, X509_get_extension_flags, X509_get_key_usage, X509v3_KU_KEY_CERT_SIGN,
+    EXFLAG_CA,
 };
 use std::cmp::Ordering;
 
@@ -208,6 +209,36 @@ impl CertificateBackend for Crypto {
             .map_err(|_| "OpenSSL returned a negative certificate version".into())
     }
 
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<super::BasicConstraints>> {
+        let critical = match Self::extension_criticality(cert, oid::BASIC_CONSTRAINTS)? {
+            Some(critical) => critical,
+            None => return Ok(None),
+        };
+        let path_len_constraint = cert
+            .pathlen()
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| "pathLenConstraint does not fit usize")?;
+        let flags = unsafe { X509_get_extension_flags(cert.as_ptr()) };
+
+        Ok(Some(super::BasicConstraints {
+            critical,
+            ca: flags & EXFLAG_CA != 0,
+            path_len_constraint,
+        }))
+    }
+
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
+        if Self::extension_criticality(cert, oid::KEY_USAGE)?.is_none() {
+            return Ok(None);
+        }
+        let key_usage = unsafe { X509_get_key_usage(cert.as_ptr()) };
+
+        Ok(Some(super::KeyUsage {
+            key_cert_sign: key_usage & X509v3_KU_KEY_CERT_SIGN != 0,
+        }))
+    }
+
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
         let oid = Asn1Object::from_str(oid)
             .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
@@ -254,6 +285,11 @@ impl CertificateBackend for Crypto {
             })
             .collect()
     }
+}
+
+mod oid {
+    pub const BASIC_CONSTRAINTS: &str = "2.5.29.19";
+    pub const KEY_USAGE: &str = "2.5.29.15";
 }
 
 impl CryptoBackend for Crypto {

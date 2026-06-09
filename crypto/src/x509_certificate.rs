@@ -9,9 +9,12 @@ use x509_cert::der::{
     asn1::AnyRef, oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode,
     DecodePem, Encode, EncodePem,
 };
+use x509_cert::ext::pkix::{BasicConstraints as X509BasicConstraints, KeyUsage as X509KeyUsage};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 
-use super::{Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
+use super::{
+    BasicConstraints, KeyUsage, Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Certificate {
@@ -185,6 +188,28 @@ impl Certificate {
 
     pub fn version(&self) -> u8 {
         self.inner.tbs_certificate.version as u8
+    }
+
+    pub fn basic_constraints(&self) -> Result<Option<BasicConstraints>> {
+        Ok(self
+            .inner
+            .tbs_certificate
+            .get::<X509BasicConstraints>()?
+            .map(|(critical, basic_constraints)| BasicConstraints {
+                critical,
+                ca: basic_constraints.ca,
+                path_len_constraint: basic_constraints.path_len_constraint.map(usize::from),
+            }))
+    }
+
+    pub fn key_usage(&self) -> Result<Option<KeyUsage>> {
+        Ok(self
+            .inner
+            .tbs_certificate
+            .get::<X509KeyUsage>()?
+            .map(|(_, key_usage)| KeyUsage {
+                key_cert_sign: key_usage.key_cert_sign(),
+            }))
     }
 
     pub fn extension_criticality(&self, oid: &str) -> Result<Option<bool>> {
