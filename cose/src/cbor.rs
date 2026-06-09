@@ -29,19 +29,31 @@ impl<T> SimpleArena<T> {
 /// Covers the major CBOR types: integers, simple values, byte/text strings,
 /// arrays, maps, and tagged values. Unlike [`CborNondet`], this type owns
 /// all its data and can be freely stored, cloned, and nested.
+///
+/// COSE_Sign1 envelopes are represented as [`CborValue::Tagged`] with tag 18
+/// and an array payload.
 #[derive(Clone, PartialEq)]
 pub enum CborValue {
+    /// Positive or negative integer.
     Int(i64),
+    /// CBOR simple value, such as `false`, `true`, or `null`.
     Simple(u8),
+    /// CBOR byte string.
     ByteString(Vec<u8>),
+    /// CBOR UTF-8 text string.
     TextString(String),
+    /// CBOR array.
     Array(Vec<CborValue>),
+    /// CBOR map stored as key/value pairs.
     Map(Vec<(CborValue, CborValue)>),
+    /// CBOR tagged value.
     Tagged { tag: u64, payload: Box<CborValue> },
 }
 
 impl CborValue {
-    /// Parse CBOR bytes into an owned `CborValue`.
+    /// Parse CBOR bytes into an owned [`CborValue`].
+    ///
+    /// The entire input must be consumed. Trailing bytes are rejected.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let (item, remainder) =
             cbor_nondet_parse(None, false, bytes).ok_or("Failed to parse CBOR bytes")?;
@@ -115,7 +127,10 @@ impl CborValue {
         }
     }
 
-    /// Get array element by index. Returns an error if not an array.
+    /// Get an array element by index.
+    ///
+    /// Returns an error if this value is not an array or if `index` is out of
+    /// bounds.
     pub fn array_at(&self, index: usize) -> Result<&CborValue, String> {
         match self {
             CborValue::Array(items) => items
@@ -125,20 +140,27 @@ impl CborValue {
         }
     }
 
-    /// Look up a map value by integer key. Returns an error if not a map.
+    /// Look up a map value by integer key.
+    ///
+    /// Returns an error if this value is not a map or if the key is absent.
     pub fn map_at_int(&self, key: i64) -> Result<&CborValue, String> {
         let target = CborValue::Int(key);
         self.map_at(&target)
     }
 
-    /// Look up a map value by text string key. Returns an error if not a map.
+    /// Look up a map value by text string key.
+    ///
+    /// Returns an error if this value is not a map or if the key is absent.
     pub fn map_at_str(&self, key: &str) -> Result<&CborValue, String> {
         let target = CborValue::TextString(key.to_string());
         self.map_at(&target)
     }
 
-    /// Look up a map value by a CborValue key (must be Int or TextString).
-    /// Returns an error if not a map or if the key type is invalid.
+    /// Look up a map value by a [`CborValue`] key.
+    ///
+    /// Only integer and text-string keys are supported. Returns an error if
+    /// this value is not a map, if the key type is unsupported, or if the key is
+    /// absent.
     pub fn map_at(&self, key: &CborValue) -> Result<&CborValue, String> {
         match key {
             CborValue::Int(_) | CborValue::TextString(_) => {}
@@ -154,7 +176,9 @@ impl CborValue {
         }
     }
 
-    /// Iterate over array elements. Returns an error if not an array.
+    /// Iterate over array elements.
+    ///
+    /// Returns an error if this value is not an array.
     pub fn iter_array(&self) -> Result<std::slice::Iter<'_, CborValue>, String> {
         match self {
             CborValue::Array(items) => Ok(items.iter()),
@@ -163,7 +187,8 @@ impl CborValue {
     }
 
     /// Iterate over map entries as `(key, value)` pairs.
-    /// Returns an error if not a map.
+    ///
+    /// Returns an error if this value is not a map.
     pub fn iter_map(&self) -> Result<impl Iterator<Item = (&CborValue, &CborValue)>, String> {
         match self {
             CborValue::Map(entries) => Ok(entries.iter().map(|(k, v)| (k, v))),
@@ -172,7 +197,8 @@ impl CborValue {
     }
 
     /// Number of elements in an array or map.
-    /// Returns an error for other types.
+    ///
+    /// Returns an error for other value types.
     pub fn len(&self) -> Result<usize, String> {
         match self {
             CborValue::Array(items) => Ok(items.len()),

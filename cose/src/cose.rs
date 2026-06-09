@@ -6,9 +6,22 @@ use crypto::{
 
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 
-/// Return the signature algorithm for a COSE algorithm identifier.
+/// Return the backend signature algorithm for a COSE algorithm identifier.
 ///
-/// Algorithm identifiers are from the IANA COSE Algorithms registry.
+/// Supported identifiers are:
+///
+/// | COSE alg | Algorithm |
+/// |---:|---|
+/// | `-7` | ECDSA P-256 / SHA-256 |
+/// | `-35` | ECDSA P-384 / SHA-384 |
+/// | `-36` | ECDSA P-521 / SHA-512 |
+/// | `-37` | RSA-PSS / SHA-256 |
+/// | `-38` | RSA-PSS / SHA-384 |
+/// | `-39` | RSA-PSS / SHA-512 |
+///
+/// Algorithm identifiers are from the IANA COSE Algorithms registry. RSA keys
+/// are compatible across the RSA-PSS hash variants; the COSE signature
+/// algorithm controls the digest and salt length used for verification.
 pub fn signature_key_algorithm_for_cose_alg(alg: i64) -> Result<SignatureKeyAlgorithm, String> {
     match alg {
         -7 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256)),
@@ -38,8 +51,22 @@ fn sig_structure(phdr: &[u8], payload: &[u8]) -> Result<Vec<u8>, String> {
     ])
 }
 
-/// Verify a COSE_Sign1 from pre-parsed components with the active synchronous
-/// crypto backend.
+/// Verify a COSE_Sign1 signature with the active synchronous crypto backend.
+///
+/// `phdr` must be the serialized protected-header byte string from the
+/// COSE_Sign1 envelope. `payload` is the payload bytes covered by the signature,
+/// either from the embedded payload field or supplied by the caller for detached
+/// payload use cases. `sig` is the COSE signature byte string.
+///
+/// The function rebuilds the COSE Sig_structure:
+///
+/// ```text
+/// ["Signature1", phdr, b"", payload]
+/// ```
+///
+/// and verifies `sig` with `key` and `alg`. Unsupported algorithms, key/alg
+/// mismatches, malformed signatures, and failed signature verification are
+/// returned as errors.
 #[cfg(sync_crypto)]
 pub fn cose_verify1(
     key: &<crypto::Crypto as CryptoBackend>::Key,
@@ -59,8 +86,10 @@ pub fn cose_verify1(
         .map_err(|e| e.to_string())
 }
 
-/// Verify a COSE_Sign1 from pre-parsed components with the active asynchronous
-/// crypto backend.
+/// Verify a COSE_Sign1 signature with the active asynchronous crypto backend.
+///
+/// This is the async equivalent of [`cose_verify1`]. Use it with backends such
+/// as WebCrypto, where signature verification is asynchronous.
 #[cfg(async_crypto)]
 pub async fn cose_verify1_async(
     key: &<crypto::Crypto as AsyncCryptoBackend>::Key,
