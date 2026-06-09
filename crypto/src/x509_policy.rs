@@ -86,11 +86,11 @@ where
             )
             .into());
         }
-        assert_skipped_extension_not_present::<Backend>(cert, oid::CERTIFICATE_POLICIES)?;
-        assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_MAPPINGS)?;
-        assert_skipped_extension_not_present::<Backend>(cert, oid::NAME_CONSTRAINTS)?;
-        assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_CONSTRAINTS)?;
-        assert_skipped_extension_not_present::<Backend>(cert, oid::INHIBIT_ANY_POLICY)?;
+        assert_skipped_extension_not_present::<Backend>(cert, oid::CERTIFICATE_POLICIES, false)?;
+        assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_MAPPINGS, true)?;
+        assert_skipped_extension_not_present::<Backend>(cert, oid::NAME_CONSTRAINTS, true)?;
+        assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_CONSTRAINTS, true)?;
+        assert_skipped_extension_not_present::<Backend>(cert, oid::INHIBIT_ANY_POLICY, true)?;
         assert_no_unhandled_critical_extensions::<Backend>(cert)?;
     }
 
@@ -182,8 +182,10 @@ where
 fn assert_skipped_extension_not_present<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
     oid: &str,
+    reject_non_critical: bool,
 ) -> super::Result<()> {
-    if Backend::extension_criticality(cert, oid)?.is_some() {
+    let criticality = Backend::extension_criticality(cert, oid)?;
+    if criticality == Some(true) || (reject_non_critical && criticality.is_some()) {
         return Err(format!(
             "Certificate {} contains unsupported extension {}",
             Backend::subject_name(cert),
@@ -343,25 +345,24 @@ mod tests {
     }
 
     #[test]
-    fn rfc5280_policy_rejects_skipped_extension() {
+    fn rfc5280_policy_rejects_critical_certificate_policies() {
         let mut root = TestCertificate::ca("Root", "Root");
         root.extensions.insert("2.5.29.32".to_string(), true);
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
         policy(&path, Duration::from_secs(10))
-            .expect_err("unsupported skipped extension must fail");
+            .expect_err("unsupported critical certificatePolicies must fail");
     }
 
     #[test]
-    fn rfc5280_policy_rejects_non_critical_skipped_extension() {
+    fn rfc5280_policy_allows_non_critical_certificate_policies() {
         let mut root = TestCertificate::ca("Root", "Root");
         root.extensions.insert("2.5.29.32".to_string(), false);
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
 
-        policy(&path, Duration::from_secs(10))
-            .expect_err("unsupported skipped extension must fail even when non-critical");
+        policy(&path, Duration::from_secs(10)).unwrap();
     }
 
     #[test]
