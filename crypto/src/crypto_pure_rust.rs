@@ -17,7 +17,9 @@ use rsa::{
     RsaPublicKey,
 };
 use sha2::{Sha256, Sha384, Sha512};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::x509_certificate::{self, Certificate};
 use super::x509_policy;
@@ -289,8 +291,19 @@ impl CryptoBackend for Crypto {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn unix_time_now() -> Result<Duration> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?)
+}
+
+#[cfg(target_family = "wasm")]
+fn unix_time_now() -> Result<Duration> {
+    let millis = js_sys::Date::now();
+    if !millis.is_finite() || millis < 0.0 || millis > u64::MAX as f64 {
+        return Err("Failed to read current Unix time from JavaScript Date".into());
+    }
+
+    Ok(Duration::from_millis(millis as u64))
 }
 
 fn policy_path<'a>(
