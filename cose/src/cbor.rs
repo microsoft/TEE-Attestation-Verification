@@ -6,7 +6,7 @@ use cborrs_nondet::cbornondet::*;
 /// Depth 0 is the root item. Containers (arrays, maps, and tags) increment the
 /// depth of their children. This mirrors CCF's CBOR wrapper default and prevents
 /// deeply nested untrusted inputs from exhausting the Rust call stack.
-pub const MAX_CBOR_NESTING_DEPTH: usize = 16;
+pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
 
 struct SimpleArena<T>(std::cell::RefCell<Vec<Box<[T]>>>);
 
