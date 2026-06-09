@@ -212,8 +212,8 @@ pub(crate) fn ark_matches_pinned(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pinned_ark = crate::pinned_arks::get_ark(generation)?;
 
-    let pinned_issuer = Crypto::issuer_name(&pinned_ark);
-    let provided_issuer = Crypto::issuer_name(ark);
+    let pinned_issuer = Crypto::issuer_name_der(&pinned_ark)?;
+    let provided_issuer = Crypto::issuer_name_der(ark)?;
     if pinned_issuer != provided_issuer {
         return Err(format!(
             "Provided ARK issuer does not match pinned ARK for {}",

@@ -147,11 +147,12 @@ impl CertificateBackend for Crypto {
         cert.inner.issuer_name()
     }
 
-    fn issuer_name_matches_subject(
-        cert: &Self::Certificate,
-        issuer: &Self::Certificate,
-    ) -> Result<bool> {
-        cert.inner.issuer_name_matches_subject(&issuer.inner)
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.inner.subject_name_der()
+    }
+
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.inner.issuer_name_der()
     }
 
     fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {

@@ -517,11 +517,12 @@ mod tests {
             cert.issuer.clone()
         }
 
-        fn issuer_name_matches_subject(
-            cert: &Self::Certificate,
-            issuer: &Self::Certificate,
-        ) -> Result<bool> {
-            Ok(cert.issuer == issuer.subject)
+        fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+            Ok(cert.subject.as_bytes().to_vec())
+        }
+
+        fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+            Ok(cert.issuer.as_bytes().to_vec())
         }
 
         fn is_valid_at(cert: &Self::Certificate, unix_time: Duration) -> Result<bool> {

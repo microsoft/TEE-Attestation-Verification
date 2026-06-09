@@ -181,14 +181,12 @@ impl CertificateBackend for Crypto {
         format!("{:?}", cert.issuer_name())
     }
 
-    fn issuer_name_matches_subject(
-        cert: &Self::Certificate,
-        issuer: &Self::Certificate,
-    ) -> Result<bool> {
-        Ok(cert
-            .issuer_name()
-            .try_cmp(issuer.subject_name())
-            .map(|ordering| ordering == Ordering::Equal)?)
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        Ok(cert.subject_name().to_der()?)
+    }
+
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        Ok(cert.issuer_name().to_der()?)
     }
 
     fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {

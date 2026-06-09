@@ -92,11 +92,19 @@ pub trait CertificateBackend {
     /// Return the certificate issuer distinguished name for diagnostics.
     fn issuer_name(cert: &Self::Certificate) -> String;
 
+    /// Return the DER-encoded subject distinguished name.
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
+    /// Return the DER-encoded issuer distinguished name.
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
     /// Return whether `cert`'s issuer name matches `issuer`'s subject name.
     fn issuer_name_matches_subject(
         cert: &Self::Certificate,
         issuer: &Self::Certificate,
-    ) -> Result<bool>;
+    ) -> Result<bool> {
+        Ok(Self::issuer_name_der(cert)? == Self::subject_name_der(issuer)?)
+    }
 
     /// Return whether the certificate validity interval includes `unix_time`.
     fn is_valid_at(cert: &Self::Certificate, unix_time: Duration) -> Result<bool>;

@@ -176,8 +176,12 @@ impl Certificate {
         self.inner.tbs_certificate.issuer.to_string()
     }
 
-    pub fn issuer_name_matches_subject(&self, issuer: &Self) -> Result<bool> {
-        Ok(self.inner.tbs_certificate.issuer == issuer.inner.tbs_certificate.subject)
+    pub fn subject_name_der(&self) -> Result<Vec<u8>> {
+        Ok(self.inner.tbs_certificate.subject.to_der()?)
+    }
+
+    pub fn issuer_name_der(&self) -> Result<Vec<u8>> {
+        Ok(self.inner.tbs_certificate.issuer.to_der()?)
     }
 
     pub fn is_valid_at(&self, unix_time: std::time::Duration) -> Result<bool> {
