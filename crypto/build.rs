@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(sync_crypto)");
     println!("cargo:rustc-check-cfg=cfg(async_crypto)");

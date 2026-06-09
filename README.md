@@ -24,6 +24,7 @@ Read the crate-specific docs for API details:
 
 ## Crypto backend selection
 
+To be compliant in multiple environments, we provide backends using openssl and webcrypto, as well as a pure rust backend.
 At least one target-compatible backend must be enabled:
 
 | Feature | Platforms | sync | async | Notes |
@@ -32,15 +33,13 @@ At least one target-compatible backend must be enabled:
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 
-The attestation crate forwards these backend features to the crypto crate. Its
-default features defer to the crypto crate's defaults, while callers can disable
-defaults and choose a backend explicitly.
+These features are forwarded by `tee-attestation-verification-lib` to the crypto sub-crate.
 
 ## Quick start
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { version = "1.0.1", features = ["crypto_pure_rust"] }
+tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-X.X.X", features = ["crypto_openssl"] }
 ```
 
 ```rust
@@ -54,20 +53,6 @@ let ask = certificate_from_pem(ask_pem)?;
 
 sync::verify_attestation(&report, &vcek, &ChainVerification::WithPinnedArk { ask: &ask })?;
 ```
-
-Enable `kds` to fetch AMD certificate collateral automatically:
-
-```toml
-[dependencies]
-tee-attestation-verification-lib = { version = "1.0.1", features = ["crypto_pure_rust", "kds"] }
-```
-
-## Publishing
-
-The attestation crate depends on the crypto crate with both a local `path` and a
-crates.io `version`, so local workspace builds use `../crypto` and published
-builds resolve from crates.io. Publish `tee-attestation-verification-crypto`
-before `tee-attestation-verification-lib`.
 
 ## Trademarks
 

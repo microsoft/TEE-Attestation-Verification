@@ -13,6 +13,16 @@ permissions:
   contents: read
 
 jobs:
+  version-sync:
+    name: Version sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check Cargo versions match changelog
+        run: python3 scripts/check-version-sync.py --root-path "${{ github.workspace }}"
+
   format:
     name: Format check
     runs-on: ubuntu-latest
