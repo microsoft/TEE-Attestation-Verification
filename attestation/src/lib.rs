@@ -64,6 +64,7 @@ use crypto::{CertificateBackend, Crypto};
 
 pub use crypto::Certificate;
 pub use snp::report::AttestationReport;
+pub use snp::{Cpuid, Generation};
 
 /// Parses a PEM-encoded X.509 certificate using the enabled crypto backend.
 ///

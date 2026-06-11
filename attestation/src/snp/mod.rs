@@ -8,3 +8,5 @@ pub(crate) mod model;
 pub mod report;
 pub(crate) mod utils;
 pub mod verify;
+
+pub use model::{Cpuid, Generation};
