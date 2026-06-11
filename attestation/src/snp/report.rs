@@ -42,6 +42,8 @@ use zerocopy::{
     Unaligned,
 };
 
+use crate::snp::Generation;
+
 // ---------------------------------------------------------------------------
 // Decoded bitfield types
 // ---------------------------------------------------------------------------
@@ -225,6 +227,28 @@ pub struct TcbVersionMilanGenoa {
     pub microcode: u8,
 }
 
+impl PartialEq for TcbVersionMilanGenoa {
+    fn eq(&self, other: &Self) -> bool {
+        self.boot_loader == other.boot_loader
+            && self.tee == other.tee
+            && self.snp == other.snp
+            && self.microcode == other.microcode
+    }
+}
+
+impl Eq for TcbVersionMilanGenoa {}
+
+impl PartialOrd for TcbVersionMilanGenoa {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        partial_cmp_tcb_fields(&[
+            self.boot_loader.cmp(&other.boot_loader),
+            self.tee.cmp(&other.tee),
+            self.snp.cmp(&other.snp),
+            self.microcode.cmp(&other.microcode),
+        ])
+    }
+}
+
 /// TCB version layout used by Turin processors.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes)]
 #[repr(C)]
@@ -242,6 +266,41 @@ pub struct TcbVersionTurin {
     pub microcode: u8,
 }
 
+impl PartialEq for TcbVersionTurin {
+    fn eq(&self, other: &Self) -> bool {
+        self.fmc == other.fmc
+            && self.boot_loader == other.boot_loader
+            && self.tee == other.tee
+            && self.snp == other.snp
+            && self.microcode == other.microcode
+    }
+}
+
+impl Eq for TcbVersionTurin {}
+
+impl PartialOrd for TcbVersionTurin {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        partial_cmp_tcb_fields(&[
+            self.fmc.cmp(&other.fmc),
+            self.boot_loader.cmp(&other.boot_loader),
+            self.tee.cmp(&other.tee),
+            self.snp.cmp(&other.snp),
+            self.microcode.cmp(&other.microcode),
+        ])
+    }
+}
+
+fn partial_cmp_tcb_fields(field_orderings: &[std::cmp::Ordering]) -> Option<std::cmp::Ordering> {
+    let has_less = field_orderings.contains(&std::cmp::Ordering::Less);
+    let has_greater = field_orderings.contains(&std::cmp::Ordering::Greater);
+    match (has_less, has_greater) {
+        (false, false) => Some(std::cmp::Ordering::Equal),
+        (true, false) => Some(std::cmp::Ordering::Less),
+        (false, true) => Some(std::cmp::Ordering::Greater),
+        (true, true) => None,
+    }
+}
+
 /// Raw 8-byte TCB version field from an attestation report.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Default, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
@@ -249,6 +308,50 @@ pub struct TcbVersionRaw {
     /// Raw TCB bytes in report layout order.
     pub raw: [u8; 8],
 }
+
+/// A TCB version interpreted for a specific CPU generation.
+#[derive(Clone, Copy, Debug)]
+pub struct TcbVersionForGeneration {
+    pub generation: Generation,
+    pub tcb: TcbVersionRaw,
+}
+
+impl TcbVersionForGeneration {
+    pub const fn new(tcb: TcbVersionRaw, generation: Generation) -> Self {
+        Self { generation, tcb }
+    }
+}
+
+impl PartialEq for TcbVersionForGeneration {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+            && match self.generation {
+                Generation::Milan | Generation::Genoa => {
+                    self.tcb.as_milan_genoa() == other.tcb.as_milan_genoa()
+                }
+                Generation::Turin => self.tcb.as_turin() == other.tcb.as_turin(),
+            }
+    }
+}
+
+impl Eq for TcbVersionForGeneration {}
+
+impl PartialOrd for TcbVersionForGeneration {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.generation != other.generation {
+            return None;
+        }
+
+        match self.generation {
+            Generation::Milan | Generation::Genoa => self
+                .tcb
+                .as_milan_genoa()
+                .partial_cmp(&other.tcb.as_milan_genoa()),
+            Generation::Turin => self.tcb.as_turin().partial_cmp(&other.tcb.as_turin()),
+        }
+    }
+}
+
 impl TcbVersionRaw {
     /// Interprets the raw bytes using the Milan/Genoa TCB layout.
     pub fn as_milan_genoa(&self) -> TcbVersionMilanGenoa {
@@ -454,6 +557,11 @@ impl AttestationReport {
     /// Returns the decoded report flags bitfield.
     pub fn flags(&self) -> ReportFlags {
         ReportFlags::from_raw(self.flags.get())
+    }
+
+    /// Returns the CPU generation indicated by this report's CPUID family and model fields.
+    pub fn cpu_generation(&self) -> Result<Generation, Box<dyn std::error::Error>> {
+        Generation::from_family_and_model(self.cpuid_fam_id, self.cpuid_mod_id)
     }
 }
 
@@ -820,6 +928,89 @@ mod tests {
         }
     }
 
+    fn milan_genoa_tcb(boot_loader: u8, tee: u8, snp: u8, microcode: u8) -> TcbVersionMilanGenoa {
+        TcbVersionMilanGenoa {
+            boot_loader,
+            tee,
+            reserved: [0; 4],
+            snp,
+            microcode,
+        }
+    }
+
+    fn turin_tcb(fmc: u8, boot_loader: u8, tee: u8, snp: u8, microcode: u8) -> TcbVersionTurin {
+        TcbVersionTurin {
+            fmc,
+            boot_loader,
+            tee,
+            snp,
+            reserved: [0; 3],
+            microcode,
+        }
+    }
+
+    #[test]
+    fn milan_genoa_tcb_versions_compare_component_wise() {
+        let baseline = milan_genoa_tcb(1, 2, 3, 4);
+        let higher = milan_genoa_tcb(2, 2, 4, 4);
+        let lower = milan_genoa_tcb(1, 1, 3, 3);
+        let mixed = milan_genoa_tcb(2, 1, 3, 4);
+        let mut same_fields_different_reserved = baseline;
+        same_fields_different_reserved.reserved = [9; 4];
+
+        assert_eq!(baseline, same_fields_different_reserved);
+        assert!(higher > baseline);
+        assert!(lower < baseline);
+        assert!(mixed.partial_cmp(&baseline).is_none());
+        assert!(!(mixed >= baseline));
+        assert!(!(mixed <= baseline));
+    }
+
+    #[test]
+    fn turin_tcb_versions_compare_component_wise() {
+        let baseline = turin_tcb(1, 2, 3, 4, 5);
+        let higher = turin_tcb(1, 3, 3, 5, 5);
+        let lower = turin_tcb(0, 2, 2, 4, 5);
+        let mixed = turin_tcb(2, 2, 2, 4, 5);
+        let mut same_fields_different_reserved = baseline;
+        same_fields_different_reserved.reserved = [9; 3];
+
+        assert_eq!(baseline, same_fields_different_reserved);
+        assert!(higher > baseline);
+        assert!(lower < baseline);
+        assert!(mixed.partial_cmp(&baseline).is_none());
+        assert!(!(mixed >= baseline));
+        assert!(!(mixed <= baseline));
+    }
+
+    fn raw_milan_genoa_tcb(boot_loader: u8, tee: u8, snp: u8, microcode: u8) -> TcbVersionRaw {
+        TcbVersionRaw {
+            raw: [boot_loader, tee, 0, 0, 0, 0, snp, microcode],
+        }
+    }
+
+    fn raw_turin_tcb(fmc: u8, boot_loader: u8, tee: u8, snp: u8, microcode: u8) -> TcbVersionRaw {
+        TcbVersionRaw {
+            raw: [fmc, boot_loader, tee, snp, 0, 0, 0, microcode],
+        }
+    }
+
+    #[test]
+    fn raw_tcb_versions_compare_for_generation() {
+        let genoa_baseline =
+            TcbVersionForGeneration::new(raw_milan_genoa_tcb(1, 2, 3, 4), Generation::Genoa);
+        let genoa_higher =
+            TcbVersionForGeneration::new(raw_milan_genoa_tcb(1, 3, 3, 5), Generation::Genoa);
+        let genoa_mixed =
+            TcbVersionForGeneration::new(raw_milan_genoa_tcb(2, 1, 3, 4), Generation::Genoa);
+        let turin_higher =
+            TcbVersionForGeneration::new(raw_turin_tcb(1, 3, 3, 5, 5), Generation::Turin);
+
+        assert!(genoa_baseline < genoa_higher);
+        assert!(genoa_mixed.partial_cmp(&genoa_baseline).is_none());
+        assert!(genoa_baseline.partial_cmp(&turin_higher).is_none());
+    }
+
     #[test]
     fn attestation_report_policy_and_flags_accessors() {
         let mut bytes = [0_u8; size_of::<AttestationReport>()];
@@ -841,6 +1032,26 @@ mod tests {
         assert!(report.flags().author_key_en());
         assert!(!report.flags().mask_chip_key());
         assert_eq!(report.flags().signing_key(), SigningKey::None);
+    }
+
+    #[test]
+    fn attestation_report_returns_cpu_generation() {
+        let mut bytes = [0_u8; size_of::<AttestationReport>()];
+
+        bytes[0x188] = 0x19;
+        bytes[0x189] = 0x11;
+        let report = AttestationReport::ref_from_bytes(&bytes).unwrap();
+        assert_eq!(report.cpu_generation().unwrap(), Generation::Genoa);
+
+        bytes[0x188] = 0x1A;
+        bytes[0x189] = 0x11;
+        let report = AttestationReport::ref_from_bytes(&bytes).unwrap();
+        assert_eq!(report.cpu_generation().unwrap(), Generation::Turin);
+
+        bytes[0x188] = 0x1B;
+        bytes[0x189] = 0x00;
+        let report = AttestationReport::ref_from_bytes(&bytes).unwrap();
+        assert!(report.cpu_generation().is_err());
     }
 
     #[test]
