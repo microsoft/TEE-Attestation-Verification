@@ -14,7 +14,6 @@ use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
-use openssl::pkey::Id as PKeyId;
 use openssl::pkey::{PKey, Public};
 use openssl::rsa::Padding;
 use openssl::sign::{RsaPssSaltlen, Verifier as OpenSslVerifier};
@@ -128,14 +127,6 @@ impl CertificateBackend for Crypto {
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>> {
         let pub_key = cert.public_key()?;
         Ok(pub_key.public_key_to_der()?)
-    }
-
-    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String> {
-        Ok(match cert.public_key()?.id() {
-            PKeyId::RSA => "RSA".to_string(),
-            PKeyId::EC => "EC".to_string(),
-            other => format!("EVP_PKEY:{}", other.as_raw()),
-        })
     }
 
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {

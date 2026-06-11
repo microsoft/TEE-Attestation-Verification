@@ -80,9 +80,6 @@ pub trait CertificateBackend {
     /// Extract the SubjectPublicKeyInfo (DER-encoded) from the certificate.
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>>;
 
-    /// Return a stable identifier for the subject public key algorithm.
-    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String>;
-
     /// Extract an extension value by dotted-decimal OID.
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
 

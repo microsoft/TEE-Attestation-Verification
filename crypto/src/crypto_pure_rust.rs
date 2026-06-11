@@ -171,10 +171,6 @@ impl CertificateBackend for Crypto {
         cert.public_key_spki_der()
     }
 
-    fn public_key_algorithm(cert: &Self::Certificate) -> Result<String> {
-        Ok(cert.public_key_algorithm())
-    }
-
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         cert.get_extension_value_by_oid(oid)
     }

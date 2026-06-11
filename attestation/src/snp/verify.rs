@@ -222,16 +222,6 @@ pub(crate) fn ark_matches_pinned(
         .into());
     }
 
-    let pinned_key_algorithm = Crypto::public_key_algorithm(&pinned_ark)?;
-    let provided_key_algorithm = Crypto::public_key_algorithm(ark)?;
-    if pinned_key_algorithm != provided_key_algorithm {
-        return Err(format!(
-            "Provided ARK public key algorithm does not match pinned ARK for {}",
-            generation
-        )
-        .into());
-    }
-
     let pinned_key = Crypto::get_public_key(&pinned_ark)?;
     let provided_key = Crypto::get_public_key(ark)?;
     if pinned_key != provided_key {

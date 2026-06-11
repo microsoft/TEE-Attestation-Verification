@@ -498,10 +498,6 @@ mod tests {
             unimplemented!("test backend does not expose public keys")
         }
 
-        fn public_key_algorithm(_cert: &Self::Certificate) -> Result<String> {
-            unimplemented!("test backend does not expose public key algorithms")
-        }
-
         fn get_extension_value_by_oid(
             _cert: &Self::Certificate,
             _oid: &str,
