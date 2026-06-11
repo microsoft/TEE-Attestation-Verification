@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::{Certificate, CertificateBackend, Crypto};
+use std::time::Duration;
 
 const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
 const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
@@ -206,19 +207,32 @@ mod sync_tests {
             &cert(MILAN_ARK),
             &[&cert(MILAN_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .unwrap();
     }
 
     #[test]
+    fn explicit_verification_time_is_used() {
+        <Crypto as CryptoBackend>::verify_chain(
+            &cert(MILAN_ARK),
+            &[&cert(MILAN_ASK)],
+            &cert(MILAN_VCEK),
+            Some(Duration::from_secs(0)),
+        )
+        .expect_err("Milan chain should not be valid at Unix epoch");
+    }
+
+    #[test]
     fn untrusted_intermediates_are_required() {
-        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_VCEK))
+        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_VCEK), None)
             .expect_err("VCEK should not verify without ASK intermediate");
     }
 
     #[test]
     fn self_signed_certificates() {
-        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK)).unwrap();
+        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK), None)
+            .unwrap();
     }
 
     #[test]
@@ -227,6 +241,7 @@ mod sync_tests {
             &cert(GENOA_ARK),
             &[&cert(MILAN_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .expect_err("Genoa ARK should not verify Milan ASK");
 
@@ -234,6 +249,7 @@ mod sync_tests {
             &cert(MILAN_ARK),
             &[&cert(GENOA_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .expect_err("Milan ARK/Genoa ASK/Milan VCEK should not verify");
 
@@ -241,6 +257,7 @@ mod sync_tests {
             &cert(MILAN_ARK),
             &[&cert(MILAN_ASK)],
             &cert(GENOA_VCEK),
+            None,
         )
         .expect_err("Milan ASK should not verify Genoa VCEK");
     }
@@ -264,9 +281,23 @@ mod async_tests {
             &cert(MILAN_ARK),
             &[&cert(MILAN_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .await
         .unwrap();
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn explicit_verification_time_is_used() {
+        <Crypto as AsyncCryptoBackend>::verify_chain(
+            &cert(MILAN_ARK),
+            &[&cert(MILAN_ASK)],
+            &cert(MILAN_VCEK),
+            Some(Duration::from_secs(0)),
+        )
+        .await
+        .expect_err("Milan chain should not be valid at Unix epoch");
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
@@ -366,15 +397,20 @@ mod async_tests {
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     async fn untrusted_intermediates_are_required() {
-        <Crypto as AsyncCryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_VCEK))
-            .await
-            .expect_err("VCEK should not verify without ASK intermediate");
+        <Crypto as AsyncCryptoBackend>::verify_chain(
+            &cert(MILAN_ARK),
+            &[],
+            &cert(MILAN_VCEK),
+            None,
+        )
+        .await
+        .expect_err("VCEK should not verify without ASK intermediate");
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     async fn self_signed_certificates() {
-        <Crypto as AsyncCryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK))
+        <Crypto as AsyncCryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK), None)
             .await
             .unwrap();
     }
@@ -386,6 +422,7 @@ mod async_tests {
             &cert(GENOA_ARK),
             &[&cert(MILAN_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .await
         .expect_err("Genoa ARK should not verify Milan ASK");
@@ -394,6 +431,7 @@ mod async_tests {
             &cert(MILAN_ARK),
             &[&cert(GENOA_ASK)],
             &cert(MILAN_VCEK),
+            None,
         )
         .await
         .expect_err("Milan ARK/Genoa ASK/Milan VCEK should not verify");
@@ -402,6 +440,7 @@ mod async_tests {
             &cert(MILAN_ARK),
             &[&cert(MILAN_ASK)],
             &cert(GENOA_VCEK),
+            None,
         )
         .await
         .expect_err("Milan ASK should not verify Genoa VCEK");

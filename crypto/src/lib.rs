@@ -144,6 +144,7 @@ pub trait CryptoBackend: CertificateBackend {
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()>;
 }
 
@@ -164,6 +165,7 @@ pub trait AsyncCryptoBackend: CertificateBackend {
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> impl std::future::Future<Output = Result<()>>;
 }
 
@@ -188,8 +190,9 @@ where
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()> {
-        <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf)
+        <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf, unix_time)
     }
 }
 

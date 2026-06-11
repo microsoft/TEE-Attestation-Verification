@@ -218,6 +218,7 @@ impl AsyncCryptoBackend for Crypto {
         trusted_cert: &Self::Certificate,
         untrusted_chain: &[&Self::Certificate],
         leaf: &Self::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()> {
         let untrusted_x509 = untrusted_chain
             .iter()
@@ -235,7 +236,7 @@ impl AsyncCryptoBackend for Crypto {
         let policy_path = std::iter::once(trusted_cert)
             .chain(untrusted_chain.iter().copied())
             .chain(std::iter::once(leaf));
-        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time_now()?)
+        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time.unwrap_or(unix_time_now()?))
     }
 }
 

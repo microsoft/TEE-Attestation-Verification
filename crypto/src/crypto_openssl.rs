@@ -19,6 +19,7 @@ use openssl::rsa::Padding;
 use openssl::sign::{RsaPssSaltlen, Verifier as OpenSslVerifier};
 use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
+use openssl::x509::verify::X509VerifyParam;
 use openssl_sys::{
     ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_critical,
     X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
@@ -306,10 +307,20 @@ impl CryptoBackend for Crypto {
         trusted_cert: &Certificate,
         untrusted_chain: &[&Certificate],
         leaf: &Certificate,
+        unix_time: Option<std::time::Duration>,
     ) -> Result<()> {
         let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
         store_builder.add_cert(trusted_cert.to_owned())?;
         store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+        if let Some(unix_time) = unix_time {
+            let mut params = X509VerifyParam::new()?;
+            let unix_time = unix_time
+                .as_secs()
+                .try_into()
+                .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
+            params.set_time(unix_time);
+            store_builder.set_param(&params)?;
+        }
         let store = store_builder.build();
         let mut ctx = openssl::x509::X509StoreContext::new()?;
         let mut chain = Stack::<Certificate>::new()?;
