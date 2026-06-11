@@ -38,11 +38,15 @@ signature bytes to `cose_verify1` or `cose_verify1_async`.
 
 The verifier accepts:
 
-- COSE algorithm identifier;
+- COSE signature algorithm selected by the caller;
 - protected-header bytes;
 - detached or embedded payload bytes;
 - signature bytes;
 - public key imported through the active crypto backend.
+
+If the protected header contains `alg`, it must match the caller-supplied
+algorithm. If it omits `alg`, the caller-supplied algorithm is used as external
+context.
 
 ## Usage
 
@@ -75,7 +79,7 @@ let key = <Key as KeyBackend>::from_spki_der(subject_public_key_info_der, algori
 
 cose_verify1(
     &key,
-    -38,
+    algorithm,
     protected_header,
     payload,
     signature,
