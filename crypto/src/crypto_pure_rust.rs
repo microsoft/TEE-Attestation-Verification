@@ -12,11 +12,12 @@ use p256::ecdsa::{Signature as EcdsaP256Signature, VerifyingKey as EcdsaP256Veri
 use p384::ecdsa::{Signature as EcdsaP384Signature, VerifyingKey as EcdsaP384VerifyingKey};
 use p521::ecdsa::{Signature as EcdsaP521Signature, VerifyingKey as EcdsaP521VerifyingKey};
 use rsa::{
+    pkcs1v15::{Signature as Pkcs1v15Signature, VerifyingKey as Pkcs1v15VerifyingKey},
     pkcs8::DecodePublicKey,
     pss::{Signature as PssSignature, VerifyingKey as PssVerifyingKey},
     RsaPublicKey,
 };
-use sha2::{Sha256, Sha384, Sha512};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,8 +26,8 @@ use super::x509_certificate::{self, Certificate};
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
-    EcSignatureKeyAlgorithm,
-    KeyBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
+    EcSignatureKeyAlgorithm, KeyBackend, Result, RsaPkcs1v15SignatureKeyAlgorithm,
+    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -39,6 +40,10 @@ pub enum Key {
         algorithm: RsaPssSignatureKeyAlgorithm,
         key: RsaPublicKey,
     },
+    RsaPkcs1v15 {
+        algorithm: RsaPkcs1v15SignatureKeyAlgorithm,
+        key: RsaPublicKey,
+    },
 }
 
 pub enum Signature {
@@ -48,6 +53,10 @@ pub enum Signature {
     RsaPss {
         algorithm: RsaPssSignatureKeyAlgorithm,
         signature: PssSignature,
+    },
+    RsaPkcs1v15 {
+        algorithm: RsaPkcs1v15SignatureKeyAlgorithm,
+        signature: Pkcs1v15Signature,
     },
 }
 
@@ -70,6 +79,11 @@ impl SignatureBackend for Signature {
                 algorithm,
                 signature: PssSignature::try_from(signature)
                     .map_err(|e| format!("Failed to parse RSA-PSS signature: {:?}", e))?,
+            }),
+            SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => Ok(Signature::RsaPkcs1v15 {
+                algorithm,
+                signature: Pkcs1v15Signature::try_from(signature)
+                    .map_err(|e| format!("Failed to parse RSA PKCS#1 v1.5 signature: {:?}", e))?,
             }),
         }
     }
@@ -137,6 +151,14 @@ impl KeyBackend for Key {
                 let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
                 Ok(Key::RsaPss {
+                    algorithm,
+                    key: rsa_pub,
+                })
+            }
+            SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => {
+                let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
+                    .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
+                Ok(Key::RsaPkcs1v15 {
                     algorithm,
                     key: rsa_pub,
                 })
@@ -254,7 +276,7 @@ impl CryptoBackend for Crypto {
                 verify_ecdsa_signature(key, signed_bytes, signature, EcSignatureKeyAlgorithm::P521)
             }
             (
-                Key::RsaPss { key, .. },
+                Key::RsaPss { key, .. } | Key::RsaPkcs1v15 { key, .. },
                 Signature::RsaPss {
                     algorithm,
                     signature,
@@ -272,6 +294,29 @@ impl CryptoBackend for Crypto {
                 ),
                 RsaPssSignatureKeyAlgorithm::Ps512 => verify_rsa_pss_signature(
                     &PssVerifyingKey::<Sha512>::new(key.clone()),
+                    signed_bytes,
+                    signature,
+                ),
+            },
+            (
+                Key::RsaPss { key, .. } | Key::RsaPkcs1v15 { key, .. },
+                Signature::RsaPkcs1v15 {
+                    algorithm,
+                    signature,
+                },
+            ) => match algorithm {
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs256 => verify_rsa_pkcs1v15_signature(
+                    &Pkcs1v15VerifyingKey::<Sha256>::new(key.clone()),
+                    signed_bytes,
+                    signature,
+                ),
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs384 => verify_rsa_pkcs1v15_signature(
+                    &Pkcs1v15VerifyingKey::<Sha384>::new(key.clone()),
+                    signed_bytes,
+                    signature,
+                ),
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs512 => verify_rsa_pkcs1v15_signature(
+                    &Pkcs1v15VerifyingKey::<Sha512>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
@@ -333,6 +378,7 @@ impl Key {
             Key::EcdsaP384(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
             Key::EcdsaP521(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521),
             Key::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
+            Key::RsaPkcs1v15 { algorithm, .. } => SignatureKeyAlgorithm::RsaPkcs1v15(*algorithm),
         }
     }
 }
@@ -371,6 +417,21 @@ where
     Ok(())
 }
 
+fn verify_rsa_pkcs1v15_signature<D>(
+    key: &Pkcs1v15VerifyingKey<D>,
+    signed_bytes: &[u8],
+    signature: &Pkcs1v15Signature,
+) -> Result<()>
+where
+    D: sha2::Digest,
+    Pkcs1v15VerifyingKey<D>: rsa::signature::Verifier<Pkcs1v15Signature>,
+{
+    use rsa::signature::Verifier;
+    key.verify(signed_bytes, signature)
+        .map_err(|e| format!("RSA PKCS#1 v1.5 signature verification failed: {:?}", e))?;
+    Ok(())
+}
+
 impl Signature {
     fn algorithm(&self) -> SignatureKeyAlgorithm {
         match self {
@@ -378,6 +439,7 @@ impl Signature {
             Self::EcdsaP384(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384),
             Self::EcdsaP521(_) => SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521),
             Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
+            Self::RsaPkcs1v15 { algorithm, .. } => SignatureKeyAlgorithm::RsaPkcs1v15(*algorithm),
         }
     }
 }

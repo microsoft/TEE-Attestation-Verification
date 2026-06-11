@@ -18,7 +18,7 @@ mod signature;
 
 pub use signature::{
     compatible_key_and_signature, DigestAlgorithm, EcSignatureKeyAlgorithm,
-    RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+    RsaPkcs1v15SignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
 
 pub trait SignatureBackend: Sized {

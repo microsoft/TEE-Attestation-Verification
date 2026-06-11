@@ -13,7 +13,8 @@ use x509_cert::ext::pkix::{BasicConstraints as X509BasicConstraints, KeyUsage as
 use x509_cert::spki::AlgorithmIdentifierOwned;
 
 use super::{
-    BasicConstraints, KeyUsage, Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+    BasicConstraints, KeyUsage, Result, RsaPkcs1v15SignatureKeyAlgorithm,
+    RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -236,6 +237,22 @@ fn parse_signature_algorithm(
         return parse_rsa_pss_signature_algorithm(parameters);
     }
 
+    if algorithm_ref.oid == oid::SHA256_WITH_RSA_ENCRYPTION {
+        return Ok(SignatureKeyAlgorithm::RsaPkcs1v15(
+            RsaPkcs1v15SignatureKeyAlgorithm::Rs256,
+        ));
+    }
+    if algorithm_ref.oid == oid::SHA384_WITH_RSA_ENCRYPTION {
+        return Ok(SignatureKeyAlgorithm::RsaPkcs1v15(
+            RsaPkcs1v15SignatureKeyAlgorithm::Rs384,
+        ));
+    }
+    if algorithm_ref.oid == oid::SHA512_WITH_RSA_ENCRYPTION {
+        return Ok(SignatureKeyAlgorithm::RsaPkcs1v15(
+            RsaPkcs1v15SignatureKeyAlgorithm::Rs512,
+        ));
+    }
+
     Err(format!("Unsupported signature algorithm OID: {}", algorithm_ref.oid).into())
 }
 
@@ -302,11 +319,28 @@ fn rsa_pss_hash_oid(algorithm: RsaPssSignatureKeyAlgorithm) -> ObjectIdentifier 
 mod oid {
     use x509_cert::der::oid::ObjectIdentifier;
 
+    // RFC 4055: https://www.rfc-editor.org/rfc/rfc4055.html
+    // RFC 5754: https://www.rfc-editor.org/rfc/rfc5754.html
+    // RFC 8017: https://www.rfc-editor.org/rfc/rfc8017.html
+    /// id-RSASSA-PSS from RFC 4055 section 3.1 and RFC 8017 appendix A.2.3.
     pub const RSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.10");
+    /// id-mgf1 from RFC 8017 appendix A.2.1.
     pub const MGF1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.8");
+    /// id-sha256 from RFC 5754 section 2.2.
     pub const SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+    /// id-sha384 from RFC 5754 section 2.3.
     pub const SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+    /// id-sha512 from RFC 5754 section 2.4.
     pub const SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
+    /// sha256WithRSAEncryption from RFC 5754 section 3.2.
+    pub const SHA256_WITH_RSA_ENCRYPTION: ObjectIdentifier =
+        ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
+    /// sha384WithRSAEncryption from RFC 5754 section 3.2.
+    pub const SHA384_WITH_RSA_ENCRYPTION: ObjectIdentifier =
+        ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.12");
+    /// sha512WithRSAEncryption from RFC 5754 section 3.2.
+    pub const SHA512_WITH_RSA_ENCRYPTION: ObjectIdentifier =
+        ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13");
 }
 
 #[cfg(test)]
@@ -314,7 +348,9 @@ mod test {
     use x509_cert::der::{asn1::AnyRef, Decode, Encode};
 
     use super::Certificate;
-    use crate::{RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
+    use crate::{
+        RsaPkcs1v15SignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+    };
 
     const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
     const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
@@ -444,6 +480,35 @@ mod test {
                 .expect("Signature algorithm should parse"),
             SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384)
         );
+    }
+
+    #[test]
+    fn signature_algorithm_accepts_rsa_pkcs1v15_sha2_oids() {
+        for (oid, algorithm) in [
+            (
+                super::oid::SHA256_WITH_RSA_ENCRYPTION,
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs256,
+            ),
+            (
+                super::oid::SHA384_WITH_RSA_ENCRYPTION,
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs384,
+            ),
+            (
+                super::oid::SHA512_WITH_RSA_ENCRYPTION,
+                RsaPkcs1v15SignatureKeyAlgorithm::Rs512,
+            ),
+        ] {
+            let algorithm_identifier = x509_cert::spki::AlgorithmIdentifierOwned {
+                oid,
+                parameters: None,
+            };
+
+            assert_eq!(
+                super::parse_signature_algorithm(&algorithm_identifier)
+                    .expect("RSA PKCS#1 v1.5 SHA-2 OID should parse"),
+                SignatureKeyAlgorithm::RsaPkcs1v15(algorithm)
+            );
+        }
     }
 
     #[test]

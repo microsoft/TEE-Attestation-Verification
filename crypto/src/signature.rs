@@ -79,11 +79,30 @@ impl RsaPssSignatureKeyAlgorithm {
     }
 }
 
+/// RSA PKCS#1 v1.5 signature key algorithms.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RsaPkcs1v15SignatureKeyAlgorithm {
+    Rs256,
+    Rs384,
+    Rs512,
+}
+
+impl RsaPkcs1v15SignatureKeyAlgorithm {
+    pub const fn digest(self) -> DigestAlgorithm {
+        match self {
+            Self::Rs256 => DigestAlgorithm::Sha256,
+            Self::Rs384 => DigestAlgorithm::Sha384,
+            Self::Rs512 => DigestAlgorithm::Sha512,
+        }
+    }
+}
+
 /// A key algorithm bound to the signature operation it is used to verify.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignatureKeyAlgorithm {
     Ec(EcSignatureKeyAlgorithm),
     RsaPss(RsaPssSignatureKeyAlgorithm),
+    RsaPkcs1v15(RsaPkcs1v15SignatureKeyAlgorithm),
 }
 
 impl SignatureKeyAlgorithm {
@@ -91,6 +110,7 @@ impl SignatureKeyAlgorithm {
         match self {
             Self::Ec(algorithm) => algorithm.digest(),
             Self::RsaPss(algorithm) => algorithm.digest(),
+            Self::RsaPkcs1v15(algorithm) => algorithm.digest(),
         }
     }
 }
@@ -99,8 +119,8 @@ impl SignatureKeyAlgorithm {
 /// signature using `signature_algorithm`.
 ///
 /// ECDSA keys are curve-specific, so the curve must match exactly. RSA keys are
-/// not intrinsically bound to a specific RSA-PSS hash/salt choice, so any
-/// RSA-PSS key algorithm is compatible with any RSA-PSS signature algorithm.
+/// not intrinsically bound to a specific RSA hash/padding choice, so any RSA
+/// key algorithm is compatible with any RSA signature algorithm.
 pub const fn compatible_key_and_signature(
     key_algorithm: SignatureKeyAlgorithm,
     signature_algorithm: SignatureKeyAlgorithm,
@@ -110,6 +130,9 @@ pub const fn compatible_key_and_signature(
             key as u8 == signature as u8
         }
         (SignatureKeyAlgorithm::RsaPss(_), SignatureKeyAlgorithm::RsaPss(_)) => true,
+        (SignatureKeyAlgorithm::RsaPss(_), SignatureKeyAlgorithm::RsaPkcs1v15(_)) => true,
+        (SignatureKeyAlgorithm::RsaPkcs1v15(_), SignatureKeyAlgorithm::RsaPss(_)) => true,
+        (SignatureKeyAlgorithm::RsaPkcs1v15(_), SignatureKeyAlgorithm::RsaPkcs1v15(_)) => true,
         _ => false,
     }
 }
@@ -135,6 +158,18 @@ mod tests {
         assert!(compatible_key_and_signature(
             SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256),
             SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384),
+        ));
+    }
+
+    #[test]
+    fn rsa_compatibility_allows_different_signature_schemes() {
+        assert!(compatible_key_and_signature(
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256),
+            SignatureKeyAlgorithm::RsaPkcs1v15(RsaPkcs1v15SignatureKeyAlgorithm::Rs384),
+        ));
+        assert!(compatible_key_and_signature(
+            SignatureKeyAlgorithm::RsaPkcs1v15(RsaPkcs1v15SignatureKeyAlgorithm::Rs384),
+            SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256),
         ));
     }
 

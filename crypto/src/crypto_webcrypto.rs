@@ -18,8 +18,8 @@ use super::x509_certificate::{self, Certificate as X509Certificate};
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend,
-    DigestAlgorithm, EcSignatureKeyAlgorithm, Result, RsaPssSignatureKeyAlgorithm,
-    SignatureBackend, SignatureKeyAlgorithm,
+    DigestAlgorithm, EcSignatureKeyAlgorithm, Result, RsaPkcs1v15SignatureKeyAlgorithm,
+    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
 pub struct Crypto;
@@ -44,6 +44,10 @@ pub enum Signature {
         algorithm: RsaPssSignatureKeyAlgorithm,
         raw: Vec<u8>,
     },
+    RsaPkcs1v15 {
+        algorithm: RsaPkcs1v15SignatureKeyAlgorithm,
+        raw: Vec<u8>,
+    },
 }
 
 impl SignatureBackend for Signature {
@@ -54,6 +58,10 @@ impl SignatureBackend for Signature {
                 fixed: ecdsa_der_to_fixed(signature, algorithm)?,
             }),
             SignatureKeyAlgorithm::RsaPss(algorithm) => Ok(Signature::RsaPss {
+                algorithm,
+                raw: signature.to_vec(),
+            }),
+            SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => Ok(Signature::RsaPkcs1v15 {
                 algorithm,
                 raw: signature.to_vec(),
             }),
@@ -331,6 +339,7 @@ fn import_params(algorithm: SignatureKeyAlgorithm) -> Result<Object> {
     match algorithm {
         SignatureKeyAlgorithm::Ec(algorithm) => ecdsa_import_params(algorithm),
         SignatureKeyAlgorithm::RsaPss(algorithm) => rsa_pss_import_params(algorithm.digest()),
+        SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => rsa_pkcs1v15_params(algorithm.digest()),
     }
 }
 
@@ -338,6 +347,7 @@ fn verify_params(algorithm: SignatureKeyAlgorithm) -> Result<Object> {
     match algorithm {
         SignatureKeyAlgorithm::Ec(algorithm) => ecdsa_verify_params(algorithm.digest()),
         SignatureKeyAlgorithm::RsaPss(algorithm) => rsa_pss_verify_params(algorithm.salt_len()),
+        SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => rsa_pkcs1v15_params(algorithm.digest()),
     }
 }
 
@@ -461,6 +471,10 @@ fn webcrypto_signature_bytes(
         {
             Ok(raw.clone())
         }
+        (
+            SignatureKeyAlgorithm::RsaPkcs1v15(key_algorithm),
+            Signature::RsaPkcs1v15 { algorithm, raw },
+        ) if key_algorithm == *algorithm => Ok(raw.clone()),
         _ => Err(format!(
             "WebCrypto signature algorithm {:?} does not match key algorithm {algorithm:?}",
             signature.algorithm()
@@ -474,6 +488,7 @@ impl Signature {
         match self {
             Self::Ecdsa { algorithm, .. } => SignatureKeyAlgorithm::Ec(*algorithm),
             Self::RsaPss { algorithm, .. } => SignatureKeyAlgorithm::RsaPss(*algorithm),
+            Self::RsaPkcs1v15 { algorithm, .. } => SignatureKeyAlgorithm::RsaPkcs1v15(*algorithm),
         }
     }
 }
@@ -494,6 +509,13 @@ fn rsa_pss_verify_params(salt_len: usize) -> Result<Object> {
         &JsValue::from_f64(salt_len as f64),
     )
     .map_err(js_error)?;
+    Ok(params)
+}
+
+fn rsa_pkcs1v15_params(digest: DigestAlgorithm) -> Result<Object> {
+    let params = Object::new();
+    set_string(&params, "name", "RSASSA-PKCS1-v1_5")?;
+    set_string(&params, "hash", digest_algorithm_name(digest))?;
     Ok(params)
 }
 
