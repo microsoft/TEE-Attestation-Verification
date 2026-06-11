@@ -136,9 +136,7 @@ fn signature_from_cose_bytes(
             <crypto::Signature as SignatureBackend>::from_bytes(sig, algorithm)
                 .map_err(|e| e.to_string())
         }
-        _ => {
-            Err(format!("Unsupported signature type {:?}", algorithm).into())
-        }
+        _ => Err(format!("Unsupported signature type {:?}", algorithm).into()),
     }
 }
 
