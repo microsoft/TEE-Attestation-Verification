@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Digest algorithm used by a signature operation.
+/// Digest algorithm used by hashing and signature operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DigestAlgorithm {
     Sha256,

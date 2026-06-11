@@ -186,6 +186,15 @@ impl AsyncCryptoBackend for Crypto {
     type Key = Key;
     type Signature = Signature;
 
+    async fn digest(algorithm: DigestAlgorithm, bytes: &[u8]) -> Result<Vec<u8>> {
+        let subtle = subtle_crypto()?;
+        let promise = subtle
+            .digest_with_str_and_u8_array(digest_algorithm_name(algorithm), bytes)
+            .map_err(js_error)?;
+        let digest = JsFuture::from(promise).await.map_err(js_error)?;
+        Ok(Uint8Array::new(&digest).to_vec())
+    }
+
     async fn verify_signature(
         key: &Self::Key,
         signature: &Self::Signature,
@@ -543,6 +552,13 @@ extern "C" {
         algorithm: &Object,
         key: &CryptoKey,
         signature: &[u8],
+        data: &[u8],
+    ) -> std::result::Result<Promise, JsValue>;
+
+    #[wasm_bindgen(method, structural, catch, js_name = digest)]
+    fn digest_with_str_and_u8_array(
+        this: &SubtleCrypto,
+        algorithm: &str,
         data: &[u8],
     ) -> std::result::Result<Promise, JsValue>;
 }

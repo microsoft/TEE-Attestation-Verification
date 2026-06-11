@@ -12,7 +12,7 @@ use foreign_types::{ForeignType, ForeignTypeRef};
 use openssl::asn1::{Asn1Object, Asn1ObjectRef, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
-use openssl::hash::MessageDigest;
+use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Public};
 use openssl::rsa::Padding;
@@ -286,6 +286,10 @@ mod oid {
 impl CryptoBackend for Crypto {
     type Key = Key;
     type Signature = Signature;
+
+    fn digest(algorithm: DigestAlgorithm, bytes: &[u8]) -> Result<Vec<u8>> {
+        Ok(hash(message_digest(algorithm), bytes)?.to_vec())
+    }
 
     fn verify_signature(
         key: &Self::Key,

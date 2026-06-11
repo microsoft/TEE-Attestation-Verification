@@ -24,7 +24,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::x509_certificate::{self, Certificate};
 use super::x509_policy;
 use super::{
-    compatible_key_and_signature, CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm,
+    compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
+    EcSignatureKeyAlgorithm,
     KeyBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
@@ -219,6 +220,14 @@ impl CertificateBackend for Crypto {
 impl CryptoBackend for Crypto {
     type Key = Key;
     type Signature = Signature;
+
+    fn digest(algorithm: DigestAlgorithm, bytes: &[u8]) -> Result<Vec<u8>> {
+        Ok(match algorithm {
+            DigestAlgorithm::Sha256 => Sha256::digest(bytes).to_vec(),
+            DigestAlgorithm::Sha384 => Sha384::digest(bytes).to_vec(),
+            DigestAlgorithm::Sha512 => Sha512::digest(bytes).to_vec(),
+        })
+    }
 
     fn verify_signature(
         key: &Self::Key,

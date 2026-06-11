@@ -132,6 +132,9 @@ pub trait CryptoBackend: CertificateBackend {
     type Key: KeyBackend;
     type Signature: SignatureBackend;
 
+    /// Compute a digest of `bytes`.
+    fn digest(algorithm: DigestAlgorithm, bytes: &[u8]) -> Result<Vec<u8>>;
+
     /// Verify a signature over `signed_bytes` with `key`.
     fn verify_signature(
         key: &Self::Key,
@@ -152,6 +155,12 @@ pub trait CryptoBackend: CertificateBackend {
 pub trait AsyncCryptoBackend: CertificateBackend {
     type Key: AsyncKeyBackend;
     type Signature: SignatureBackend;
+
+    /// Compute a digest of `bytes`.
+    fn digest(
+        algorithm: DigestAlgorithm,
+        bytes: &[u8],
+    ) -> impl std::future::Future<Output = Result<Vec<u8>>>;
 
     /// Verify a signature over `signed_bytes` with `key`.
     fn verify_signature(
@@ -177,6 +186,10 @@ where
 {
     type Key = <C as CryptoBackend>::Key;
     type Signature = <C as CryptoBackend>::Signature;
+
+    async fn digest(algorithm: DigestAlgorithm, bytes: &[u8]) -> Result<Vec<u8>> {
+        <C as CryptoBackend>::digest(algorithm, bytes)
+    }
 
     async fn verify_signature(
         key: &Self::Key,
