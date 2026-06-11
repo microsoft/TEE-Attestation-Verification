@@ -1,10 +1,17 @@
-use crate::cbor::{serialize_array, CborSlice};
+use crate::cbor::{serialize_array, CborSlice, CborValue};
 use crypto::{
     compatible_key_and_signature, AsyncCryptoBackend, CryptoBackend, EcSignatureKeyAlgorithm,
     RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
 
+// COSE_Sign1 Sig_structure context string.
+// RFC 9052, Section 4.4: https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
+
+// Protected header parameter label for `alg`.
+// RFC 9052, Section 3.1: https://www.rfc-editor.org/rfc/rfc9052.html#section-3.1
+// IANA "COSE Header Parameters": https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
+const COSE_HEADER_ALG: i64 = 1;
 
 /// Return the backend signature algorithm for a COSE algorithm identifier.
 ///
@@ -12,27 +19,38 @@ const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 ///
 /// | COSE alg | Algorithm |
 /// |---:|---|
-/// | `-7` | ECDSA P-256 / SHA-256 |
-/// | `-35` | ECDSA P-384 / SHA-384 |
-/// | `-36` | ECDSA P-521 / SHA-512 |
-/// | `-37` | RSA-PSS / SHA-256 |
-/// | `-38` | RSA-PSS / SHA-384 |
-/// | `-39` | RSA-PSS / SHA-512 |
+/// | `-7` | ES256: ECDSA P-256 / SHA-256 |
+/// | `-35` | ES384: ECDSA P-384 / SHA-384 |
+/// | `-36` | ES512: ECDSA P-521 / SHA-512 |
+/// | `-37` | PS256: RSA-PSS / SHA-256 |
+/// | `-38` | PS384: RSA-PSS / SHA-384 |
+/// | `-39` | PS512: RSA-PSS / SHA-512 |
 ///
-/// Algorithm identifiers are from the IANA COSE Algorithms registry. RSA keys
-/// are compatible across the RSA-PSS hash variants; the COSE signature
-/// algorithm controls the digest and salt length used for verification.
+/// Algorithm identifiers are from RFC 9053 and the IANA COSE Algorithms
+/// registry:
+/// - RFC 9053: https://www.rfc-editor.org/rfc/rfc9053.html
+/// - IANA: https://www.iana.org/assignments/cose/cose.xhtml#algorithms
+///
+/// RSA keys are compatible across the RSA-PSS hash variants; the COSE
+/// signature algorithm controls the digest and salt length used for
+/// verification.
 pub fn signature_key_algorithm_for_cose_alg(alg: i64) -> Result<SignatureKeyAlgorithm, String> {
     match alg {
+        // ES256. RFC 9053, Section 2.1; IANA COSE Algorithms value -7.
         -7 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256)),
+        // ES384. RFC 9053, Section 2.1; IANA COSE Algorithms value -35.
         -35 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384)),
+        // ES512. RFC 9053, Section 2.1; IANA COSE Algorithms value -36.
         -36 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521)),
+        // PS256. RFC 9053, Section 2.2; IANA COSE Algorithms value -37.
         -37 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps256,
         )),
+        // PS384. RFC 9053, Section 2.2; IANA COSE Algorithms value -38.
         -38 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps384,
         )),
+        // PS512. RFC 9053, Section 2.2; IANA COSE Algorithms value -39.
         -39 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps512,
         )),
@@ -75,6 +93,7 @@ pub fn cose_verify1(
     payload: &[u8],
     sig: &[u8],
 ) -> Result<(), String> {
+    validate_protected_header(phdr, alg)?;
     let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
     if !compatible_key_and_signature(key.algorithm(), algorithm) {
         return Err("Algorithm mismatch between supplied alg and key".into());
@@ -98,6 +117,7 @@ pub async fn cose_verify1_async(
     payload: &[u8],
     sig: &[u8],
 ) -> Result<(), String> {
+    validate_protected_header(phdr, alg)?;
     let algorithm = signature_key_algorithm_for_cose_alg(alg)?;
     if !compatible_key_and_signature(key.algorithm(), algorithm) {
         return Err("Algorithm mismatch between supplied alg and key".into());
@@ -108,6 +128,21 @@ pub async fn cose_verify1_async(
     <crypto::Crypto as AsyncCryptoBackend>::verify_signature(key, &signature, &tbs)
         .await
         .map_err(|e| e.to_string())
+}
+
+fn validate_protected_header(phdr: &[u8], expected_alg: i64) -> Result<(), String> {
+    let protected = CborValue::from_bytes(phdr)?;
+    let alg = match protected.map_at_int(COSE_HEADER_ALG)? {
+        CborValue::Int(alg) => *alg,
+        _ => return Err("protected alg must be an integer".to_string()),
+    };
+    if alg != expected_alg {
+        return Err(format!(
+            "protected alg {alg} does not match supplied alg {expected_alg}"
+        ));
+    }
+
+    Ok(())
 }
 
 fn signature_from_cose_bytes(
@@ -251,8 +286,8 @@ mod tests {
         let key = key(P256_SPKI, algorithm);
 
         assert_eq!(
-            cose_verify1(&key, -35, b"", b"", b"").unwrap_err(),
-            "Algorithm mismatch between supplied alg and key"
+            cose_verify1(&key, -35, P256_PHDR, b"", b"").unwrap_err(),
+            "protected alg -7 does not match supplied alg -35"
         );
     }
 
@@ -263,7 +298,7 @@ mod tests {
         let key = key(P256_SPKI, algorithm);
 
         assert_eq!(
-            cose_verify1(&key, -7, b"", b"", &[0u8; 3]).unwrap_err(),
+            cose_verify1(&key, -7, P256_PHDR, b"", &[0u8; 3]).unwrap_err(),
             "Expected 64 byte ECDSA signature, got 3"
         );
     }
