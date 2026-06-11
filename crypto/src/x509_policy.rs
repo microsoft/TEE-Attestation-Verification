@@ -220,10 +220,15 @@ mod oid {
     pub const BASIC_CONSTRAINTS: &str = "2.5.29.19";
     /// RFC 5280 section 4.2.1.3: id-ce-keyUsage OBJECT IDENTIFIER ::= { id-ce 15 }.
     pub const KEY_USAGE: &str = "2.5.29.15";
+    /// RFC 5280 section 4.2.1.4: id-ce-certificatePolicies OBJECT IDENTIFIER ::= { id-ce 32 }.
     pub const CERTIFICATE_POLICIES: &str = "2.5.29.32";
+    /// RFC 5280 section 4.2.1.5: id-ce-policyMappings OBJECT IDENTIFIER ::= { id-ce 33 }.
     pub const POLICY_MAPPINGS: &str = "2.5.29.33";
+    /// RFC 5280 section 4.2.1.10: id-ce-nameConstraints OBJECT IDENTIFIER ::= { id-ce 30 }.
     pub const NAME_CONSTRAINTS: &str = "2.5.29.30";
+    /// RFC 5280 section 4.2.1.11: id-ce-policyConstraints OBJECT IDENTIFIER ::= { id-ce 36 }.
     pub const POLICY_CONSTRAINTS: &str = "2.5.29.36";
+    /// RFC 5280 section 4.2.1.14: id-ce-inhibitAnyPolicy OBJECT IDENTIFIER ::= { id-ce 54 }.
     pub const INHIBIT_ANY_POLICY: &str = "2.5.29.54";
 
     pub const HANDLED_CRITICAL_EXTENSIONS: &[&str] = &[BASIC_CONSTRAINTS, KEY_USAGE];
