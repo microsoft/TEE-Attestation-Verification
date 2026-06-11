@@ -17,8 +17,12 @@ use rsa::{
     RsaPublicKey,
 };
 use sha2::{Sha256, Sha384, Sha512};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::x509_certificate::{self, Certificate};
+use super::x509_policy;
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, EcSignatureKeyAlgorithm,
     KeyBackend, Result, RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
@@ -170,6 +174,46 @@ impl CertificateBackend for Crypto {
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         cert.get_extension_value_by_oid(oid)
     }
+
+    fn subject_name(cert: &Self::Certificate) -> String {
+        cert.subject_name()
+    }
+
+    fn issuer_name(cert: &Self::Certificate) -> String {
+        cert.issuer_name()
+    }
+
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.subject_name_der()
+    }
+
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.issuer_name_der()
+    }
+
+    fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {
+        cert.is_valid_at(unix_time)
+    }
+
+    fn version(cert: &Self::Certificate) -> Result<u8> {
+        Ok(cert.version())
+    }
+
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<super::BasicConstraints>> {
+        cert.basic_constraints()
+    }
+
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
+        cert.key_usage()
+    }
+
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
+        cert.extension_criticality(oid)
+    }
+
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String> {
+        cert.critical_extension_oids()
+    }
 }
 
 impl CryptoBackend for Crypto {
@@ -231,14 +275,35 @@ impl CryptoBackend for Crypto {
         trusted_cert: &Certificate,
         untrusted_chain: &[&Certificate],
         leaf: &Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()> {
         x509_certificate::verify_certificate_path(
             verify_certificate_signature,
             trusted_cert,
             untrusted_chain,
             leaf,
-        )
+        )?;
+
+        let policy_path = std::iter::once(trusted_cert)
+            .chain(untrusted_chain.iter().copied())
+            .chain(std::iter::once(leaf));
+        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time.unwrap_or(unix_time_now()?))
     }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn unix_time_now() -> Result<Duration> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?)
+}
+
+#[cfg(target_family = "wasm")]
+fn unix_time_now() -> Result<Duration> {
+    let millis = js_sys::Date::now();
+    if !millis.is_finite() || millis < 0.0 || millis > u64::MAX as f64 {
+        return Err("Failed to read current Unix time from JavaScript Date".into());
+    }
+
+    Ok(Duration::from_millis(millis as u64))
 }
 
 fn verify_certificate_signature(issuer: &Certificate, subject: &Certificate) -> Result<()> {

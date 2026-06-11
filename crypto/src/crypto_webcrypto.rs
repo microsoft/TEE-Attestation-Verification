@@ -10,10 +10,12 @@
 //! RSA-PSS/SHA-384 and ECDSA P-256/P-384/P-521 verification support.
 
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
+use std::time::Duration;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use super::x509_certificate::{self, Certificate as X509Certificate};
+use super::x509_policy;
 use super::{
     compatible_key_and_signature, AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend,
     DigestAlgorithm, EcSignatureKeyAlgorithm, Result, RsaPssSignatureKeyAlgorithm,
@@ -132,6 +134,46 @@ impl CertificateBackend for Crypto {
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         cert.inner.get_extension_value_by_oid(oid)
     }
+
+    fn subject_name(cert: &Self::Certificate) -> String {
+        cert.inner.subject_name()
+    }
+
+    fn issuer_name(cert: &Self::Certificate) -> String {
+        cert.inner.issuer_name()
+    }
+
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.inner.subject_name_der()
+    }
+
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        cert.inner.issuer_name_der()
+    }
+
+    fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {
+        cert.inner.is_valid_at(unix_time)
+    }
+
+    fn version(cert: &Self::Certificate) -> Result<u8> {
+        Ok(cert.inner.version())
+    }
+
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<super::BasicConstraints>> {
+        cert.inner.basic_constraints()
+    }
+
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
+        cert.inner.key_usage()
+    }
+
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
+        cert.inner.extension_criticality(oid)
+    }
+
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String> {
+        cert.inner.critical_extension_oids()
+    }
 }
 
 impl Key {
@@ -176,6 +218,7 @@ impl AsyncCryptoBackend for Crypto {
         trusted_cert: &Self::Certificate,
         untrusted_chain: &[&Self::Certificate],
         leaf: &Self::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()> {
         let untrusted_x509 = untrusted_chain
             .iter()
@@ -188,8 +231,22 @@ impl AsyncCryptoBackend for Crypto {
             &untrusted_x509,
             &leaf.inner,
         )
-        .await
+        .await?;
+
+        let policy_path = std::iter::once(trusted_cert)
+            .chain(untrusted_chain.iter().copied())
+            .chain(std::iter::once(leaf));
+        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time.unwrap_or(unix_time_now()?))
     }
+}
+
+fn unix_time_now() -> Result<Duration> {
+    let millis = js_sys::Date::now();
+    if !millis.is_finite() || millis < 0.0 || millis > u64::MAX as f64 {
+        return Err("Failed to read current Unix time from JavaScript Date".into());
+    }
+
+    Ok(Duration::from_millis(millis as u64))
 }
 
 async fn verify_x509_certificate_signature(

@@ -8,8 +8,8 @@
 //! verification. It is the native backend selected when `crypto_openssl` is
 //! enabled for a non-`wasm32` target.
 
-use foreign_types::ForeignType;
-use openssl::asn1::Asn1Object;
+use foreign_types::{ForeignType, ForeignTypeRef};
+use openssl::asn1::{Asn1Object, Asn1ObjectRef, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
@@ -19,10 +19,14 @@ use openssl::rsa::Padding;
 use openssl::sign::{RsaPssSaltlen, Verifier as OpenSslVerifier};
 use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
+use openssl::x509::verify::X509VerifyParam;
 use openssl_sys::{
-    ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_data, X509_get_ext,
-    X509_get_ext_by_OBJ,
+    ASN1_STRING_get0_data, ASN1_STRING_length, X509_EXTENSION_get_critical,
+    X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
+    X509_get_ext_count, X509_get_extension_flags, X509_get_key_usage, X509v3_KU_KEY_CERT_SIGN,
+    EXFLAG_CA,
 };
+use std::cmp::Ordering;
 
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -160,6 +164,123 @@ impl CertificateBackend for Crypto {
             Ok(Some(bytes))
         }
     }
+
+    fn subject_name(cert: &Self::Certificate) -> String {
+        format!("{:?}", cert.subject_name())
+    }
+
+    fn issuer_name(cert: &Self::Certificate) -> String {
+        format!("{:?}", cert.issuer_name())
+    }
+
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        Ok(cert.subject_name().to_der()?)
+    }
+
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>> {
+        Ok(cert.issuer_name().to_der()?)
+    }
+
+    fn is_valid_at(cert: &Self::Certificate, unix_time: std::time::Duration) -> Result<bool> {
+        let unix_time = unix_time
+            .as_secs()
+            .try_into()
+            .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
+        let unix_time = Asn1Time::from_unix(unix_time)?;
+
+        Ok(cert.not_before().compare(&unix_time)? != Ordering::Greater
+            && cert.not_after().compare(&unix_time)? != Ordering::Less)
+    }
+
+    fn version(cert: &Self::Certificate) -> Result<u8> {
+        cert.version()
+            .try_into()
+            .map_err(|_| "OpenSSL returned a negative certificate version".into())
+    }
+
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<super::BasicConstraints>> {
+        let critical = match Self::extension_criticality(cert, oid::BASIC_CONSTRAINTS)? {
+            Some(critical) => critical,
+            None => return Ok(None),
+        };
+        let path_len_constraint = cert
+            .pathlen()
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| "pathLenConstraint does not fit usize")?;
+        let flags = unsafe { X509_get_extension_flags(cert.as_ptr()) };
+
+        Ok(Some(super::BasicConstraints {
+            critical,
+            ca: flags & EXFLAG_CA != 0,
+            path_len_constraint,
+        }))
+    }
+
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
+        if Self::extension_criticality(cert, oid::KEY_USAGE)?.is_none() {
+            return Ok(None);
+        }
+        let key_usage = unsafe { X509_get_key_usage(cert.as_ptr()) };
+
+        Ok(Some(super::KeyUsage {
+            key_cert_sign: key_usage & X509v3_KU_KEY_CERT_SIGN != 0,
+        }))
+    }
+
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
+        let oid = Asn1Object::from_str(oid)
+            .map_err(|e| format!("Invalid extension OID {}: {:?}", oid, e))?;
+
+        unsafe {
+            let index = X509_get_ext_by_OBJ(cert.as_ptr(), oid.as_ptr(), -1);
+            if index == -1 {
+                return Ok(None);
+            }
+
+            let extension = X509_get_ext(cert.as_ptr(), index);
+            if extension.is_null() {
+                return Err("OpenSSL returned null extension pointer".into());
+            }
+
+            Ok(Some(X509_EXTENSION_get_critical(extension) != 0))
+        }
+    }
+
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String> {
+        let count = unsafe { X509_get_ext_count(cert.as_ptr()) };
+        if count <= 0 {
+            return Vec::new();
+        }
+
+        (0..count)
+            .filter_map(|index| {
+                let extension = unsafe { X509_get_ext(cert.as_ptr(), index) };
+                if extension.is_null() {
+                    return None;
+                }
+
+                let critical = unsafe { X509_EXTENSION_get_critical(extension) != 0 };
+                if !critical {
+                    return None;
+                }
+
+                let object = unsafe { X509_EXTENSION_get_object(extension) };
+                if object.is_null() {
+                    return None;
+                }
+
+                Some(unsafe { Asn1ObjectRef::from_ptr(object) }.to_string())
+            })
+            .collect()
+    }
+}
+
+mod oid {
+    /// RFC 5280 section 4.2.1.9: id-ce-basicConstraints OBJECT IDENTIFIER ::= { id-ce 19 }.
+    pub const BASIC_CONSTRAINTS: &str = "2.5.29.19";
+    /// RFC 5280 section 4.2.1.3: id-ce-keyUsage OBJECT IDENTIFIER ::= { id-ce 15 }.
+    pub const KEY_USAGE: &str = "2.5.29.15";
 }
 
 impl CryptoBackend for Crypto {
@@ -188,10 +309,20 @@ impl CryptoBackend for Crypto {
         trusted_cert: &Certificate,
         untrusted_chain: &[&Certificate],
         leaf: &Certificate,
+        unix_time: Option<std::time::Duration>,
     ) -> Result<()> {
         let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
         store_builder.add_cert(trusted_cert.to_owned())?;
         store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+        if let Some(unix_time) = unix_time {
+            let mut params = X509VerifyParam::new()?;
+            let unix_time = unix_time
+                .as_secs()
+                .try_into()
+                .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
+            params.set_time(unix_time);
+            store_builder.set_param(&params)?;
+        }
         let store = store_builder.build();
         let mut ctx = openssl::x509::X509StoreContext::new()?;
         let mut chain = Stack::<Certificate>::new()?;

@@ -8,6 +8,10 @@
 //! - `crypto_pure_rust` - Pure Rust
 //! - `crypto_webcrypto` - WebCrypto-based async verification for WASM
 
+use std::time::Duration;
+
+mod x509_policy;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 mod signature;
@@ -42,6 +46,18 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BasicConstraints {
+    pub critical: bool,
+    pub ca: bool,
+    pub path_len_constraint: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyUsage {
+    pub key_cert_sign: bool,
+}
+
 /// API for the certificate types of the backend
 pub trait CertificateBackend {
     type Certificate: Clone;
@@ -66,6 +82,49 @@ pub trait CertificateBackend {
 
     /// Extract an extension value by dotted-decimal OID.
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
+
+    /// Return the certificate subject distinguished name for diagnostics.
+    fn subject_name(cert: &Self::Certificate) -> String;
+
+    /// Return the certificate issuer distinguished name for diagnostics.
+    fn issuer_name(cert: &Self::Certificate) -> String;
+
+    /// Return the DER-encoded subject distinguished name.
+    fn subject_name_der(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
+    /// Return the DER-encoded issuer distinguished name.
+    fn issuer_name_der(cert: &Self::Certificate) -> Result<Vec<u8>>;
+
+    /// Return whether `cert`'s issuer name matches `issuer`'s subject name.
+    fn issuer_name_matches_subject(
+        cert: &Self::Certificate,
+        issuer: &Self::Certificate,
+    ) -> Result<bool> {
+        Ok(Self::issuer_name_der(cert)? == Self::subject_name_der(issuer)?)
+    }
+
+    /// Return whether the certificate validity interval includes `unix_time`.
+    fn is_valid_at(cert: &Self::Certificate, unix_time: Duration) -> Result<bool>;
+
+    /// Return the zero-based X.509 version number: 0 = v1, 1 = v2, 2 = v3.
+    fn version(cert: &Self::Certificate) -> Result<u8>;
+
+    /// Return decoded RFC 5280 basicConstraints metadata if present.
+    fn basic_constraints(cert: &Self::Certificate) -> Result<Option<BasicConstraints>>;
+
+    /// Return decoded RFC 5280 keyUsage metadata if present.
+    fn key_usage(cert: &Self::Certificate) -> Result<Option<KeyUsage>>;
+
+    /// Return the criticality of an extension by dotted-decimal OID if present.
+    fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>>;
+
+    /// Return dotted-decimal OIDs for critical extensions in the certificate.
+    fn critical_extension_oids(cert: &Self::Certificate) -> Vec<String>;
+
+    /// Return whether the certificate is self-issued.
+    fn is_self_issued(cert: &Self::Certificate) -> Result<bool> {
+        Self::issuer_name_matches_subject(cert, cert)
+    }
 }
 
 /// Synchronous API for a cryptographic backend
@@ -85,6 +144,7 @@ pub trait CryptoBackend: CertificateBackend {
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()>;
 }
 
@@ -105,6 +165,7 @@ pub trait AsyncCryptoBackend: CertificateBackend {
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> impl std::future::Future<Output = Result<()>>;
 }
 
@@ -129,8 +190,9 @@ where
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
+        unix_time: Option<Duration>,
     ) -> Result<()> {
-        <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf)
+        <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf, unix_time)
     }
 }
 

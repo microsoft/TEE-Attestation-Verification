@@ -128,13 +128,13 @@ pub mod sync {
                 ark_matches_pinned(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
 
-                Crypto::verify_chain(ark, &[ask], vcek)
+                Crypto::verify_chain(ark, &[ask], vcek, None)
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::WithPinnedArk { ask } => {
                 let pinned_ark = crate::pinned_arks::get_ark(generation)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
-                Crypto::verify_chain(&pinned_ark, &[ask], vcek)
+                Crypto::verify_chain(&pinned_ark, &[ask], vcek, None)
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::Skip => {}
@@ -181,14 +181,14 @@ pub mod asynchronous {
                 ark_matches_pinned(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
 
-                Crypto::verify_chain(ark, &[ask], vcek)
+                Crypto::verify_chain(ark, &[ask], vcek, None)
                     .await
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
             ChainVerification::WithPinnedArk { ask } => {
                 let pinned_ark = crate::pinned_arks::get_ark(generation)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
-                Crypto::verify_chain(&pinned_ark, &[ask], vcek)
+                Crypto::verify_chain(&pinned_ark, &[ask], vcek, None)
                     .await
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
             }
@@ -211,6 +211,17 @@ pub(crate) fn ark_matches_pinned(
     ark: &Certificate,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pinned_ark = crate::pinned_arks::get_ark(generation)?;
+
+    let pinned_issuer = Crypto::issuer_name_der(&pinned_ark)?;
+    let provided_issuer = Crypto::issuer_name_der(ark)?;
+    if pinned_issuer != provided_issuer {
+        return Err(format!(
+            "Provided ARK issuer does not match pinned ARK for {}",
+            generation
+        )
+        .into());
+    }
+
     let pinned_key = Crypto::get_public_key(&pinned_ark)?;
     let provided_key = Crypto::get_public_key(ark)?;
     if pinned_key != provided_key {

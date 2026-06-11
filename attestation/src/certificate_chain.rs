@@ -91,7 +91,7 @@ impl AmdCertificates {
         // Get pinned ARK for this processor generation
         let ark = pinned_arks::get_ark(processor_model)?;
 
-        <ActiveCrypto as CryptoBackend>::verify_chain(&ark, &[&ask], &vcek)
+        <ActiveCrypto as CryptoBackend>::verify_chain(&ark, &[&ask], &vcek, None)
             .map_err(|e| format!("Failed to verify certificate chain: {}", e))?;
 
         info!(
@@ -156,7 +156,7 @@ impl AmdCertificates {
             .await
             .map_err(|e| format!("Error fetching chain: {}", e))?;
 
-        <ActiveCrypto as AsyncCryptoBackend>::verify_chain(&ark, &[], &ask)
+        <ActiveCrypto as AsyncCryptoBackend>::verify_chain(&ark, &[], &ask, None)
             .await
             .map_err(|e| format!("Failed to verify ASK signature: {}", e))?;
 
@@ -189,9 +189,14 @@ impl AmdCertificates {
 
             // Verify that VCEK is signed by ASK
             let chain = self.get_chain(processor_model).await?;
-            <ActiveCrypto as AsyncCryptoBackend>::verify_chain(&chain.ark, &[&chain.ask], &vcek)
-                .await
-                .map_err(|e| format!("Failed to verify certificate chain: {}", e))?;
+            <ActiveCrypto as AsyncCryptoBackend>::verify_chain(
+                &chain.ark,
+                &[&chain.ask],
+                &vcek,
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to verify certificate chain: {}", e))?;
 
             info!(
                 "VCEK certificate verified successfully for {}",

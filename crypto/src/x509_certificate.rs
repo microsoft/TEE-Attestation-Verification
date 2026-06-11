@@ -9,9 +9,12 @@ use x509_cert::der::{
     asn1::AnyRef, oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode,
     DecodePem, Encode, EncodePem,
 };
+use x509_cert::ext::pkix::{BasicConstraints as X509BasicConstraints, KeyUsage as X509KeyUsage};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 
-use super::{Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm};
+use super::{
+    BasicConstraints, KeyUsage, Result, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Certificate {
@@ -145,6 +148,78 @@ impl Certificate {
 
     pub fn signature_algorithm(&self) -> Result<SignatureKeyAlgorithm> {
         parse_signature_algorithm(&self.inner.signature_algorithm)
+    }
+    pub fn subject_name(&self) -> String {
+        self.inner.tbs_certificate.subject.to_string()
+    }
+
+    pub fn issuer_name(&self) -> String {
+        self.inner.tbs_certificate.issuer.to_string()
+    }
+
+    pub fn subject_name_der(&self) -> Result<Vec<u8>> {
+        Ok(self.inner.tbs_certificate.subject.to_der()?)
+    }
+
+    pub fn issuer_name_der(&self) -> Result<Vec<u8>> {
+        Ok(self.inner.tbs_certificate.issuer.to_der()?)
+    }
+
+    pub fn is_valid_at(&self, unix_time: std::time::Duration) -> Result<bool> {
+        let validity = self.inner.tbs_certificate.validity;
+        Ok(validity.not_before.to_unix_duration() <= unix_time
+            && unix_time <= validity.not_after.to_unix_duration())
+    }
+
+    pub fn version(&self) -> u8 {
+        self.inner.tbs_certificate.version as u8
+    }
+
+    pub fn basic_constraints(&self) -> Result<Option<BasicConstraints>> {
+        Ok(self
+            .inner
+            .tbs_certificate
+            .get::<X509BasicConstraints>()?
+            .map(|(critical, basic_constraints)| BasicConstraints {
+                critical,
+                ca: basic_constraints.ca,
+                path_len_constraint: basic_constraints.path_len_constraint.map(usize::from),
+            }))
+    }
+
+    pub fn key_usage(&self) -> Result<Option<KeyUsage>> {
+        Ok(self
+            .inner
+            .tbs_certificate
+            .get::<X509KeyUsage>()?
+            .map(|(_, key_usage)| KeyUsage {
+                key_cert_sign: key_usage.key_cert_sign(),
+            }))
+    }
+
+    pub fn extension_criticality(&self, oid: &str) -> Result<Option<bool>> {
+        let oid = ObjectIdentifier::new(oid)?;
+
+        Ok(self
+            .inner
+            .tbs_certificate
+            .extensions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .find(|extension| extension.extn_id == oid)
+            .map(|extension| extension.critical))
+    }
+
+    pub fn critical_extension_oids(&self) -> Vec<String> {
+        self.inner
+            .tbs_certificate
+            .extensions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|extension| extension.critical.then(|| extension.extn_id.to_string()))
+            .collect()
     }
 }
 
