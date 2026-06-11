@@ -17,10 +17,14 @@ pub(crate) fn padded_windows<'cert, Certificate: 'cert, Path, const WINDOW_SIZE:
 where
     Path: Clone + Iterator<Item = &'cert Certificate>,
 {
-    assert!(WINDOW_SIZE > 0, "window size must be non-zero");
+    const {
+        assert!(WINDOW_SIZE > 0, "window size must be non-zero");
+        assert!(WINDOW_SIZE <= 127, "window size must be at most 127");
+    }
 
-    let path_len = path.clone().count();
-    let roots = 1 - WINDOW_SIZE as isize..path_len as isize;
+    let path_len = isize::try_from(path.clone().count()).expect("path length must fit isize");
+    let window_size = isize::try_from(WINDOW_SIZE).expect("window size must fit isize");
+    let roots = 1 - window_size..path_len;
     roots.map(move |window_index| {
         std::array::from_fn(|offset| {
             let path_index = window_index + offset as isize;
