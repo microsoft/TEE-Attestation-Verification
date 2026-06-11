@@ -329,7 +329,31 @@ mod tests {
 
     #[test]
     #[cfg(sync_crypto)]
-    fn cose_verify1_allows_absent_protected_alg() {
+    fn cose_verify1_rejects_invalid_protected_header_cbor() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        assert_eq!(
+            cose_verify1(&key, algorithm, &[0xff], b"", b"").unwrap_err(),
+            "Failed to parse CBOR bytes"
+        );
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_rejects_non_map_protected_header() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        assert_eq!(
+            cose_verify1(&key, algorithm, &[0x80], b"", b"").unwrap_err(),
+            "Expected Map, got \"Array\""
+        );
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_allows_missing_protected_alg() {
         let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
         let key = key(P256_SPKI, algorithm);
 
@@ -337,6 +361,18 @@ mod tests {
         assert!(
             err.contains("signature verification failed"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_rejects_non_integer_protected_alg() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        assert_eq!(
+            cose_verify1(&key, algorithm, &[0xa1, 0x01, 0x40], b"", b"").unwrap_err(),
+            "protected alg must be an integer"
         );
     }
 
