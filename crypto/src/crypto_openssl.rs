@@ -277,7 +277,9 @@ impl CertificateBackend for Crypto {
 }
 
 mod oid {
+    /// RFC 5280 section 4.2.1.9: id-ce-basicConstraints OBJECT IDENTIFIER ::= { id-ce 19 }.
     pub const BASIC_CONSTRAINTS: &str = "2.5.29.19";
+    /// RFC 5280 section 4.2.1.3: id-ce-keyUsage OBJECT IDENTIFIER ::= { id-ce 15 }.
     pub const KEY_USAGE: &str = "2.5.29.15";
 }
 
