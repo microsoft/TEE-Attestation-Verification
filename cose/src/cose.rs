@@ -26,9 +26,11 @@ const COSE_HEADER_ALG: i64 = 1;
 /// | `-38` | PS384: RSA-PSS / SHA-384 |
 /// | `-39` | PS512: RSA-PSS / SHA-512 |
 ///
-/// Algorithm identifiers are from RFC 9053 and the IANA COSE Algorithms
-/// registry:
+/// ECDSA algorithm identifiers are from RFC 9053. RSA-PSS algorithm
+/// identifiers are from RFC 8230. All are registered in the IANA COSE
+/// Algorithms registry:
 /// - RFC 9053: https://www.rfc-editor.org/rfc/rfc9053.html
+/// - RFC 8230, Section 2: https://www.rfc-editor.org/rfc/rfc8230.html#section-2
 /// - IANA: https://www.iana.org/assignments/cose/cose.xhtml#algorithms
 ///
 /// RSA keys are compatible across the RSA-PSS hash variants; the COSE
@@ -42,15 +44,15 @@ pub fn signature_key_algorithm_for_cose_alg(alg: i64) -> Result<SignatureKeyAlgo
         -35 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384)),
         // ES512. RFC 9053, Section 2.1; IANA COSE Algorithms value -36.
         -36 => Ok(SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521)),
-        // PS256. RFC 9053, Section 2.2; IANA COSE Algorithms value -37.
+        // PS256. RFC 8230, Section 2; IANA COSE Algorithms value -37.
         -37 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps256,
         )),
-        // PS384. RFC 9053, Section 2.2; IANA COSE Algorithms value -38.
+        // PS384. RFC 8230, Section 2; IANA COSE Algorithms value -38.
         -38 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps384,
         )),
-        // PS512. RFC 9053, Section 2.2; IANA COSE Algorithms value -39.
+        // PS512. RFC 8230, Section 2; IANA COSE Algorithms value -39.
         -39 => Ok(SignatureKeyAlgorithm::RsaPss(
             RsaPssSignatureKeyAlgorithm::Ps512,
         )),
