@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install rust
         run: |
           rustup update nightly
@@ -26,7 +26,7 @@ jobs:
 
       - name: Setup WASM tooling
         run: |
-          cargo install wasm-bindgen-cli
+          cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
       # COSE depends on EverParse CBOR code that requires 64-bit usize, so it
       # must be compiled as wasm64 with Cargo nightly build-std. wasm-bindgen
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install rust
         run: |
           rustup update stable && rustup default stable
