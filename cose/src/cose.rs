@@ -70,6 +70,10 @@ pub fn cose_alg_for_signature_key_algorithm(
         SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps256) => Ok(-37),
         SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384) => Ok(-38),
         SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps512) => Ok(-39),
+        _ => Err(format!(
+            "Unsupported signature key algorithm {:?} for COSE",
+            algorithm
+        )),
     }
 }
 
