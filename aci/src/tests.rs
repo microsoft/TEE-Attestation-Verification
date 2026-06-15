@@ -187,7 +187,8 @@ mod sync {
             wrong_feed,
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        {
             Err(AciError::Policy(actual)) => assert_eq!(
                 actual,
                 "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
@@ -343,6 +344,7 @@ mod r#async {
             ACI_FEED,
             ACI_SVN,
         )
+        .await
         .unwrap();
 
         assert_eq!(report_data, report.report_data);
@@ -459,6 +461,7 @@ mod r#async {
             ACI_FEED,
             ACI_SVN,
         )
+        .await
         .unwrap();
         assert_eq!(report_data, report.report_data);
 
@@ -469,7 +472,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN + 1,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => {
                 assert_eq!(actual, "UVM SVN 104 is below trusted minimum 105")
             }
@@ -485,7 +490,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => {
                 assert_eq!(actual, "SNP HOST_DATA does not match trusted policy")
             }
@@ -501,7 +508,9 @@ mod r#async {
             wrong_feed,
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => assert_eq!(
                 actual,
                 "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
@@ -519,7 +528,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => assert_contains(&actual, "SNP reported TCB"),
             other => panic!("expected Policy error, got {other:?}"),
         }
@@ -533,7 +544,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Measurement(actual)) => assert_eq!(
                 actual,
                 "ACI payload measurement does not match attestation measurement"
@@ -549,7 +562,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => {
                 assert_eq!(actual, "SNP guest policy allows debug mode")
             }
@@ -564,7 +579,9 @@ mod r#async {
             uvm.clone(),
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Policy(actual)) => {
                 assert_eq!(actual, "SNP report VMPL is outside the guest range")
             }
@@ -581,7 +598,9 @@ mod r#async {
             missing_svn_int,
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Measurement(actual)) => {
                 assert_eq!(actual, "x-ms-sevsnpvm-guestsvn-int must be a JSON integer")
             }
@@ -598,7 +617,9 @@ mod r#async {
             uppercase_measurement,
             ACI_FEED,
             ACI_SVN,
-        ) {
+        )
+        .await
+        {
             Err(AciError::Measurement(actual)) => assert_eq!(
                 actual,
                 "x-ms-sevsnpvm-launchmeasurement must match ^[0-9a-f]+$"

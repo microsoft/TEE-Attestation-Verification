@@ -82,7 +82,7 @@ const MAX_GUEST_VMPL: u32 = 3;
 ///     uvm,
 ///     "ContainerPlat-AMD-UVM",
 ///     minimum_uvm_svn,
-/// )?;
+/// ).await?;
 /// # let _ = verified_report_data;
 /// # Ok(())
 /// # }
