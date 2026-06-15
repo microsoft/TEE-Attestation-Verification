@@ -178,7 +178,7 @@ pub mod wasm {
 
     use js_sys::Array;
     use wasm_bindgen::prelude::*;
-    use zerocopy::FromBytes;
+    use zerocopy::{FromBytes, IntoBytes};
 
     use super::VerifyError;
     use crate::crypto::{CertificateBackend, Crypto};
@@ -282,7 +282,13 @@ pub mod wasm {
     // -----------------------------------------------------------------------
 
     impl SnpAttestationReport {
-        fn report(&self) -> &AttestationReport {
+        pub fn from_verified_report(report: AttestationReport) -> Self {
+            Self {
+                bytes: report.as_bytes().to_vec(),
+            }
+        }
+
+        pub fn report(&self) -> &AttestationReport {
             AttestationReport::ref_from_bytes(&self.bytes)
                 .expect("SnpAttestationReport is only constructed from verified bytes so this parse should not fail")
         }

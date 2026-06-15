@@ -146,13 +146,11 @@ mod wasm {
             amd_endorsements[2].as_slice(),
         ];
 
-        asynchronous::verify_attestation(&attestation_report, &endorsement_refs)
+        let attestation = asynchronous::verify_attestation(&attestation_report, &endorsement_refs)
             .await
             .map_err(wasm_error)?;
 
-        Ok(SnpAttestationReport::from_verified_bytes(
-            attestation_report,
-        ))
+        Ok(SnpAttestationReport::from_verified_report(attestation))
     }
 
     /// Verify an ACI/UVM endorsement COSE blob with a caller-pinned did:x509 root.
