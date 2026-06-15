@@ -68,6 +68,7 @@ jobs:
         run: |
           rustup update stable && rustup default stable
           rustup toolchain install nightly
+          rustup +nightly component add rust-src
 
       - name: Setup WASM tooling
         run: |
