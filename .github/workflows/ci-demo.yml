@@ -71,7 +71,6 @@ jobs:
 
       - name: Setup WASM tooling
         run: |
-          rustup target add wasm64-unknown-unknown --toolchain nightly
           cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
       - name: Build ACI WASM for the demo

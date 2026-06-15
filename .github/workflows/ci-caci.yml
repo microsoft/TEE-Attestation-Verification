@@ -52,7 +52,6 @@ jobs:
 
       - name: Setup WASM tooling
         run: |
-          rustup target add wasm64-unknown-unknown --toolchain nightly
           cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
       # ACI depends on EverParse CBOR code that requires 64-bit usize, so it
