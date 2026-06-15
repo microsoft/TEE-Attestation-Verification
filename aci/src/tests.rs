@@ -36,7 +36,7 @@ mod sync {
         let uvm =
             crate::sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
 
-        let report_data = verify_c_aci_attestation(
+        let report_data = crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -137,7 +137,7 @@ mod sync {
             crate::sync::verify_uvm_endorsement(&reference_info_fixture(), TRUSTED_ACI_DIDX509)
                 .unwrap();
 
-        let report_data = verify_c_aci_attestation(
+        let report_data = crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -148,7 +148,7 @@ mod sync {
         .unwrap();
         assert_eq!(report_data, report.report_data);
 
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -164,7 +164,7 @@ mod sync {
 
         let mut policy = report.host_data;
         policy[0] ^= 1;
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![policy],
@@ -180,7 +180,7 @@ mod sync {
 
         let mut wrong_feed = uvm.clone();
         endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -198,7 +198,7 @@ mod sync {
         let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
         let mut minimum_tcb = report.reported_tcb;
         minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             vec![(matching_cpuid, minimum_tcb)],
             vec![report.host_data],
@@ -212,7 +212,7 @@ mod sync {
 
         let mut wrong_measurement = report;
         wrong_measurement.measurement[0] ^= 1;
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             wrong_measurement,
             Vec::new(),
             vec![wrong_measurement.host_data],
@@ -228,7 +228,7 @@ mod sync {
         }
 
         let debug_report = report_with_debug_enabled();
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             debug_report,
             Vec::new(),
             vec![debug_report.host_data],
@@ -243,7 +243,7 @@ mod sync {
         }
 
         let host_report = report_with_vmpl(4);
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             host_report,
             Vec::new(),
             vec![host_report.host_data],
@@ -260,7 +260,7 @@ mod sync {
         let mut missing_svn_int = uvm.clone();
         endorsement_v1_mut(&mut missing_svn_int).payload =
             reference_payload_without_guestsvn_int(report);
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -277,7 +277,7 @@ mod sync {
         let mut uppercase_measurement = uvm;
         endorsement_v1_mut(&mut uppercase_measurement).payload =
             reference_payload_with_uppercase_measurement(report);
-        match verify_c_aci_attestation(
+        match crate::sync::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -300,6 +300,25 @@ mod r#async {
 
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    async fn verify_c_aci_attestation(
+        attestation: AttestationReport,
+        minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
+        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        uvm_endorsement: CaciUvmEndorsement,
+        uvm_feed: &str,
+        minimum_svn: u64,
+    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+        crate::asynchronous::verify_c_aci_attestation(
+            attestation,
+            minimum_tcb,
+            trusted_c_aci_policy,
+            uvm_endorsement,
+            uvm_feed,
+            minimum_svn,
+        )
+        .await
+    }
 
     #[cfg_attr(not(target_family = "wasm"), tokio::test)]
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]

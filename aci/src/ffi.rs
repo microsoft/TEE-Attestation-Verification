@@ -8,8 +8,7 @@ mod wasm {
     use wasm_bindgen::{prelude::*, JsCast};
 
     use crate::{
-        asynchronous, parse_aci_cose as parse_aci_cose_native,
-        verify_c_aci_attestation as verify_c_aci_attestation_native, AciError, CaciUvmEndorsement,
+        asynchronous, parse_aci_cose as parse_aci_cose_native, AciError, CaciUvmEndorsement,
         CaciUvmEndorsementV1, HOST_DATA_LEN,
     };
     use attestation::snp::{ffi::wasm::SnpAttestationReport, report::TcbVersionRaw, Cpuid};
@@ -188,7 +187,7 @@ mod wasm {
         if trusted_c_aci_policies.is_empty() {
             return Err("at least one trusted CACI policy digest is required".to_string());
         }
-        verify_c_aci_attestation_native(
+        asynchronous::verify_c_aci_attestation(
             *attestation.report(),
             minimum_tcb,
             trusted_c_aci_policies,
@@ -196,6 +195,7 @@ mod wasm {
             uvm_feed,
             minimum_svn,
         )
+        .await
         .map(|report_data| report_data.to_vec())
         .map_err(wasm_error)
     }

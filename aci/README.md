@@ -32,7 +32,7 @@ let caci_uvm_endorsement = tee_attestation_verification_aci::sync::verify_uvm_en
     trusted_didx509,
 )?;
 let minimum_tcb: Vec<(Cpuid, TcbVersionRaw)> = vec![(container_cpuid, minimum_tcb_version)];
-let verified_report_data = tee_attestation_verification_aci::verify_c_aci_attestation(
+let verified_report_data = tee_attestation_verification_aci::sync::verify_c_aci_attestation(
     report,
     minimum_tcb,
     vec![trusted_c_aci_policy], // SHA-256 digest of the loaded security policy.

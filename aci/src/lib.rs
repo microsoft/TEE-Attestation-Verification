@@ -75,7 +75,7 @@ const MAX_GUEST_VMPL: u32 = 3;
 ///     aci_cose,
 ///     trusted_didx509,
 /// )?;
-/// let verified_report_data = tee_attestation_verification_aci::verify_c_aci_attestation(
+/// let verified_report_data = tee_attestation_verification_aci::sync::verify_c_aci_attestation(
 ///     report,
 ///     vec![],
 ///     vec![trusted_c_aci_policy],
@@ -170,6 +170,33 @@ pub mod sync {
             _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
         }
     }
+
+    /// Verify Confidential ACI relying-party policy over staged verified artifacts.
+    ///
+    /// [`verify_attestation`] must be used to authenticate the SNP report before
+    /// calling this function, and [`verify_uvm_endorsement`] must be used to
+    /// authenticate the UVM reference info and its did:x509 root.
+    ///
+    /// `trusted_c_aci_policy` is the expected SHA-256 digest of the Confidential
+    /// ACI security policy loaded into `HOST_DATA`. The returned value is the
+    /// verified `REPORT_DATA` from the SNP report.
+    pub fn verify_c_aci_attestation(
+        attestation: AttestationReport,
+        minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
+        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        uvm_endorsement: CaciUvmEndorsement,
+        uvm_feed: &str,
+        minimum_svn: u64,
+    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+        verify_c_aci_attestation_impl(
+            attestation,
+            minimum_tcb,
+            trusted_c_aci_policy,
+            uvm_endorsement,
+            uvm_feed,
+            minimum_svn,
+        )
+    }
 }
 
 #[cfg(async_crypto)]
@@ -195,7 +222,7 @@ pub mod sync {
 ///     aci_cose,
 ///     trusted_didx509,
 /// ).await?;
-/// let verified_report_data = tee_attestation_verification_aci::verify_c_aci_attestation(
+/// let verified_report_data = tee_attestation_verification_aci::asynchronous::verify_c_aci_attestation(
 ///     report,
 ///     vec![],
 ///     vec![trusted_c_aci_policy],
@@ -240,7 +267,7 @@ pub mod asynchronous {
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
     /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
-    /// call [`crate::verify_c_aci_attestation`] afterwards to bind the UVM
+    /// call [`verify_c_aci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
     pub async fn verify_uvm_endorsement(
         aci_cose: &[u8],
@@ -299,19 +326,36 @@ pub mod asynchronous {
             _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
         }
     }
+
+    /// Verify Confidential ACI relying-party policy over staged verified artifacts.
+    ///
+    /// [`verify_attestation`] must be used to authenticate the SNP report before
+    /// calling this function, and [`verify_uvm_endorsement`] must be used to
+    /// authenticate the UVM reference info and its did:x509 root.
+    ///
+    /// `trusted_c_aci_policy` is the expected SHA-256 digest of the Confidential
+    /// ACI security policy loaded into `HOST_DATA`. The returned value is the
+    /// verified `REPORT_DATA` from the SNP report.
+    pub async fn verify_c_aci_attestation(
+        attestation: AttestationReport,
+        minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
+        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        uvm_endorsement: CaciUvmEndorsement,
+        uvm_feed: &str,
+        minimum_svn: u64,
+    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+        verify_c_aci_attestation_impl(
+            attestation,
+            minimum_tcb,
+            trusted_c_aci_policy,
+            uvm_endorsement,
+            uvm_feed,
+            minimum_svn,
+        )
+    }
 }
 
-/// Verify Confidential ACI relying-party policy over staged verified artifacts.
-///
-/// `sync::verify_attestation` or `asynchronous::verify_attestation` must be used
-/// to authenticate the SNP report before calling this function, and
-/// `sync::verify_uvm_endorsement` or `asynchronous::verify_uvm_endorsement`
-/// must be used to authenticate the UVM reference info and its did:x509 root.
-///
-/// `trusted_c_aci_policy` is the expected SHA-256 digest of the Confidential
-/// ACI security policy loaded into `HOST_DATA`. The returned value is the
-/// verified `REPORT_DATA` from the SNP report.
-pub fn verify_c_aci_attestation(
+fn verify_c_aci_attestation_impl(
     attestation: AttestationReport,
     minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
     trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
@@ -334,13 +378,13 @@ pub fn verify_c_aci_attestation(
     if !minimum_tcb.is_empty() {
         let generation = attestation
             .cpu_generation()
-            .map_err(|e| AciError::Policy(format!("unsupported SNP CPU generation: {e}")))?;
+            .map_err(|e| AciError::Policy(format!("Unsupported SNP CPU generation: {e}")))?;
         let matching_minimum_tcb = minimum_tcb
             .iter()
             .map(|(cpuid, minimum_tcb)| {
                 Ok::<_, AciError>((
                     Generation::from_cpuid(cpuid).map_err(|e| {
-                        AciError::Policy(format!("unsupported minimum TCB CPUID {cpuid:?}: {e}"))
+                        AciError::Policy(format!("Unsupported minimum TCB CPUID {cpuid:?}: {e}"))
                     })?,
                     minimum_tcb,
                 ))
