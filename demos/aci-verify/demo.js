@@ -156,6 +156,14 @@ function formatBytes(bytes) {
   return groups.join("\n  ");
 }
 
+function requiredNonNegativeBigInt(textId, name) {
+  const value = document.getElementById(textId).value.trim();
+  if (!/^[0-9]+$/.test(value)) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return BigInt(value);
+}
+
 async function onSubmit(ev) {
   ev.preventDefault();
   outputEl.textContent = "";
@@ -171,10 +179,7 @@ async function onSubmit(ev) {
     const policyDigests = requiredHexLinesToBytes("policy-hex", "security policy digest");
     const minimumTcbJson = document.getElementById("minimum-tcb-json").value;
     const feed = getText("UVM feed", "feed");
-    const minimumSvn = Number.parseInt(document.getElementById("minimum-svn").value, 10);
-    if (!Number.isSafeInteger(minimumSvn) || minimumSvn < 0) {
-      throw new Error("Minimum UVM SVN must be a non-negative integer");
-    }
+    const minimumSvn = requiredNonNegativeBigInt("minimum-svn", "Minimum UVM SVN");
 
     setStatus("Verifying SEV-SNP attestation...");
     const attestation = await verify_attestation_with_cert_chain_async(reportBytes, endorsements);
@@ -190,7 +195,7 @@ async function onSubmit(ev) {
       policyDigests,
       uvm,
       feed,
-      BigInt(minimumSvn),
+      minimumSvn,
     );
 
     setStatus("Confidential ACI policy verified.", "ok");

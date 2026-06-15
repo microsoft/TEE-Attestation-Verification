@@ -8,6 +8,10 @@ run the Confidential ACI fixture through the staged ACI WASM bindings.
 From the repository root, build the ACI WASM package:
 
 ```sh
+rustup toolchain install nightly
+rustup +nightly component add rust-src
+cargo install wasm-bindgen-cli --version 0.2.122 --locked
+
 cargo +nightly build -Z build-std=std,panic_abort \
   --manifest-path aci/Cargo.toml \
   --target wasm64-unknown-unknown \
