@@ -92,9 +92,14 @@ For WebCrypto or other async backends, use `cose_verify1_async`.
 
 The COSE crate depends on EverParse CBOR Rust code (`cborrs`). That generated
 code currently requires a 64-bit `usize`, so COSE WASM builds use
-`wasm64-unknown-unknown` with Cargo nightly `build-std`:
+`wasm64-unknown-unknown` with Cargo nightly `build-std`. The target does not
+have a prebuilt `rust-std` component, so install `rust-src` and do not run
+`rustup target add wasm64-unknown-unknown`:
 
 ```bash
+rustup toolchain install nightly
+rustup +nightly component add rust-src
+
 cargo +nightly build -Z build-std=std,panic_abort \
   --manifest-path cose/Cargo.toml \
   --target wasm64-unknown-unknown \

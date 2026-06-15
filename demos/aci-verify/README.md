@@ -13,6 +13,11 @@ loading its own WASM module.
 From the repository root, build the ACI WASM package as wasm64, emitting
 `aci_pkg/` directly inside this demo directory:
 
+ACI depends on EverParse CBOR code that requires a 64-bit `usize`. Build it as
+`wasm64-unknown-unknown` with nightly `build-std`; the target does not have a
+prebuilt `rust-std` component, so install `rust-src` and do not run
+`rustup target add wasm64-unknown-unknown`.
+
 ```sh
 rustup toolchain install nightly
 rustup +nightly component add rust-src
