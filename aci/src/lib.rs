@@ -13,36 +13,6 @@
 //! 3. Bind the two verified artifacts by checking that the UVM launch
 //!    measurement matches the attestation report measurement.
 //!
-//! ```no_run
-//! # #[cfg(sync_crypto)]
-//! # fn example(
-//! #     attestation: &[u8],
-//! #     amd_endorsements: &[&[u8]],
-//! #     aci_cose: &[u8],
-//! #     trusted_didx509: &str,
-//! #     trusted_c_aci_policy: [u8; tee_attestation_verification_aci::HOST_DATA_LEN],
-//! #     minimum_uvm_svn: u64,
-//! # ) -> Result<(), Box<dyn std::error::Error>> {
-//! let report = tee_attestation_verification_aci::sync::verify_attestation(
-//!     attestation,
-//!     amd_endorsements,
-//! )?;
-//! let uvm = tee_attestation_verification_aci::sync::verify_uvm_endorsement(
-//!     aci_cose,
-//!     trusted_didx509,
-//! )?;
-//! let verified_report_data = tee_attestation_verification_aci::verify_c_aci_attestation(
-//!     report,
-//!     vec![],
-//!     vec![trusted_c_aci_policy],
-//!     uvm,
-//!     "ContainerPlat-AMD-UVM",
-//!     minimum_uvm_svn,
-//! )?;
-//! # let _ = verified_report_data;
-//! # Ok(())
-//! # }
-//! ```
 
 mod base64;
 mod didx509;

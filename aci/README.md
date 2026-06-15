@@ -27,7 +27,7 @@ let report = tee_attestation_verification_aci::sync::verify_attestation(
 )?;
 let trusted_didx509 =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
-let uvm_claims = tee_attestation_verification_aci::sync::verify_uvm_endorsement(
+let caci_uvm_endorsement = tee_attestation_verification_aci::sync::verify_uvm_endorsement(
     aci_cose_sign1,
     trusted_didx509,
 )?;
@@ -36,7 +36,7 @@ let verified_report_data = tee_attestation_verification_aci::verify_c_aci_attest
     report,
     minimum_tcb,
     vec![trusted_c_aci_policy], // SHA-256 digest of the loaded security policy.
-    uvm_claims,
+    caci_uvm_endorsement,
     "ContainerPlat-AMD-UVM",
     minimum_uvm_svn,
 )?;
