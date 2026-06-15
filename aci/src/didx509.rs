@@ -6,7 +6,7 @@ use crypto::AsyncCryptoBackend;
 #[cfg(sync_crypto)]
 use crypto::CryptoBackend;
 
-use crate::AciError;
+use crate::{base64::base64url_no_padding, AciError};
 
 #[cfg(sync_crypto)]
 pub(crate) fn verify_didx509_root(
@@ -123,35 +123,4 @@ async fn sha256_base64url_no_padding_async(bytes: &[u8]) -> Result<String, AciEr
                 ))
             })?;
     Ok(base64url_no_padding(&digest))
-}
-
-fn base64url_no_padding(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut encoded = String::with_capacity((bytes.len() * 4).div_ceil(3));
-    for chunk in bytes.chunks(3) {
-        let indexes = base64_indexes(chunk);
-        encoded.push(ALPHABET[indexes[0] as usize] as char);
-        encoded.push(ALPHABET[indexes[1] as usize] as char);
-        if chunk.len() > 1 {
-            encoded.push(ALPHABET[indexes[2] as usize] as char);
-        }
-        if chunk.len() > 2 {
-            encoded.push(ALPHABET[indexes[3] as usize] as char);
-        }
-    }
-    encoded
-}
-
-fn base64_indexes(chunk: &[u8]) -> [u8; 4] {
-    let mut block = [0u8; 3];
-    block[..chunk.len()].copy_from_slice(chunk);
-    // Turn 3 chunks into a 24 bit u32
-    // Then select 6 bits at a time to get the base64 indexes
-    let packed = u32::from_be_bytes([0, block[0], block[1], block[2]]);
-    [
-        ((packed >> 18) & 0x3f) as u8,
-        ((packed >> 12) & 0x3f) as u8,
-        ((packed >> 6) & 0x3f) as u8,
-        (packed & 0x3f) as u8,
-    ]
 }
