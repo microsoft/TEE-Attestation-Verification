@@ -3,32 +3,607 @@
 
 use super::*;
 
-use crate::didx509::parse_didx509_prefix;
-use crate::parse::hex_to_bytes;
-#[cfg(sync_crypto)]
-use crate::parse::ReferenceInfoPayload;
+use crate::parse::{hex_to_bytes, ReferenceInfoPayload};
 
-const MILAN_ATTESTATION: &[u8] =
-    include_bytes!("../../attestation/tests/test_data/milan_attestation_report.bin");
-const MILAN_ARK: &[u8] = include_bytes!("../../attestation/src/pinned_arks/milan_ark.pem");
-const MILAN_ASK: &[u8] = include_bytes!("../../attestation/tests/test_data/milan_ask.pem");
-const MILAN_VCEK: &[u8] = include_bytes!("../../attestation/tests/test_data/milan_vcek.pem");
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
-#[cfg(any(sync_crypto, async_crypto))]
 const REFERENCE_INFO_BASE64: &str = include_str!("../tests/fixtures/reference-info.base64");
 const REPORT_HEX: &str = include_str!("../tests/fixtures/report.hex");
-#[cfg(any(sync_crypto, async_crypto))]
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
-#[cfg(all(async_crypto, sync_crypto))]
-fn block_on_ready<F: std::future::Future>(future: F) -> F::Output {
-    let mut future = std::pin::pin!(future);
-    let waker = std::task::Waker::noop();
-    let mut context = std::task::Context::from_waker(waker);
-    match future.as_mut().poll(&mut context) {
-        std::task::Poll::Ready(output) => output,
-        std::task::Poll::Pending => panic!("native crypto futures should complete immediately"),
+const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
+const ACI_SVN: u64 = 104;
+const MILAN_CPUID: u32 = 0x00A00F11;
+
+#[cfg(sync_crypto)]
+mod sync {
+    use super::*;
+
+    #[cfg(target_family = "wasm")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn verifies_caci_attestation_end_to_end() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+        let reference_info = reference_info_fixture();
+
+        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        let uvm =
+            crate::sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
+
+        let report_data = verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm,
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .unwrap();
+
+        assert_eq!(report_data, report.report_data);
     }
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn step1_attestation_verification_works_and_rejects_invalid_inputs() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+
+        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        assert_verified_attestation_matches_fixture(report);
+
+        match crate::sync::verify_attestation(&attestation, &endorsement_refs[..2]) {
+            Err(AciError::InvalidAmdEndorsements(actual)) => {
+                assert_eq!(actual, "expected [vcek, ask, ark], got 2 certificate(s)")
+            }
+            other => panic!("expected InvalidAmdEndorsements, got {other:?}"),
+        }
+
+        let truncated = &attestation[..64];
+        match crate::sync::verify_attestation(truncated, &endorsement_refs) {
+            Err(AciError::InvalidAttestation(actual)) => assert_contains(&actual, "SizeError"),
+            other => panic!("expected InvalidAttestation, got {other:?}"),
+        }
+
+        let mut tampered = attestation.clone();
+        tampered[100] ^= 0xff;
+        match crate::sync::verify_attestation(&tampered, &endorsement_refs) {
+            Err(AciError::AttestationVerification(
+                attestation::snp::verify::VerificationError::SignatureVerificationError(actual),
+            )) => assert_contains(
+                &actual.to_ascii_lowercase(),
+                "signature verification failed",
+            ),
+            other => panic!("expected attestation signature verification error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn step2_uvm_endorsement_verification_works_and_rejects_invalid_inputs() {
+        let reference_info = reference_info_fixture();
+        let expected_report = parse_attestation(&attestation_fixture()).unwrap();
+
+        let uvm =
+            crate::sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
+        assert_verified_uvm_matches_fixture(&uvm, expected_report);
+
+        match crate::sync::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509) {
+            Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
+            other => panic!("expected Cose error, got {other:?}"),
+        }
+
+        match crate::sync::verify_uvm_endorsement(&reference_info, "not-a-did") {
+            Err(AciError::DidX509(actual)) => {
+                assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+            }
+            other => panic!("expected DidX509 error, got {other:?}"),
+        }
+
+        match crate::sync::verify_uvm_endorsement(&reference_info, "did:x509:0:sha256:wrong") {
+            Err(AciError::DidX509(actual)) => assert_eq!(
+                actual,
+                "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+            ),
+            other => panic!("expected DidX509 error, got {other:?}"),
+        }
+
+        let mut tampered_signature = reference_info;
+        *tampered_signature.last_mut().unwrap() ^= 1;
+        match crate::sync::verify_uvm_endorsement(&tampered_signature, TRUSTED_ACI_DIDX509) {
+            Err(AciError::Signature(actual)) => assert_contains(
+                &actual.to_ascii_lowercase(),
+                "signature verification failed",
+            ),
+            other => panic!("expected Signature error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn step3_policy_binding_works_and_rejects_invalid_inputs() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        let uvm =
+            crate::sync::verify_uvm_endorsement(&reference_info_fixture(), TRUSTED_ACI_DIDX509)
+                .unwrap();
+
+        let report_data = verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .unwrap();
+        assert_eq!(report_data, report.report_data);
+
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN + 1,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "UVM SVN 104 is below trusted minimum 105")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut policy = report.host_data;
+        policy[0] ^= 1;
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![policy],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP HOST_DATA does not match trusted policy")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut wrong_feed = uvm.clone();
+        endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            wrong_feed,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => assert_eq!(
+                actual,
+                "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
+            ),
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
+        let mut minimum_tcb = report.reported_tcb;
+        minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
+        match verify_c_aci_attestation(
+            report,
+            vec![(matching_cpuid, minimum_tcb)],
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => assert_contains(&actual, "SNP reported TCB"),
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut wrong_measurement = report;
+        wrong_measurement.measurement[0] ^= 1;
+        match verify_c_aci_attestation(
+            wrong_measurement,
+            Vec::new(),
+            vec![wrong_measurement.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => assert_eq!(
+                actual,
+                "ACI payload measurement does not match attestation measurement"
+            ),
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+
+        let debug_report = report_with_debug_enabled();
+        match verify_c_aci_attestation(
+            debug_report,
+            Vec::new(),
+            vec![debug_report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP guest policy allows debug mode")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let host_report = report_with_vmpl(4);
+        match verify_c_aci_attestation(
+            host_report,
+            Vec::new(),
+            vec![host_report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP report VMPL is outside the guest range")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut missing_svn_int = uvm.clone();
+        endorsement_v1_mut(&mut missing_svn_int).payload =
+            reference_payload_without_guestsvn_int(report);
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            missing_svn_int,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => {
+                assert_eq!(actual, "x-ms-sevsnpvm-guestsvn-int must be a JSON integer")
+            }
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+
+        let mut uppercase_measurement = uvm;
+        endorsement_v1_mut(&mut uppercase_measurement).payload =
+            reference_payload_with_uppercase_measurement(report);
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uppercase_measurement,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => assert_eq!(
+                actual,
+                "x-ms-sevsnpvm-launchmeasurement must match ^[0-9a-f]+$"
+            ),
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(async_crypto)]
+mod r#async {
+    use super::*;
+
+    #[cfg(target_family = "wasm")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn verifies_caci_attestation_end_to_end() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+        let reference_info = reference_info_fixture();
+
+        let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
+            .await
+            .unwrap();
+        let uvm = crate::asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
+            .await
+            .unwrap();
+
+        let report_data = verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm,
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .unwrap();
+
+        assert_eq!(report_data, report.report_data);
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn step1_attestation_verification_works_and_rejects_invalid_inputs() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+
+        let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
+            .await
+            .unwrap();
+        assert_verified_attestation_matches_fixture(report);
+
+        match crate::asynchronous::verify_attestation(&attestation, &endorsement_refs[..2]).await {
+            Err(AciError::InvalidAmdEndorsements(actual)) => {
+                assert_eq!(actual, "expected [vcek, ask, ark], got 2 certificate(s)")
+            }
+            other => panic!("expected InvalidAmdEndorsements, got {other:?}"),
+        }
+
+        let truncated = &attestation[..64];
+        match crate::asynchronous::verify_attestation(truncated, &endorsement_refs).await {
+            Err(AciError::InvalidAttestation(actual)) => assert_contains(&actual, "SizeError"),
+            other => panic!("expected InvalidAttestation, got {other:?}"),
+        }
+
+        let mut tampered = attestation.clone();
+        tampered[100] ^= 0xff;
+        match crate::asynchronous::verify_attestation(&tampered, &endorsement_refs).await {
+            Err(AciError::AttestationVerification(
+                attestation::snp::verify::VerificationError::SignatureVerificationError(actual),
+            )) => assert_contains(
+                &actual.to_ascii_lowercase(),
+                "signature verification failed",
+            ),
+            other => panic!("expected attestation signature verification error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn step2_uvm_endorsement_verification_works_and_rejects_invalid_inputs() {
+        let reference_info = reference_info_fixture();
+        let expected_report = parse_attestation(&attestation_fixture()).unwrap();
+
+        let uvm = crate::asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
+            .await
+            .unwrap();
+        assert_verified_uvm_matches_fixture(&uvm, expected_report);
+
+        match crate::asynchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509).await {
+            Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
+            other => panic!("expected Cose error, got {other:?}"),
+        }
+
+        match crate::asynchronous::verify_uvm_endorsement(&reference_info, "not-a-did").await {
+            Err(AciError::DidX509(actual)) => {
+                assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+            }
+            other => panic!("expected DidX509 error, got {other:?}"),
+        }
+
+        match crate::asynchronous::verify_uvm_endorsement(
+            &reference_info,
+            "did:x509:0:sha256:wrong",
+        )
+        .await
+        {
+            Err(AciError::DidX509(actual)) => assert_eq!(
+                actual,
+                "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+            ),
+            other => panic!("expected DidX509 error, got {other:?}"),
+        }
+
+        let mut tampered_signature = reference_info;
+        *tampered_signature.last_mut().unwrap() ^= 1;
+        match crate::asynchronous::verify_uvm_endorsement(&tampered_signature, TRUSTED_ACI_DIDX509)
+            .await
+        {
+            Err(AciError::Signature(actual)) => assert_contains(
+                &actual.to_ascii_lowercase(),
+                "signature verification failed",
+            ),
+            other => panic!("expected Signature error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn step3_policy_binding_works_and_rejects_invalid_inputs() {
+        let attestation = attestation_fixture();
+        let endorsements = amd_endorsement_fixture();
+        let endorsement_refs = endorsement_refs(&endorsements);
+        let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
+            .await
+            .unwrap();
+        let uvm = crate::asynchronous::verify_uvm_endorsement(
+            &reference_info_fixture(),
+            TRUSTED_ACI_DIDX509,
+        )
+        .await
+        .unwrap();
+
+        let report_data = verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .unwrap();
+        assert_eq!(report_data, report.report_data);
+
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN + 1,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "UVM SVN 104 is below trusted minimum 105")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut policy = report.host_data;
+        policy[0] ^= 1;
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![policy],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP HOST_DATA does not match trusted policy")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut wrong_feed = uvm.clone();
+        endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            wrong_feed,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => assert_eq!(
+                actual,
+                "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
+            ),
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
+        let mut minimum_tcb = report.reported_tcb;
+        minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
+        match verify_c_aci_attestation(
+            report,
+            vec![(matching_cpuid, minimum_tcb)],
+            vec![report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => assert_contains(&actual, "SNP reported TCB"),
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut wrong_measurement = report;
+        wrong_measurement.measurement[0] ^= 1;
+        match verify_c_aci_attestation(
+            wrong_measurement,
+            Vec::new(),
+            vec![wrong_measurement.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => assert_eq!(
+                actual,
+                "ACI payload measurement does not match attestation measurement"
+            ),
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+
+        let debug_report = report_with_debug_enabled();
+        match verify_c_aci_attestation(
+            debug_report,
+            Vec::new(),
+            vec![debug_report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP guest policy allows debug mode")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let host_report = report_with_vmpl(4);
+        match verify_c_aci_attestation(
+            host_report,
+            Vec::new(),
+            vec![host_report.host_data],
+            uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "SNP report VMPL is outside the guest range")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
+
+        let mut missing_svn_int = uvm.clone();
+        endorsement_v1_mut(&mut missing_svn_int).payload =
+            reference_payload_without_guestsvn_int(report);
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            missing_svn_int,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => {
+                assert_eq!(actual, "x-ms-sevsnpvm-guestsvn-int must be a JSON integer")
+            }
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+
+        let mut uppercase_measurement = uvm;
+        endorsement_v1_mut(&mut uppercase_measurement).payload =
+            reference_payload_with_uppercase_measurement(report);
+        match verify_c_aci_attestation(
+            report,
+            Vec::new(),
+            vec![report.host_data],
+            uppercase_measurement,
+            ACI_FEED,
+            ACI_SVN,
+        ) {
+            Err(AciError::Measurement(actual)) => assert_eq!(
+                actual,
+                "x-ms-sevsnpvm-launchmeasurement must match ^[0-9a-f]+$"
+            ),
+            other => panic!("expected Measurement error, got {other:?}"),
+        }
+    }
+}
+
+fn attestation_fixture() -> Vec<u8> {
+    hex_to_bytes(REPORT_HEX.trim()).unwrap()
+}
+
+fn reference_info_fixture() -> Vec<u8> {
+    decode_base64_fixture(REFERENCE_INFO_BASE64)
+}
+
+fn amd_endorsement_fixture() -> [Vec<u8>; 3] {
+    endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap()
+}
+
+fn endorsement_refs(endorsements: &[Vec<u8>; 3]) -> [&[u8]; 3] {
+    [
+        endorsements[0].as_slice(),
+        endorsements[1].as_slice(),
+        endorsements[2].as_slice(),
+    ]
 }
 
 fn endorsements_from_host_amd_cert_fixture(
@@ -93,144 +668,12 @@ fn split_pem_chain(pem_chain: &str) -> Result<Vec<Vec<u8>>, AciError> {
     Ok(certs)
 }
 
-#[test]
-fn parses_didx509_prefix_and_ignores_policy_suffix() {
-    let did = "did:x509:0:sha256:abc123::eku:1.2.3";
-    let parsed = parse_didx509_prefix(did).unwrap();
-
-    assert_eq!(parsed.prefix, "did:x509:0:sha256:abc123");
-    assert_eq!(parsed.fingerprint, "abc123");
-}
-
-#[test]
-fn rejects_wrong_amd_endorsement_count() {
-    let err = parse_amd_endorsements(&[MILAN_VCEK, MILAN_ASK]).unwrap_err();
-
-    assert!(err.to_string().contains("expected [vcek, ask, ark]"));
-}
-
-#[test]
-fn test_helper_splits_host_amd_cert_base64_into_vcek_ask_ark() {
-    let host_amd_cert = serde_json::json!({
-        "vcekCert": "-----BEGIN CERTIFICATE-----\nvcek\n-----END CERTIFICATE-----\n",
-        "certificateChain": "-----BEGIN CERTIFICATE-----\nask\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nark\n-----END CERTIFICATE-----\n",
-    });
-    let encoded = base64_standard_encode(host_amd_cert.to_string().as_bytes());
-
-    let [vcek, ask, ark] = endorsements_from_host_amd_cert_fixture(&encoded).unwrap();
-
-    assert!(String::from_utf8(vcek).unwrap().contains("vcek"));
-    assert!(String::from_utf8(ask).unwrap().contains("ask"));
-    assert!(String::from_utf8(ark).unwrap().contains("ark"));
-}
-
-#[test]
-fn splits_real_host_amd_cert_fixture_into_parseable_vcek_ask_ark() {
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    assert!(String::from_utf8_lossy(&endorsements[0]).contains("BEGIN CERTIFICATE"));
-    assert!(String::from_utf8_lossy(&endorsements[1]).contains("BEGIN CERTIFICATE"));
-    assert!(String::from_utf8_lossy(&endorsements[2]).contains("BEGIN CERTIFICATE"));
-
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-    parse_amd_endorsements(&endorsement_refs).unwrap();
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn verifies_real_aci_report_with_host_amd_cert_fixture() {
-    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
-    let report = parse_attestation(&attestation).unwrap();
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-
-    let verified = sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
-
-    assert_eq!(verified.measurement, report.measurement);
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn verifies_real_aci_reference_info_fixture_end_to_end() {
-    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-
-    let report = sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-
-    let uvm_v1 = endorsement_v1(&uvm);
-    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
-    assert_eq!(uvm_v1.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
-    assert_eq!(
-        endorsement_payload(&uvm).measurement,
-        parse_attestation(&attestation).unwrap().measurement
-    );
-    assert_eq!(endorsement_svn(&uvm).as_deref(), Some("104"));
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
-}
-
-#[cfg(any(sync_crypto, async_crypto))]
 fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
     let encoded = encoded
         .chars()
         .filter(|c| !c.is_ascii_whitespace())
         .collect::<String>();
     base64_standard_decode(&encoded).unwrap()
-}
-
-#[cfg(sync_crypto)]
-fn endorsement_v1(endorsement: &CaciUvmEndorsement) -> &CaciUvmEndorsementV1 {
-    match endorsement {
-        CaciUvmEndorsement::V1(v1) => v1,
-        #[allow(unreachable_patterns)]
-        _ => panic!("expected CACI UVM endorsement V1"),
-    }
-}
-
-#[cfg(sync_crypto)]
-fn endorsement_payload(endorsement: &CaciUvmEndorsement) -> ReferenceInfoPayload {
-    let v1 = endorsement_v1(endorsement);
-    measurement_from_payload(&v1.payload, &v1.content_type).unwrap()
-}
-
-#[cfg(sync_crypto)]
-fn endorsement_svn(endorsement: &CaciUvmEndorsement) -> Option<String> {
-    let v1 = endorsement_v1(endorsement);
-    endorsement_payload(endorsement).svn.or(v1.svn.clone())
-}
-
-fn base64_standard_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let indexes = base64_indexes(chunk);
-        encoded.push(ALPHABET[indexes[0] as usize] as char);
-        encoded.push(ALPHABET[indexes[1] as usize] as char);
-        if chunk.len() > 1 {
-            encoded.push(ALPHABET[indexes[2] as usize] as char);
-        } else {
-            encoded.push('=');
-        }
-        if chunk.len() > 2 {
-            encoded.push(ALPHABET[indexes[3] as usize] as char);
-        } else {
-            encoded.push('=');
-        }
-    }
-    encoded
 }
 
 fn base64_standard_decode(encoded: &str) -> Result<Vec<u8>, String> {
@@ -282,32 +725,6 @@ fn base64_standard_decode(encoded: &str) -> Result<Vec<u8>, String> {
     Ok(decoded)
 }
 
-fn base64_indexes(chunk: &[u8]) -> [u8; 4] {
-    let mut block = [0u8; 3];
-    block[..chunk.len()].copy_from_slice(chunk);
-    // Base64 treats each 3-byte block as one 24-bit integer, then emits four
-    // 6-bit indexes into the selected alphabet. Short final chunks are padded
-    // with zero bits here; the caller decides whether to emit padding chars.
-    let packed = u32::from_be_bytes([0, block[0], block[1], block[2]]);
-    [
-        ((packed >> 18) & 0x3f) as u8,
-        ((packed >> 12) & 0x3f) as u8,
-        ((packed >> 6) & 0x3f) as u8,
-        (packed & 0x3f) as u8,
-    ]
-}
-
-fn bytes_from_base64_indexes(indexes: [u8; 4]) -> [u8; 3] {
-    // Decoding reverses the packing above: four 6-bit alphabet indexes are
-    // reassembled into a 24-bit integer, which yields up to three bytes.
-    let packed = (u32::from(indexes[0]) << 18)
-        | (u32::from(indexes[1]) << 12)
-        | (u32::from(indexes[2]) << 6)
-        | u32::from(indexes[3]);
-    let bytes = packed.to_be_bytes();
-    [bytes[1], bytes[2], bytes[3]]
-}
-
 fn base64_standard_value(byte: u8) -> Option<u8> {
     match byte {
         b'A'..=b'Z' => Some(byte - b'A'),
@@ -319,386 +736,127 @@ fn base64_standard_value(byte: u8) -> Option<u8> {
     }
 }
 
-#[test]
-fn local_base64_standard_helpers_match_known_vectors() {
-    for (plain, encoded) in [
-        ("", ""),
-        ("f", "Zg=="),
-        ("fo", "Zm8="),
-        ("foo", "Zm9v"),
-        ("foob", "Zm9vYg=="),
-        ("fooba", "Zm9vYmE="),
-        ("foobar", "Zm9vYmFy"),
-    ] {
-        assert_eq!(base64_standard_encode(plain.as_bytes()), encoded);
-        assert_eq!(base64_standard_decode(encoded).unwrap(), plain.as_bytes());
-    }
+fn bytes_from_base64_indexes(indexes: [u8; 4]) -> [u8; 3] {
+    let packed = (u32::from(indexes[0]) << 18)
+        | (u32::from(indexes[1]) << 12)
+        | (u32::from(indexes[2]) << 6)
+        | u32::from(indexes[3]);
+    let bytes = packed.to_be_bytes();
+    [bytes[1], bytes[2], bytes[3]]
 }
 
-#[test]
-fn parses_single_certificate_x5chain_without_intermediates() {
-    let cert = crypto::Crypto::from_pem(MILAN_ARK).unwrap();
-    let cert_der = crypto::Crypto::to_der(&cert).unwrap();
-
-    let (root, intermediates, leaf) =
-        crate::parse::parse_x5chain_certs(&[cert_der.clone()]).unwrap();
-
-    assert!(intermediates.is_empty());
-    assert_eq!(crypto::Crypto::to_der(&root).unwrap(), cert_der);
-    assert_eq!(crypto::Crypto::to_der(&leaf).unwrap(), cert_der);
+fn assert_verified_attestation_matches_fixture(report: AttestationReport) {
+    let expected = parse_attestation(&attestation_fixture()).unwrap();
+    assert_eq!(report.measurement, expected.measurement);
+    assert_eq!(report.host_data, expected.host_data);
+    assert_eq!(report.report_data, expected.report_data);
 }
 
-#[test]
-fn parses_reference_info_json_payload() {
-    let report = parse_attestation(MILAN_ATTESTATION).unwrap();
-    let payload = format!(
-        r#"{{
-            "x-ms-sevsnpvm-launchmeasurement": "{}",
-            "x-ms-sevsnpvm-guestsvn": "104",
-            "x-ms-sevsnpvm-guestsvn-int": 104,
-            "future-field": true
-        }}"#,
-        report
-            .measurement
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    );
+fn assert_verified_uvm_matches_fixture(
+    endorsement: &CaciUvmEndorsement,
+    expected_report: AttestationReport,
+) {
+    let v1 = endorsement_v1(endorsement);
+    let payload = endorsement_payload(endorsement);
 
-    let reference_info = measurement_from_payload(payload.as_bytes(), "application/json").unwrap();
-
-    assert_eq!(reference_info.measurement, report.measurement);
-    assert_eq!(reference_info.svn.as_deref(), Some("104"));
+    assert_eq!(v1.issuer, TRUSTED_ACI_DIDX509);
+    assert_eq!(v1.feed.as_deref(), Some(ACI_FEED));
+    assert_eq!(endorsement_svn(endorsement), Some(ACI_SVN.to_string()));
+    assert!(v1.x5chain.len() >= 2);
+    assert_eq!(payload.measurement, expected_report.measurement);
 }
 
-#[test]
-fn rejects_reference_info_json_missing_guestsvn_int() {
-    let report = parse_attestation(MILAN_ATTESTATION).unwrap();
-    let payload = format!(
-        r#"{{
-            "x-ms-sevsnpvm-launchmeasurement": "{}",
-            "x-ms-sevsnpvm-guestsvn": "104"
-        }}"#,
-        report
-            .measurement
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    );
-
-    let err = measurement_from_payload(payload.as_bytes(), "application/json").unwrap_err();
-
-    assert!(err.to_string().contains("x-ms-sevsnpvm-guestsvn-int"));
-}
-
-#[test]
-fn rejects_reference_info_json_uppercase_measurement() {
-    let report = parse_attestation(MILAN_ATTESTATION).unwrap();
-    let payload = format!(
-        r#"{{
-            "x-ms-sevsnpvm-launchmeasurement": "{}",
-            "x-ms-sevsnpvm-guestsvn": "104",
-            "x-ms-sevsnpvm-guestsvn-int": 104
-        }}"#,
-        report
-            .measurement
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<String>()
-    );
-
-    let err = measurement_from_payload(payload.as_bytes(), "application/json").unwrap_err();
-
-    assert!(err.to_string().contains("^[0-9a-f]+$"));
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn verifies_attestation_with_ordered_amd_endorsements() {
-    let report = parse_attestation(MILAN_ATTESTATION).unwrap();
-    let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
-
-    let verified = sync::verify_attestation(MILAN_ATTESTATION, &endorsements).unwrap();
-
-    assert_eq!(verified.measurement, report.measurement);
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn verifies_aci_cose_against_attestation_and_didx509_root() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let report = verified_reference_attestation();
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-
-    let uvm_v1 = endorsement_v1(&uvm);
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
-    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
-    assert_eq!(uvm_v1.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
-    assert_eq!(endorsement_svn(&uvm).as_deref(), Some("104"));
-    assert!(uvm_v1.x5chain.len() >= 2);
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn verifies_caci_policy_against_attestation_and_uvm() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let report = verified_reference_attestation();
-    let expected_report_data = report.report_data;
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-
-    let report_data = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap();
-
-    assert_eq!(report_data, expected_report_data);
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn rejects_caci_policy_mismatches() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let report = verified_reference_attestation();
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-
-    let err = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![report.host_data],
-        uvm.clone(),
-        "ContainerPlat-AMD-UVM",
-        105,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("UVM SVN 104 is below"));
-
-    let mut policy = report.host_data;
-    policy[0] ^= 1;
-    let err = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![policy],
-        uvm.clone(),
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("HOST_DATA"));
-
-    let mut uvm = uvm;
-    let uvm_v1 = match &mut uvm {
-        CaciUvmEndorsement::V1(v1) => v1,
-        #[allow(unreachable_patterns)]
-        _ => panic!("expected CACI UVM endorsement V1"),
-    };
-    uvm_v1.feed = Some("not-confidential-aci".to_string());
-    let err = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("UVM feed"));
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn rejects_caci_minimum_tcb_mismatch() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let report = verified_reference_attestation();
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-    let matching_cpuid = snp::Cpuid::from(0x00A00F11);
-    let mut minimum_tcb = report.reported_tcb;
-    minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-
-    let err = verify_c_aci_attestation(
-        report,
-        vec![(matching_cpuid, minimum_tcb)],
-        vec![report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-
-    assert!(err.to_string().contains("reported TCB"));
-}
-
-#[test]
-#[cfg(sync_crypto)]
-fn rejects_debug_and_host_generated_reports() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-
-    let debug_report = verified_attestation_from_reference_fixture(|bytes| {
+fn report_with_debug_enabled() -> AttestationReport {
+    report_from_reference_fixture(|bytes| {
         let mut policy = u64::from_le_bytes(bytes[0x008..0x010].try_into().unwrap());
         policy |= 1 << 19;
         bytes[0x008..0x010].copy_from_slice(&policy.to_le_bytes());
-    });
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-    let err = verify_c_aci_attestation(
-        debug_report,
-        Vec::new(),
-        vec![debug_report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("debug mode"));
-
-    let invalid_vmpl_report = verified_attestation_from_reference_fixture(|bytes| {
-        bytes[0x030..0x034].copy_from_slice(&4_u32.to_le_bytes());
-    });
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-    let err = verify_c_aci_attestation(
-        invalid_vmpl_report,
-        Vec::new(),
-        vec![invalid_vmpl_report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("outside the guest range"));
-
-    let host_report = verified_attestation_from_reference_fixture(|bytes| {
-        bytes[0x030..0x034].copy_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
-    });
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-    let err = verify_c_aci_attestation(
-        host_report,
-        Vec::new(),
-        vec![host_report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("outside the guest range"));
+    })
 }
 
-#[test]
-#[cfg(sync_crypto)]
-fn staged_api_verifies_uvm_before_binding_to_attestation() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-
-    let report = verified_reference_attestation();
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
+fn report_with_vmpl(vmpl: u32) -> AttestationReport {
+    report_from_reference_fixture(|bytes| {
+        bytes[0x030..0x034].copy_from_slice(&vmpl.to_le_bytes());
+    })
 }
 
-#[test]
-#[cfg(sync_crypto)]
-fn rejects_aci_measurement_mismatch() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
-
-    let report = sync::verify_attestation(MILAN_ATTESTATION, &endorsements).unwrap();
-    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
-    let err = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap_err();
-
-    assert!(err
-        .to_string()
-        .contains("ACI payload measurement does not match"));
-}
-
-#[test]
-#[cfg(all(async_crypto, sync_crypto))]
-fn async_staged_api_verifies_aci_cose_against_attestation_and_didx509_root() {
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-
-    let report = block_on_ready(asynchronous::verify_attestation(
-        &attestation,
-        &endorsement_refs,
-    ));
-    let uvm = block_on_ready(asynchronous::verify_uvm_endorsement(
-        &reference_info,
-        TRUSTED_ACI_DIDX509,
-    ));
-    let report = report.unwrap();
-    let uvm = uvm.unwrap();
-
-    let uvm_v1 = endorsement_v1(&uvm);
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
-    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
-    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
-}
-
-#[cfg(all(async_crypto, target_family = "wasm"))]
-#[wasm_bindgen_test::wasm_bindgen_test]
-async fn wasm_webcrypto_verifies_real_aci_reference_info_fixture_end_to_end() {
-    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-
-    let report = asynchronous::verify_attestation(&attestation, &endorsement_refs)
-        .await
-        .unwrap();
-    let uvm = asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
-        .await
-        .unwrap();
-    let expected_report_data = report.report_data;
-
-    let report_data = verify_c_aci_attestation(
-        report,
-        Vec::new(),
-        vec![report.host_data],
-        uvm,
-        "ContainerPlat-AMD-UVM",
-        104,
-    )
-    .unwrap();
-
-    assert_eq!(report_data, expected_report_data);
-}
-
-#[cfg(sync_crypto)]
-fn verified_reference_attestation() -> AttestationReport {
-    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
-    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
-    let endorsement_refs = [
-        endorsements[0].as_slice(),
-        endorsements[1].as_slice(),
-        endorsements[2].as_slice(),
-    ];
-    sync::verify_attestation(&attestation, &endorsement_refs).unwrap()
-}
-
-#[cfg(sync_crypto)]
-fn verified_attestation_from_reference_fixture(
-    mutate: impl FnOnce(&mut [u8]),
-) -> AttestationReport {
-    let mut report = hex_to_bytes(REPORT_HEX.trim()).unwrap();
+fn report_from_reference_fixture(mutate: impl FnOnce(&mut [u8])) -> AttestationReport {
+    let mut report = attestation_fixture();
     mutate(&mut report);
     parse_attestation(&report).unwrap()
+}
+
+fn reference_payload_without_guestsvn_int(report: AttestationReport) -> Vec<u8> {
+    format!(
+        r#"{{
+            "x-ms-sevsnpvm-launchmeasurement": "{}",
+            "x-ms-sevsnpvm-guestsvn": "{}"
+        }}"#,
+        measurement_hex_lower(report),
+        ACI_SVN,
+    )
+    .into_bytes()
+}
+
+fn reference_payload_with_uppercase_measurement(report: AttestationReport) -> Vec<u8> {
+    format!(
+        r#"{{
+            "x-ms-sevsnpvm-launchmeasurement": "{}",
+            "x-ms-sevsnpvm-guestsvn": "{}",
+            "x-ms-sevsnpvm-guestsvn-int": {}
+        }}"#,
+        measurement_hex_upper(report),
+        ACI_SVN,
+        ACI_SVN,
+    )
+    .into_bytes()
+}
+
+fn measurement_hex_lower(report: AttestationReport) -> String {
+    report
+        .measurement
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn measurement_hex_upper(report: AttestationReport) -> String {
+    report
+        .measurement
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect()
+}
+
+fn endorsement_v1(endorsement: &CaciUvmEndorsement) -> &CaciUvmEndorsementV1 {
+    match endorsement {
+        CaciUvmEndorsement::V1(v1) => v1,
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected CACI UVM endorsement V1"),
+    }
+}
+
+fn endorsement_v1_mut(endorsement: &mut CaciUvmEndorsement) -> &mut CaciUvmEndorsementV1 {
+    match endorsement {
+        CaciUvmEndorsement::V1(v1) => v1,
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected CACI UVM endorsement V1"),
+    }
+}
+
+fn endorsement_payload(endorsement: &CaciUvmEndorsement) -> ReferenceInfoPayload {
+    let v1 = endorsement_v1(endorsement);
+    measurement_from_payload(&v1.payload, &v1.content_type).unwrap()
+}
+
+fn endorsement_svn(endorsement: &CaciUvmEndorsement) -> Option<String> {
+    let v1 = endorsement_v1(endorsement);
+    endorsement_payload(endorsement).svn.or(v1.svn.clone())
+}
+
+fn assert_contains(actual: &str, expected: &str) {
+    assert!(
+        actual.contains(expected),
+        "expected error to contain {expected:?}, got {actual:?}"
+    );
 }
