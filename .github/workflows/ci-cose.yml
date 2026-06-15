@@ -28,9 +28,11 @@ jobs:
         run: |
           cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
-      # COSE depends on EverParse CBOR code that requires 64-bit usize, so it
-      # must be compiled as wasm64 with Cargo nightly build-std. wasm-bindgen
-      # only generates JS bindings from the already-built wasm artifact.
+      # COSE depends on EverParse CBOR code that requires 64-bit usize.
+      # wasm64-unknown-unknown does not have a prebuilt rust-std
+      # component, so use nightly Cargo build-std with rust-src instead of
+      # rustup target add. wasm-bindgen only generates JS bindings from the
+      # already-built wasm artifact.
       - name: Build WASM64 with pure-Rust backend
         run: cargo +nightly build -Z build-std=std,panic_abort --manifest-path cose/Cargo.toml --target wasm64-unknown-unknown --no-default-features --features "crypto_pure_rust" --release
 

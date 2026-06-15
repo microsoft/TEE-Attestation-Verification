@@ -74,6 +74,11 @@ jobs:
         run: |
           cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
+      # ACI depends on EverParse CBOR code that requires 64-bit usize.
+      # wasm64-unknown-unknown does not have a prebuilt rust-std
+      # component, so use nightly Cargo build-std with rust-src instead of
+      # rustup target add. wasm-bindgen only generates JS bindings from the
+      # already-built wasm artifact.
       - name: Build ACI WASM for the demo
         run: |
           cargo +nightly build -Z build-std=std,panic_abort \

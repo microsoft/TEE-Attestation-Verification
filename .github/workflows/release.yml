@@ -136,6 +136,11 @@ jobs:
         working-directory: demos/web-verify-kernel/tests
         run: npm test
 
+      # ACI depends on EverParse CBOR code that requires 64-bit usize.
+      # wasm64-unknown-unknown does not have a prebuilt rust-std
+      # component, so use nightly Cargo build-std with rust-src instead of
+      # rustup target add. wasm-bindgen only generates JS bindings from the
+      # already-built wasm artifact.
       - name: Build WASM64 for the aci-verify demo
         run: |
           cargo +nightly build -Z build-std=std,panic_abort \
