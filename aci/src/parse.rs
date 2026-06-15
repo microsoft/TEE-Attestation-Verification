@@ -58,19 +58,19 @@ pub(crate) fn parse_amd_endorsements(
     ])
 }
 
-/// Parsed ACI COSE endorsement.
+/// Confidential ACI UVM endorsement.
 ///
 /// The enum is versioned so future ACI reference-info formats can be added
 /// without changing the shape of existing parsed data.
 #[derive(Clone, Debug)]
-pub enum ParsedAciCose {
+pub enum CaciUvmEndorsement {
     /// Current Confidential ACI UVM reference-info format.
-    V1(ParsedAciCoseV1),
+    V1(CaciUvmEndorsementV1),
 }
 
 /// Parsed V1 ACI COSE endorsement fields.
 #[derive(Clone, Debug)]
-pub struct ParsedAciCoseV1 {
+pub struct CaciUvmEndorsementV1 {
     /// Serialized COSE protected header map.
     pub protected: Vec<u8>,
     /// COSE payload bytes.
@@ -93,7 +93,7 @@ pub struct ParsedAciCoseV1 {
     pub signing_time: Option<Duration>,
 }
 
-pub fn parse_aci_cose(aci_cose: &[u8]) -> Result<ParsedAciCose, AciError> {
+pub fn parse_aci_cose(aci_cose: &[u8]) -> Result<CaciUvmEndorsement, AciError> {
     let envelope = CborValue::from_bytes(aci_cose).map_err(AciError::Cose)?;
     let sign1 = match &envelope {
         // RFC 9052, Section 4.2: COSE_Sign1 may be encoded as CBOR tag 18
@@ -142,7 +142,7 @@ pub fn parse_aci_cose(aci_cose: &[u8]) -> Result<ParsedAciCose, AciError> {
 
     let (issuer, feed, svn) = parse_claims(&protected_header)?;
 
-    Ok(ParsedAciCose::V1(ParsedAciCoseV1 {
+    Ok(CaciUvmEndorsement::V1(CaciUvmEndorsementV1 {
         protected,
         payload,
         signature,
@@ -189,15 +189,6 @@ pub(crate) fn parse_x5chain_certs(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok((root, intermediates, leaf))
-}
-
-pub(crate) fn parse_certificates(certs: &[Vec<u8>]) -> Result<Vec<crypto::Certificate>, AciError> {
-    certs
-        .iter()
-        .map(|cert| {
-            crypto::Crypto::from_der(cert).map_err(|e| AciError::Certificate(e.to_string()))
-        })
-        .collect()
 }
 
 pub(crate) fn measurement_from_payload(

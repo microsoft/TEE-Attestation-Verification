@@ -2,18 +2,11 @@
 // Licensed under the MIT License.
 
 use super::*;
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-use cose::CborValue;
 
 use crate::didx509::parse_didx509_prefix;
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-use crate::didx509::sha256_base64url_no_padding;
 use crate::parse::hex_to_bytes;
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-use crate::parse::{
-    COSE_HEADER_ALG, COSE_HEADER_CONTENT_TYPE, COSE_HEADER_CWT_CLAIMS, COSE_HEADER_X5CHAIN,
-    COSE_SIGN1_TAG, CWT_ISS, CWT_SUB, CWT_SVN,
-};
+#[cfg(sync_crypto)]
+use crate::parse::ReferenceInfoPayload;
 
 const MILAN_ATTESTATION: &[u8] =
     include_bytes!("../../attestation/tests/test_data/milan_attestation_report.bin");
@@ -21,19 +14,13 @@ const MILAN_ARK: &[u8] = include_bytes!("../../attestation/src/pinned_arks/milan
 const MILAN_ASK: &[u8] = include_bytes!("../../attestation/tests/test_data/milan_ask.pem");
 const MILAN_VCEK: &[u8] = include_bytes!("../../attestation/tests/test_data/milan_vcek.pem");
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(any(sync_crypto, async_crypto))]
 const REFERENCE_INFO_BASE64: &str = include_str!("../tests/fixtures/reference-info.base64");
 const REPORT_HEX: &str = include_str!("../tests/fixtures/report.hex");
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(any(sync_crypto, async_crypto))]
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
-
-#[cfg(all(
-    async_crypto,
-    sync_crypto,
-    feature = "crypto_openssl",
-    not(target_family = "wasm")
-))]
+#[cfg(all(async_crypto, sync_crypto))]
 fn block_on_ready<F: std::future::Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     let waker = std::task::Waker::noop();
@@ -170,7 +157,7 @@ fn verifies_real_aci_report_with_host_amd_cert_fixture() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn verifies_real_aci_reference_info_fixture_end_to_end() {
     let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
     let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
@@ -184,23 +171,45 @@ fn verifies_real_aci_reference_info_fixture_end_to_end() {
     let report = sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
     let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
 
-    assert_eq!(uvm.issuer, TRUSTED_ACI_DIDX509);
-    assert_eq!(uvm.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
+    let uvm_v1 = endorsement_v1(&uvm);
+    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
+    assert_eq!(uvm_v1.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
     assert_eq!(
-        uvm.measurement,
+        endorsement_payload(&uvm).measurement,
         parse_attestation(&attestation).unwrap().measurement
     );
-    assert_eq!(uvm.svn.as_deref(), Some("104"));
-    assert_eq!(uvm.measurement, report.measurement);
+    assert_eq!(endorsement_svn(&uvm).as_deref(), Some("104"));
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
 }
 
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(any(sync_crypto, async_crypto))]
 fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
     let encoded = encoded
         .chars()
         .filter(|c| !c.is_ascii_whitespace())
         .collect::<String>();
     base64_standard_decode(&encoded).unwrap()
+}
+
+#[cfg(sync_crypto)]
+fn endorsement_v1(endorsement: &CaciUvmEndorsement) -> &CaciUvmEndorsementV1 {
+    match endorsement {
+        CaciUvmEndorsement::V1(v1) => v1,
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected CACI UVM endorsement V1"),
+    }
+}
+
+#[cfg(sync_crypto)]
+fn endorsement_payload(endorsement: &CaciUvmEndorsement) -> ReferenceInfoPayload {
+    let v1 = endorsement_v1(endorsement);
+    measurement_from_payload(&v1.payload, &v1.content_type).unwrap()
+}
+
+#[cfg(sync_crypto)]
+fn endorsement_svn(endorsement: &CaciUvmEndorsement) -> Option<String> {
+    let v1 = endorsement_v1(endorsement);
+    endorsement_payload(endorsement).svn.or(v1.svn.clone())
 }
 
 fn base64_standard_encode(bytes: &[u8]) -> String {
@@ -415,27 +424,25 @@ fn verifies_attestation_with_ordered_amd_endorsements() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn verifies_aci_cose_against_attestation_and_didx509_root() {
-    let fixture = native_test_fixture();
-    let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
+    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
+    let report = verified_reference_attestation();
+    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
 
-    let report = sync::verify_attestation(MILAN_ATTESTATION, &endorsements).unwrap();
-    let uvm = sync::verify_uvm_endorsement(&fixture.cose, &fixture.trusted_didx509).unwrap();
-
-    assert_eq!(uvm.measurement, fixture.measurement);
-    assert_eq!(uvm.issuer, fixture.trusted_didx509);
-    assert_eq!(uvm.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
-    assert_eq!(uvm.svn.as_deref(), Some("104"));
-    assert_eq!(uvm.x5chain.len(), 2);
-    assert_eq!(uvm.measurement, report.measurement);
+    let uvm_v1 = endorsement_v1(&uvm);
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
+    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
+    assert_eq!(uvm_v1.feed.as_deref(), Some("ContainerPlat-AMD-UVM"));
+    assert_eq!(endorsement_svn(&uvm).as_deref(), Some("104"));
+    assert!(uvm_v1.x5chain.len() >= 2);
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn verifies_caci_policy_against_attestation_and_uvm() {
     let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
-
     let report = verified_reference_attestation();
     let expected_report_data = report.report_data;
     let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
@@ -454,7 +461,7 @@ fn verifies_caci_policy_against_attestation_and_uvm() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn rejects_caci_policy_mismatches() {
     let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
     let report = verified_reference_attestation();
@@ -485,7 +492,12 @@ fn rejects_caci_policy_mismatches() {
     assert!(err.to_string().contains("HOST_DATA"));
 
     let mut uvm = uvm;
-    uvm.feed = Some("not-confidential-aci".to_string());
+    let uvm_v1 = match &mut uvm {
+        CaciUvmEndorsement::V1(v1) => v1,
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected CACI UVM endorsement V1"),
+    };
+    uvm_v1.feed = Some("not-confidential-aci".to_string());
     let err = verify_c_aci_attestation(
         report,
         Vec::new(),
@@ -499,7 +511,7 @@ fn rejects_caci_policy_mismatches() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn rejects_caci_minimum_tcb_mismatch() {
     let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
     let report = verified_reference_attestation();
@@ -522,7 +534,7 @@ fn rejects_caci_minimum_tcb_mismatch() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn rejects_debug_and_host_generated_reports() {
     let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
 
@@ -575,26 +587,24 @@ fn rejects_debug_and_host_generated_reports() {
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn staged_api_verifies_uvm_before_binding_to_attestation() {
-    let fixture = native_test_fixture();
-    let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
+    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
 
-    let uvm = sync::verify_uvm_endorsement(&fixture.cose, &fixture.trusted_didx509).unwrap();
-    assert_eq!(uvm.measurement, fixture.measurement);
+    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
 
-    let report = sync::verify_attestation(MILAN_ATTESTATION, &endorsements).unwrap();
-    assert_eq!(uvm.measurement, report.measurement);
+    let report = verified_reference_attestation();
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
 }
 
 #[test]
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn rejects_aci_measurement_mismatch() {
-    let fixture = native_test_fixture_with_payload([0u8; MEASUREMENT_LEN]);
+    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
     let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
 
     let report = sync::verify_attestation(MILAN_ATTESTATION, &endorsements).unwrap();
-    let uvm = sync::verify_uvm_endorsement(&fixture.cose, &fixture.trusted_didx509).unwrap();
+    let uvm = sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
     let err = verify_c_aci_attestation(
         report,
         Vec::new(),
@@ -611,220 +621,68 @@ fn rejects_aci_measurement_mismatch() {
 }
 
 #[test]
-#[cfg(all(
-    async_crypto,
-    sync_crypto,
-    feature = "crypto_openssl",
-    not(target_family = "wasm")
-))]
+#[cfg(all(async_crypto, sync_crypto))]
 fn async_staged_api_verifies_aci_cose_against_attestation_and_didx509_root() {
-    let fixture = native_test_fixture();
-    let endorsements = [MILAN_VCEK, MILAN_ASK, MILAN_ARK];
+    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
+    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
+    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
+    let endorsement_refs = [
+        endorsements[0].as_slice(),
+        endorsements[1].as_slice(),
+        endorsements[2].as_slice(),
+    ];
 
     let report = block_on_ready(asynchronous::verify_attestation(
-        MILAN_ATTESTATION,
-        &endorsements,
+        &attestation,
+        &endorsement_refs,
     ));
     let uvm = block_on_ready(asynchronous::verify_uvm_endorsement(
-        &fixture.cose,
-        &fixture.trusted_didx509,
+        &reference_info,
+        TRUSTED_ACI_DIDX509,
     ));
     let report = report.unwrap();
     let uvm = uvm.unwrap();
 
-    assert_eq!(uvm.measurement, fixture.measurement);
-    assert_eq!(uvm.issuer, fixture.trusted_didx509);
-    assert_eq!(uvm.measurement, report.measurement);
+    let uvm_v1 = endorsement_v1(&uvm);
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
+    assert_eq!(uvm_v1.issuer, TRUSTED_ACI_DIDX509);
+    assert_eq!(endorsement_payload(&uvm).measurement, report.measurement);
 }
 
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-struct NativeFixture {
-    cose: Vec<u8>,
-    trusted_didx509: String,
-    measurement: [u8; MEASUREMENT_LEN],
-}
+#[cfg(all(async_crypto, target_family = "wasm"))]
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn wasm_webcrypto_verifies_real_aci_reference_info_fixture_end_to_end() {
+    let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
+    let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
+    let endorsement_refs = [
+        endorsements[0].as_slice(),
+        endorsements[1].as_slice(),
+        endorsements[2].as_slice(),
+    ];
+    let reference_info = decode_base64_fixture(REFERENCE_INFO_BASE64);
 
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-fn native_test_fixture() -> NativeFixture {
-    let report = parse_attestation(MILAN_ATTESTATION).unwrap();
-    native_test_fixture_with_payload(report.measurement)
-}
-
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
-fn native_test_fixture_with_payload(payload_measurement: [u8; MEASUREMENT_LEN]) -> NativeFixture {
-    use openssl::asn1::Asn1Time;
-    use openssl::bn::BigNum;
-    use openssl::ec::{EcGroup, EcKey};
-    use openssl::ecdsa::EcdsaSig;
-    use openssl::hash::MessageDigest;
-    use openssl::nid::Nid;
-    use openssl::pkey::{PKey, Private};
-    use openssl::x509::{X509NameBuilder, X509};
-
-    fn cert(
-        key: &PKey<Private>,
-        issuer_key: &PKey<Private>,
-        issuer: Option<&X509>,
-        common_name: &str,
-        ca: bool,
-    ) -> X509 {
-        use openssl::x509::extension::{
-            AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
-        };
-
-        let mut name = X509NameBuilder::new().unwrap();
-        name.append_entry_by_nid(Nid::COMMONNAME, common_name)
-            .unwrap();
-        let name = name.build();
-
-        let mut builder = X509::builder().unwrap();
-        builder.set_version(2).unwrap();
-        let serial = BigNum::from_u32(if ca { 1 } else { 2 })
-            .unwrap()
-            .to_asn1_integer()
-            .unwrap();
-        builder.set_serial_number(&serial).unwrap();
-        builder.set_subject_name(&name).unwrap();
-        builder
-            .set_issuer_name(issuer.map_or(name.as_ref(), |cert| cert.subject_name()))
-            .unwrap();
-        builder.set_pubkey(key).unwrap();
-        builder
-            .set_not_before(Asn1Time::days_from_now(0).unwrap().as_ref())
-            .unwrap();
-        builder
-            .set_not_after(Asn1Time::days_from_now(365).unwrap().as_ref())
-            .unwrap();
-        if ca {
-            builder
-                .append_extension(
-                    BasicConstraints::new()
-                        .critical()
-                        .ca()
-                        .pathlen(1)
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap();
-            builder
-                .append_extension(KeyUsage::new().key_cert_sign().crl_sign().build().unwrap())
-                .unwrap();
-        } else {
-            builder
-                .append_extension(BasicConstraints::new().critical().build().unwrap())
-                .unwrap();
-            builder
-                .append_extension(KeyUsage::new().digital_signature().build().unwrap())
-                .unwrap();
-        }
-
-        let subject_key_identifier = SubjectKeyIdentifier::new()
-            .build(&builder.x509v3_context(issuer.map(|cert| cert.as_ref()), None))
-            .unwrap();
-        builder.append_extension(subject_key_identifier).unwrap();
-        let authority_key_identifier = AuthorityKeyIdentifier::new()
-            .keyid(true)
-            .build(&builder.x509v3_context(issuer.map(|cert| cert.as_ref()), None))
-            .unwrap();
-        builder.append_extension(authority_key_identifier).unwrap();
-
-        builder.sign(issuer_key, MessageDigest::sha256()).unwrap();
-        builder.build()
-    }
-
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-    let ca_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
-    let leaf_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
-    let ca = cert(&ca_key, &ca_key, None, "aci-test-ca", true);
-    let leaf = cert(&leaf_key, &ca_key, Some(&ca), "aci-test-leaf", false);
-    let ca_der = ca.to_der().unwrap();
-    let leaf_der = leaf.to_der().unwrap();
-    let fingerprint = sha256_base64url_no_padding(&ca_der).unwrap();
-    let trusted_didx509 = format!("did:x509:0:sha256:{fingerprint}::eku:1.3.6.1.4.1.311.76.59.1.2");
-    let protected = CborValue::Map(vec![
-        (CborValue::Int(COSE_HEADER_ALG), CborValue::Int(-7)),
-        (
-            CborValue::Int(COSE_HEADER_CONTENT_TYPE),
-            CborValue::TextString("application/json".to_string()),
-        ),
-        (
-            CborValue::Int(COSE_HEADER_X5CHAIN),
-            CborValue::Array(vec![
-                CborValue::ByteString(leaf_der),
-                CborValue::ByteString(ca_der),
-            ]),
-        ),
-        (
-            CborValue::Int(COSE_HEADER_CWT_CLAIMS),
-            CborValue::Map(vec![
-                (
-                    CborValue::Int(CWT_ISS),
-                    CborValue::TextString(trusted_didx509.clone()),
-                ),
-                (
-                    CborValue::Int(CWT_SUB),
-                    CborValue::TextString("ContainerPlat-AMD-UVM".to_string()),
-                ),
-                (
-                    CborValue::TextString(CWT_SVN.to_string()),
-                    CborValue::Int(104),
-                ),
-            ]),
-        ),
-    ])
-    .to_bytes()
-    .unwrap();
-    let payload = format!(
-        r#"{{
-            "x-ms-sevsnpvm-launchmeasurement": "{}",
-            "x-ms-sevsnpvm-guestsvn": "104",
-            "x-ms-sevsnpvm-guestsvn-int": 104
-        }}"#,
-        payload_measurement
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    )
-    .into_bytes();
-    let tbs = CborValue::Array(vec![
-        CborValue::TextString("Signature1".to_string()),
-        CborValue::ByteString(protected.clone()),
-        CborValue::ByteString(Vec::new()),
-        CborValue::ByteString(payload.clone()),
-    ])
-    .to_bytes()
-    .unwrap();
-    let der_signature = openssl::sign::Signer::new(MessageDigest::sha256(), &leaf_key)
-        .unwrap()
-        .sign_oneshot_to_vec(&tbs)
+    let report = asynchronous::verify_attestation(&attestation, &endorsement_refs)
+        .await
         .unwrap();
-    let sig = EcdsaSig::from_der(&der_signature).unwrap();
-    let mut signature = vec![0; 64];
-    let r = sig.r().to_vec();
-    let s = sig.s().to_vec();
-    signature[32 - r.len()..32].copy_from_slice(&r);
-    signature[64 - s.len()..64].copy_from_slice(&s);
+    let uvm = asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
+        .await
+        .unwrap();
+    let expected_report_data = report.report_data;
 
-    let cose = CborValue::Tagged {
-        tag: COSE_SIGN1_TAG,
-        payload: Box::new(CborValue::Array(vec![
-            CborValue::ByteString(protected),
-            CborValue::Map(Vec::new()),
-            CborValue::ByteString(payload),
-            CborValue::ByteString(signature),
-        ])),
-    }
-    .to_bytes()
+    let report_data = verify_c_aci_attestation(
+        report,
+        Vec::new(),
+        vec![report.host_data],
+        uvm,
+        "ContainerPlat-AMD-UVM",
+        104,
+    )
     .unwrap();
 
-    NativeFixture {
-        cose,
-        trusted_didx509,
-        measurement: payload_measurement,
-    }
+    assert_eq!(report_data, expected_report_data);
 }
 
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn verified_reference_attestation() -> AttestationReport {
     let attestation = hex_to_bytes(REPORT_HEX.trim()).unwrap();
     let endorsements = endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap();
@@ -836,7 +694,7 @@ fn verified_reference_attestation() -> AttestationReport {
     sync::verify_attestation(&attestation, &endorsement_refs).unwrap()
 }
 
-#[cfg(all(sync_crypto, feature = "crypto_openssl", not(target_family = "wasm")))]
+#[cfg(sync_crypto)]
 fn verified_attestation_from_reference_fixture(
     mutate: impl FnOnce(&mut [u8]),
 ) -> AttestationReport {

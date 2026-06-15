@@ -39,8 +39,8 @@ cose = { package = "tee-attestation-verification-cose", path = "../cose", defaul
 crypto = { package = "tee-attestation-verification-crypto", path = "../crypto", default-features = false }
 serde_json = "1"
 
-[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-openssl = "0.10"
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"

@@ -52,9 +52,9 @@ mod parse;
 use attestation::snp::report::{AttestationReport, TcbVersionForGeneration, TcbVersionRaw};
 use attestation::snp::verify::{ChainVerification, VerificationError};
 use attestation::{snp, Generation};
+use crypto::CertificateBackend;
 #[cfg(async_crypto)]
 use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
-use crypto::{Certificate, CertificateBackend};
 #[cfg(sync_crypto)]
 use crypto::{CryptoBackend, KeyBackend};
 
@@ -63,11 +63,10 @@ use didx509::verify_didx509_root;
 #[cfg(async_crypto)]
 use didx509::verify_didx509_root_async;
 use parse::{
-    measurement_from_payload, parse_amd_endorsements, parse_attestation, parse_certificates,
-    parse_x5chain_certs,
+    measurement_from_payload, parse_amd_endorsements, parse_attestation, parse_x5chain_certs,
 };
 
-pub use parse::{parse_aci_cose, ParsedAciCose, ParsedAciCoseV1};
+pub use parse::{parse_aci_cose, CaciUvmEndorsement, CaciUvmEndorsementV1};
 
 const fn attestation_report_field_len<const N: usize>(
     _: fn(&AttestationReport) -> &[u8; N],
@@ -81,27 +80,6 @@ pub const HOST_DATA_LEN: usize = attestation_report_field_len(|report| &report.h
 /// Length of the SNP `REPORT_DATA` field.
 pub const REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &report.report_data);
 const MAX_GUEST_VMPL: u32 = 3;
-
-/// Verified ACI/UVM endorsement claims.
-///
-/// Construct this with `sync::verify_uvm_endorsement` or
-/// `asynchronous::verify_uvm_endorsement`. The COSE signature, certificate
-/// chain, and caller-pinned `did:x509` root have been verified, but the launch
-/// measurement has not yet been bound to an attestation report. Use
-/// [`verify_c_aci_attestation`] for the final relying-party policy check.
-#[derive(Clone, Debug)]
-pub struct VerifiedUvmEndorsement {
-    /// DID x509 issuer from the ACI endorsement.
-    pub issuer: String,
-    /// Feed/subject claim from the ACI endorsement, when present.
-    pub feed: Option<String>,
-    /// SVN claim from the ACI endorsement, when present.
-    pub svn: Option<String>,
-    /// Launch measurement authenticated by the ACI COSE.
-    pub measurement: [u8; MEASUREMENT_LEN],
-    /// The x5chain from the ACI endorsement, starting with the leaf certificate.
-    pub x5chain: Vec<Certificate>,
-}
 
 #[cfg(sync_crypto)]
 /// Synchronous staged ACI verification.
@@ -172,10 +150,10 @@ pub mod sync {
     pub fn verify_uvm_endorsement(
         aci_cose: &[u8],
         trusted_didx509: &str,
-    ) -> Result<VerifiedUvmEndorsement, AciError> {
+    ) -> Result<CaciUvmEndorsement, AciError> {
         let parsed = parse_aci_cose(aci_cose)?;
         match parsed {
-            ParsedAciCose::V1(parsed) => {
+            CaciUvmEndorsement::V1(parsed) => {
                 verify_didx509_root(trusted_didx509, &parsed.issuer, &parsed.x5chain)?;
 
                 let (root, intermediates, leaf) = parse_x5chain_certs(&parsed.x5chain)?;
@@ -215,7 +193,7 @@ pub mod sync {
                 )
                 .map_err(AciError::Signature)?;
 
-                verified_uvm_endorsement(parsed)
+                Ok(CaciUvmEndorsement::V1(parsed))
             }
             #[allow(unreachable_patterns)]
             _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
@@ -296,10 +274,10 @@ pub mod asynchronous {
     pub async fn verify_uvm_endorsement(
         aci_cose: &[u8],
         trusted_didx509: &str,
-    ) -> Result<VerifiedUvmEndorsement, AciError> {
+    ) -> Result<CaciUvmEndorsement, AciError> {
         let parsed = parse_aci_cose(aci_cose)?;
         match parsed {
-            ParsedAciCose::V1(parsed) => {
+            CaciUvmEndorsement::V1(parsed) => {
                 verify_didx509_root_async(trusted_didx509, &parsed.issuer, &parsed.x5chain).await?;
 
                 let (root, intermediates, leaf) = parse_x5chain_certs(&parsed.x5chain)?;
@@ -344,7 +322,7 @@ pub mod asynchronous {
                 .await
                 .map_err(AciError::Signature)?;
 
-                verified_uvm_endorsement(parsed)
+                Ok(CaciUvmEndorsement::V1(parsed))
             }
             #[allow(unreachable_patterns)]
             _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
@@ -366,7 +344,7 @@ pub fn verify_c_aci_attestation(
     attestation: AttestationReport,
     minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
     trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
-    uvm_endorsement: VerifiedUvmEndorsement,
+    uvm_endorsement: CaciUvmEndorsement,
     uvm_feed: &str,
     minimum_svn: u64,
 ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
@@ -422,24 +400,37 @@ pub fn verify_c_aci_attestation(
         }
     }
 
-    if uvm_endorsement.feed.as_deref() != Some(uvm_feed) {
-        return Err(AciError::Policy(format!(
-            "UVM feed {:?} does not match trusted feed {}",
-            uvm_endorsement.feed, uvm_feed
-        )));
-    }
+    match uvm_endorsement {
+        CaciUvmEndorsement::V1(uvm_endorsement) => {
+            let reference_info =
+                measurement_from_payload(&uvm_endorsement.payload, &uvm_endorsement.content_type)?;
+            if reference_info.measurement != attestation.measurement {
+                return Err(AciError::Measurement(
+                    "ACI payload measurement does not match attestation measurement".to_string(),
+                ));
+            }
 
-    let svn = parse_uvm_svn(uvm_endorsement.svn.as_deref())?;
-    if svn < minimum_svn {
-        return Err(AciError::Policy(format!(
-            "UVM SVN {svn} is below trusted minimum {minimum_svn}"
-        )));
-    }
+            if uvm_endorsement.feed.as_deref() != Some(uvm_feed) {
+                return Err(AciError::Policy(format!(
+                    "UVM feed {:?} does not match trusted feed {}",
+                    uvm_endorsement.feed, uvm_feed
+                )));
+            }
 
-    if uvm_endorsement.measurement != attestation.measurement {
-        return Err(AciError::Measurement(
-            "ACI payload measurement does not match attestation measurement".to_string(),
-        ));
+            let svn = parse_uvm_svn(
+                reference_info
+                    .svn
+                    .as_deref()
+                    .or(uvm_endorsement.svn.as_deref()),
+            )?;
+            if svn < minimum_svn {
+                return Err(AciError::Policy(format!(
+                    "UVM SVN {svn} is below trusted minimum {minimum_svn}"
+                )));
+            }
+        }
+        #[allow(unreachable_patterns)]
+        _ => return Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
     }
 
     if !trusted_c_aci_policy.contains(&attestation.host_data) {
@@ -501,19 +492,6 @@ fn parse_uvm_svn(svn: Option<&str>) -> Result<u64, AciError> {
     }
     svn.parse::<u64>()
         .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
-}
-
-fn verified_uvm_endorsement(parsed: ParsedAciCoseV1) -> Result<VerifiedUvmEndorsement, AciError> {
-    let reference_info = measurement_from_payload(&parsed.payload, &parsed.content_type)?;
-    let x5chain = parse_certificates(&parsed.x5chain)?;
-
-    Ok(VerifiedUvmEndorsement {
-        issuer: parsed.issuer,
-        feed: parsed.feed,
-        svn: reference_info.svn.or(parsed.svn),
-        measurement: reference_info.measurement,
-        x5chain,
-    })
 }
 
 #[cfg(test)]
