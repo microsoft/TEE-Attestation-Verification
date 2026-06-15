@@ -1,0 +1,12 @@
+{
+  "name": "aci-verify-tests",
+  "private": true,
+  "type": "module",
+  "description": "Playwright end-to-end tests for the aci-verify WASM demo",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}

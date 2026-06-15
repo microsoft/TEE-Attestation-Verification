@@ -27,10 +27,9 @@ jobs:
       - name: Setup WASM tooling
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.122 --locked
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build WASM for the demo
+      - name: Build attestation WASM for the demo
         working-directory: attestation
         run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
 
@@ -39,13 +38,13 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Playwright and browsers
+      - name: Install web-verify-kernel Playwright and browsers
         working-directory: demos/web-verify-kernel/tests
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run e2e test
+      - name: Run web-verify-kernel e2e test
         working-directory: demos/web-verify-kernel/tests
         run: npm test
 
@@ -57,3 +56,56 @@ jobs:
           path: |
             demos/web-verify-kernel/tests/test-results/
             demos/web-verify-kernel/tests/playwright-report/
+
+  aci-verify:
+    name: aci-verify e2e
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+          rustup toolchain install nightly
+
+      - name: Setup WASM tooling
+        run: |
+          rustup target add wasm64-unknown-unknown --toolchain nightly
+          cargo install wasm-bindgen-cli --version 0.2.122 --locked
+
+      - name: Build ACI WASM for the demo
+        run: |
+          cargo +nightly build -Z build-std=std,panic_abort \
+            --manifest-path aci/Cargo.toml \
+            --target wasm64-unknown-unknown \
+            --no-default-features \
+            --features "crypto_webcrypto" \
+            --release
+          wasm-bindgen --target web \
+            --out-dir demos/aci-verify/aci_pkg \
+            target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+
+      - name: Install aci-verify Playwright and browsers
+        working-directory: demos/aci-verify/tests
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run aci-verify e2e test
+        working-directory: demos/aci-verify/tests
+        run: npm test
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aci-verify-playwright-report
+          path: |
+            demos/aci-verify/tests/test-results/
+            demos/aci-verify/tests/playwright-report/

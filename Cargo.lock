@@ -1058,6 +1058,7 @@ dependencies = [
  "tee-attestation-verification-lib",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
