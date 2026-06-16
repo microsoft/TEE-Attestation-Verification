@@ -1,4 +1,4 @@
-name: "CACI CI"
+name: "CACI attestation verification CI"
 
 on:
   pull_request:
@@ -33,10 +33,10 @@ jobs:
           rustup update stable && rustup default stable
 
       - name: Build with ${{ matrix.backend.name }} backend
-        run: cargo build --manifest-path aci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}"
+        run: cargo build --manifest-path caci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}"
 
       - name: Test with ${{ matrix.backend.name }} backend
-        run: cargo test --manifest-path aci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
+        run: cargo test --manifest-path caci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
 
   wasm64:
     name: WASM64 WebCrypto build and test
@@ -62,19 +62,19 @@ jobs:
       - name: Build WASM64 with WebCrypto backend
         run: |
           cargo +nightly build -Z build-std=std,panic_abort \
-            --manifest-path aci/Cargo.toml \
+            --manifest-path caci/Cargo.toml \
             --target wasm64-unknown-unknown \
             --no-default-features \
             --features "crypto_webcrypto" \
             --release
 
       - name: Generate WASM bindings
-        run: wasm-bindgen --target web --out-dir aci/pkg target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+        run: wasm-bindgen --target web --out-dir caci/pkg target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
 
       - name: Compile WASM64 tests with WebCrypto backend
         run: |
           cargo +nightly test -Z build-std=std,panic_abort \
-            --manifest-path aci/Cargo.toml \
+            --manifest-path caci/Cargo.toml \
             --target wasm64-unknown-unknown \
             --no-default-features \
             --features "crypto_webcrypto" \
@@ -87,5 +87,5 @@ jobs:
 
       - name: Test WASM64 with WebCrypto backend
         run: |
-          test_wasm=$(find target/wasm64-unknown-unknown/debug/deps -maxdepth 1 -name 'tee_attestation_verification_aci-*.wasm' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)
+          test_wasm=$(find target/wasm64-unknown-unknown/debug/deps -maxdepth 1 -name 'tee_attestation_verification_caci-*.wasm' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)
           wasm-bindgen-test-runner --nocapture "$test_wasm"

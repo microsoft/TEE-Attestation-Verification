@@ -1,8 +1,8 @@
-# aci-verify — Confidential ACI WASM verification demo
+# caci-attestation-verify — Confidential CACI WASM verification demo
 
 A standalone HTML/JS page that exercises the top-level
-`tee-attestation-verification-aci` WASM bindings. It verifies an SNP
-attestation report, UVM endorsement, and Confidential ACI relying-party policy,
+`tee-attestation-verification-caci` WASM bindings. It verifies an SNP
+attestation report, UVM endorsement, and Confidential CACI relying-party policy,
 then renders the verified `REPORT_DATA`.
 
 All processing happens client-side; the page makes no network calls other than
@@ -10,8 +10,8 @@ loading its own WASM module.
 
 ## Build and run
 
-From the repository root, build the ACI WASM package as wasm64, emitting
-`aci_pkg/` directly inside this demo directory:
+From the repository root, build the CACI WASM package as wasm64, emitting
+`caci_pkg/` directly inside this demo directory:
 
 ACI depends on EverParse CBOR code that requires a 64-bit `usize`. Build it as
 `wasm64-unknown-unknown` with nightly `build-std`; the target does not have a
@@ -24,20 +24,20 @@ rustup +nightly component add rust-src
 cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
 cargo +nightly build -Z build-std=std,panic_abort \
-  --manifest-path aci/Cargo.toml \
+  --manifest-path caci/Cargo.toml \
   --target wasm64-unknown-unknown \
   --no-default-features \
   --features "crypto_webcrypto" \
   --release
 wasm-bindgen --target web \
-  --out-dir demos/aci-verify/aci_pkg \
-  target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+  --out-dir demos/caci-attestation-verify/caci_pkg \
+  target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
 ```
 
 Serve this directory over HTTP:
 
 ```sh
-cd demos/aci-verify
+cd demos/caci-attestation-verify
 python3 -m http.server 8000
 ```
 

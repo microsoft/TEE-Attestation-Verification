@@ -141,26 +141,26 @@ jobs:
       # component, so use nightly Cargo build-std with rust-src instead of
       # rustup target add. wasm-bindgen only generates JS bindings from the
       # already-built wasm artifact.
-      - name: Build WASM64 for the aci-verify demo
+      - name: Build WASM64 for the caci-attestation-verify demo
         run: |
           cargo +nightly build -Z build-std=std,panic_abort \
-            --manifest-path aci/Cargo.toml \
+            --manifest-path caci/Cargo.toml \
             --target wasm64-unknown-unknown \
             --no-default-features \
             --features "crypto_webcrypto" \
             --release
           wasm-bindgen --target web \
-            --out-dir demos/aci-verify/aci_pkg \
-            target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+            --out-dir demos/caci-attestation-verify/caci_pkg \
+            target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
 
-      - name: Install aci-verify demo test deps
-        working-directory: demos/aci-verify/tests
+      - name: Install caci-attestation-verify demo test deps
+        working-directory: demos/caci-attestation-verify/tests
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run aci-verify demo e2e test
-        working-directory: demos/aci-verify/tests
+      - name: Run caci-attestation-verify demo e2e test
+        working-directory: demos/caci-attestation-verify/tests
         run: npm test
 
   package_wasm:

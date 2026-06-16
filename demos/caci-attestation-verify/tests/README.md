@@ -1,11 +1,11 @@
-# aci-verify end-to-end tests
+# caci-attestation-verify end-to-end tests
 
-Playwright tests that drive the `demos/aci-verify/` page in a real browser and
-run the Confidential ACI fixture through the staged ACI WASM bindings.
+Playwright tests that drive the `demos/caci-attestation-verify/` page in a real browser and
+run the Confidential CACI fixture through the staged CACI WASM bindings.
 
 ## How to run
 
-From the repository root, build the ACI WASM package:
+From the repository root, build the CACI WASM package:
 
 ACI depends on EverParse CBOR code that requires a 64-bit `usize`. Build it as
 `wasm64-unknown-unknown` with nightly `build-std`; the target does not have a
@@ -18,20 +18,20 @@ rustup +nightly component add rust-src
 cargo install wasm-bindgen-cli --version 0.2.122 --locked
 
 cargo +nightly build -Z build-std=std,panic_abort \
-  --manifest-path aci/Cargo.toml \
+  --manifest-path caci/Cargo.toml \
   --target wasm64-unknown-unknown \
   --no-default-features \
   --features "crypto_webcrypto" \
   --release
 wasm-bindgen --target web \
-  --out-dir demos/aci-verify/aci_pkg \
-  target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+  --out-dir demos/caci-attestation-verify/caci_pkg \
+  target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
 ```
 
 Install JS dependencies and run:
 
 ```sh
-cd demos/aci-verify/tests
+cd demos/caci-attestation-verify/tests
 npm install
 npm test
 ```

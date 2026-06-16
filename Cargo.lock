@@ -1048,7 +1048,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tee-attestation-verification-aci"
+name = "tee-attestation-verification-caci"
 version = "1.0.2"
 dependencies = [
  "js-sys",

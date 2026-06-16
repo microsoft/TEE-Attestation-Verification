@@ -2,13 +2,13 @@
   Copyright (c) Microsoft Corporation.
   Licensed under the MIT License.
 
-  Minimal browser demo for the WASM build of tee-attestation-verification-aci.
+  Minimal browser demo for the WASM build of tee-attestation-verification-caci.
 -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Confidential ACI verify (WASM demo)</title>
+  <title>Confidential CACI verify (WASM demo)</title>
   <style>
     body { font-family: sans-serif; margin: 2em; max-width: 960px; }
     fieldset { margin-bottom: 1em; }
@@ -31,17 +31,17 @@
   </style>
 </head>
 <body>
-  <h1>Confidential ACI policy verification (WASM demo)</h1>
+  <h1>Confidential CACI policy verification (WASM demo)</h1>
   <p>
     Loads an attestation report, host AMD certificate bundle, UVM endorsement,
-    and relying-party policy, then calls the staged ACI WASM bindings. On
+    and relying-party policy, then calls the staged CACI WASM bindings. On
     success, the verified <code>REPORT_DATA</code> is returned.
   </p>
   <p>
     <button type="button" id="load-example">Load good example from manifest</button>
   </p>
 
-  <form id="aci-form">
+  <form id="caci-form">
     <fieldset>
       <legend>Attestation report (binary, 1184 bytes)</legend>
       <input type="file" id="report-file" accept=".bin,application/octet-stream" />

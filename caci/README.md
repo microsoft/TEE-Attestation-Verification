@@ -1,6 +1,6 @@
-# ACI verification
+# CACI verification
 
-`tee-attestation-verification-aci` verifies ACI/UVM endorsement COSE blobs
+`tee-attestation-verification-caci` verifies ACI/UVM endorsement COSE blobs
 against a verified SEV-SNP attestation report and a caller-pinned `did:x509`
 root of trust.
 
@@ -18,7 +18,7 @@ We establish trust in an ACI container using the following relying-party-policy:
 The API of this library tries to expose this process to the user.
 
 ```rust
-use tee_attestation_verification_aci::{snp, synchronous as tav};
+use tee_attestation_verification_caci::{snp, synchronous as tav};
 
 let report = tav::verify_attestation(
     attestation_report_bytes,

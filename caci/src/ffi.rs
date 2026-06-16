@@ -165,7 +165,7 @@ mod wasm {
         Ok(WasmCaciUvmEndorsement { inner })
     }
 
-    /// Verify Confidential ACI relying-party policy over staged verified artifacts.
+    /// Verify Confidential CACI relying-party policy over staged verified artifacts.
     ///
     /// `minimum_tcb_json`, when non-empty, must be a JSON map from CPUID hex
     /// strings to TCB hex strings, for example `{ "00a10f11": "04000000000018db" }`.

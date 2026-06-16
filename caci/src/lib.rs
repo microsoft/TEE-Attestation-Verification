@@ -57,13 +57,13 @@ const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";
 const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
 
 #[cfg(sync_crypto)]
-/// Synchronous staged ACI verification.
+/// Synchronous staged CACI verification.
 ///
 /// Use this module when the active crypto backend supports synchronous
 /// verification:
 ///
 /// ```no_run
-/// use tee_attestation_verification_aci::{synchronous as tav, HOST_DATA_LEN};
+/// use tee_attestation_verification_caci::{synchronous as tav, HOST_DATA_LEN};
 ///
 /// # fn example(
 /// #     attestation: &[u8],
@@ -181,7 +181,7 @@ pub mod synchronous {
         Ok(parsed)
     }
 
-    /// Verify Confidential ACI relying-party policy over staged verified artifacts.
+    /// Verify Confidential CACI relying-party policy over staged verified artifacts.
     ///
     /// [`verify_attestation`] must be used to authenticate the SNP report before
     /// calling this function, and [`verify_uvm_endorsement`] must be used to
@@ -210,13 +210,13 @@ pub mod synchronous {
 }
 
 #[cfg(async_crypto)]
-/// Asynchronous staged ACI verification.
+/// Asynchronous staged CACI verification.
 ///
 /// Use this module when the active crypto backend is asynchronous, such as
 /// WebCrypto:
 ///
 /// ```no_run
-/// use tee_attestation_verification_aci::{asynchronous as tav, HOST_DATA_LEN};
+/// use tee_attestation_verification_caci::{asynchronous as tav, HOST_DATA_LEN};
 ///
 /// # async fn example(
 /// #     attestation: &[u8],
@@ -342,7 +342,7 @@ pub mod asynchronous {
         Ok(parsed)
     }
 
-    /// Verify Confidential ACI relying-party policy over staged verified artifacts.
+    /// Verify Confidential CACI relying-party policy over staged verified artifacts.
     ///
     /// [`verify_attestation`] must be used to authenticate the SNP report before
     /// calling this function, and [`verify_uvm_endorsement`] must be used to
@@ -507,7 +507,7 @@ fn verify_c_aci_attestation_impl(
     Ok(attestation.report_data)
 }
 
-/// Error returned when ACI verification fails.
+/// Error returned when CACI verification fails.
 #[derive(Debug)]
 pub enum AciError {
     /// The caller did not provide exactly `[vcek, ask, ark]`.

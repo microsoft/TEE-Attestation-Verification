@@ -4,18 +4,18 @@
 import { test, expect } from "@playwright/test";
 
 const FIXTURES = {
-  aciReport: "/test-data/aci-report.hex",
+  caciReport: "/test-data/aci-report.hex",
   hostAmdCert: "/test-data/host-amd-cert.base64",
   referenceInfo: "/test-data/reference-info.base64",
 };
 
 const bytesToHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 
-test("Confidential ACI policy fixture verifies and returns report data", async ({ page, baseURL }) => {
+test("Confidential CACI policy fixture verifies and returns report data", async ({ page, baseURL }) => {
   await verifyFixture(page, baseURL, ({ reportedTcbHex }) => JSON.stringify({ "00a00f11": reportedTcbHex }));
 });
 
-test("Confidential ACI policy fixture verifies without minimum TCB policy", async ({ page, baseURL }) => {
+test("Confidential CACI policy fixture verifies without minimum TCB policy", async ({ page, baseURL }) => {
   await verifyFixture(page, baseURL, () => "");
 });
 
@@ -25,7 +25,7 @@ async function verifyFixture(page, baseURL, minimumTcbJson) {
     if (!r.ok) throw new Error(`fetch ${path} -> ${r.status}`);
     return r;
   };
-  const reportHex = (await (await get(FIXTURES.aciReport)).text()).trim();
+  const reportHex = (await (await get(FIXTURES.caciReport)).text()).trim();
   const reportBytes = new Uint8Array(reportHex.match(/../g).map(byte => Number.parseInt(byte, 16)));
   const hostAmdCert = await (await get(FIXTURES.hostAmdCert)).text();
   const referenceInfo = await (await get(FIXTURES.referenceInfo)).text();
@@ -43,10 +43,10 @@ async function verifyFixture(page, baseURL, minimumTcbJson) {
   await page.locator("#feed").fill("ContainerPlat-AMD-UVM");
   await page.locator("#minimum-svn").fill("104");
 
-  await page.locator('#aci-form button[type="submit"]').click();
+  await page.locator('#caci-form button[type="submit"]').click();
 
   await expect(page.locator("#status")).toHaveClass("ok", { timeout: 30_000 });
-  await expect(page.locator("#status")).toHaveText("Confidential ACI policy verified.");
+  await expect(page.locator("#status")).toHaveText("Confidential CACI policy verified.");
   await expect(page.locator("#output")).toContainText("verified_report_data");
   await expect(page.locator("#output")).toContainText(reportDataHex.slice(0, 32));
 }

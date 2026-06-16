@@ -57,8 +57,8 @@ jobs:
             demos/web-verify-kernel/tests/test-results/
             demos/web-verify-kernel/tests/playwright-report/
 
-  aci-verify:
-    name: aci-verify e2e
+  caci-attestation-verify:
+    name: E2E test of CACI attestation verification
     runs-on: ubuntu-latest
 
     steps:
@@ -79,38 +79,38 @@ jobs:
       # component, so use nightly Cargo build-std with rust-src instead of
       # rustup target add. wasm-bindgen only generates JS bindings from the
       # already-built wasm artifact.
-      - name: Build ACI WASM for the demo
+      - name: Build CACI WASM for the demo
         run: |
           cargo +nightly build -Z build-std=std,panic_abort \
-            --manifest-path aci/Cargo.toml \
+            --manifest-path caci/Cargo.toml \
             --target wasm64-unknown-unknown \
             --no-default-features \
             --features "crypto_webcrypto" \
             --release
           wasm-bindgen --target web \
-            --out-dir demos/aci-verify/aci_pkg \
-            target/wasm64-unknown-unknown/release/tee_attestation_verification_aci.wasm
+            --out-dir demos/caci-attestation-verify/caci_pkg \
+            target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "26"
 
-      - name: Install aci-verify Playwright and browsers
-        working-directory: demos/aci-verify/tests
+      - name: Install caci-attestation-verify Playwright and browsers
+        working-directory: demos/caci-attestation-verify/tests
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run aci-verify e2e test
-        working-directory: demos/aci-verify/tests
+      - name: Run caci-attestation-verify e2e test
+        working-directory: demos/caci-attestation-verify/tests
         run: npm test
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: aci-verify-playwright-report
+          name: caci-attestation-verify-playwright-report
           path: |
-            demos/aci-verify/tests/test-results/
-            demos/aci-verify/tests/playwright-report/
+            demos/caci-attestation-verify/tests/test-results/
+            demos/caci-attestation-verify/tests/playwright-report/

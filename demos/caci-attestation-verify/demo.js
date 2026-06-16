@@ -6,7 +6,7 @@ import init, {
   verify_attestation_with_cert_chain_async,
   verify_c_aci_attestation,
   verify_uvm_endorsement_async,
-} from "./aci_pkg/tee_attestation_verification_aci.js";
+} from "./caci_pkg/tee_attestation_verification_caci.js";
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
@@ -167,7 +167,7 @@ function requiredNonNegativeBigInt(textId, name) {
 async function onSubmit(ev) {
   ev.preventDefault();
   outputEl.textContent = "";
-  setStatus("Loading ACI WASM module...");
+  setStatus("Loading CACI WASM module...");
   try {
     await ensureWasmLoaded();
     setStatus("Reading ACI inputs...");
@@ -188,7 +188,7 @@ async function onSubmit(ev) {
       uvmEndorsementBase64,
       "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2",
     );
-    setStatus("Verifying Confidential ACI policy...");
+    setStatus("Verifying Confidential CACI policy...");
     const reportData = await verify_c_aci_attestation(
       attestation,
       minimumTcbJson,
@@ -198,14 +198,14 @@ async function onSubmit(ev) {
       minimumSvn,
     );
 
-    setStatus("Confidential ACI policy verified.", "ok");
+    setStatus("Confidential CACI policy verified.", "ok");
     outputEl.textContent = `verified_report_data:\n  ${formatBytes(reportData)}`;
   } catch (err) {
     console.error(err);
     const msg = err && err.message ? err.message : String(err);
-    setStatus(`ACI verification failed: ${msg}`, "err");
+    setStatus(`CACI verification failed: ${msg}`, "err");
   }
 }
 
-document.getElementById("aci-form").addEventListener("submit", onSubmit);
+document.getElementById("caci-form").addEventListener("submit", onSubmit);
 document.getElementById("load-example").addEventListener("click", loadExample);
