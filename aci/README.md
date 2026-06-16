@@ -18,21 +18,21 @@ We establish trust in an ACI container using the following relying-party-policy:
 The API of this library tries to expose this process to the user.
 
 ```rust
-use tee_attestation_verification_lib::snp::Cpuid;
-use tee_attestation_verification_lib::snp::report::TcbVersionRaw;
+use tee_attestation_verification_aci::{snp, synchronous as tav};
 
-let report = tee_attestation_verification_aci::sync::verify_attestation(
+let report = tav::verify_attestation(
     attestation_report_bytes,
     amd_endorsements,
 )?;
 let trusted_didx509 =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
-let caci_uvm_endorsement = tee_attestation_verification_aci::sync::verify_uvm_endorsement(
+let caci_uvm_endorsement = tav::verify_uvm_endorsement(
     aci_cose_sign1,
     trusted_didx509,
 )?;
-let minimum_tcb: Vec<(Cpuid, TcbVersionRaw)> = vec![(container_cpuid, minimum_tcb_version)];
-let verified_report_data = tee_attestation_verification_aci::sync::verify_c_aci_attestation(
+let minimum_tcb: Vec<(snp::Cpuid, snp::report::TcbVersionRaw)> =
+    vec![(container_cpuid, minimum_tcb_version)];
+let verified_report_data = tav::verify_c_aci_attestation(
     report,
     minimum_tcb,
     vec![trusted_c_aci_policy], // SHA-256 digest of the loaded security policy.

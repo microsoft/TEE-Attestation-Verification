@@ -39,7 +39,7 @@ tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Att
 Parse the attestation report from its raw 1184-byte binary representation and verify with the synchronous API:
 
 ```rust
-use tee_attestation_verification_lib::snp::verify::{sync, ChainVerification};
+use tee_attestation_verification_lib::snp::verify::{sync as tav, ChainVerification};
 use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
 use zerocopy::FromBytes;
 
@@ -47,7 +47,7 @@ let attestation_report = AttestationReport::read_from_bytes(attestation_bytes)?;
 let vcek = certificate_from_pem(vcek_pem)?;
 let ask = certificate_from_pem(ask_pem)?;
 
-sync::verify_attestation(
+tav::verify_attestation(
     &attestation_report,
     &vcek,
     &ChainVerification::WithPinnedArk { ask: &ask },

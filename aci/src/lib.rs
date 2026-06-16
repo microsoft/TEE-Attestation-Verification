@@ -21,7 +21,7 @@ mod parse;
 
 use attestation::snp::report::{AttestationReport, TcbVersionForGeneration, TcbVersionRaw};
 use attestation::snp::verify::{ChainVerification, VerificationError};
-use attestation::{snp, Generation};
+use attestation::Generation;
 use crypto::CertificateBackend;
 #[cfg(async_crypto)]
 use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
@@ -36,6 +36,7 @@ use parse::{
     measurement_from_payload, parse_amd_endorsements, parse_attestation, parse_x5chain_certs,
 };
 
+pub use attestation::snp;
 pub use parse::{parse_aci_cose, CaciUvmEndorsement, CaciUvmEndorsementV1};
 
 const fn attestation_report_field_len<const N: usize>(
@@ -58,23 +59,25 @@ const MAX_GUEST_VMPL: u32 = 3;
 /// verification:
 ///
 /// ```no_run
+/// use tee_attestation_verification_aci::{synchronous as tav, HOST_DATA_LEN};
+///
 /// # fn example(
 /// #     attestation: &[u8],
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_c_aci_policy: [u8; tee_attestation_verification_aci::HOST_DATA_LEN],
+/// #     trusted_c_aci_policy: [u8; HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
-/// let report = tee_attestation_verification_aci::sync::verify_attestation(
+/// let report = tav::verify_attestation(
 ///     attestation,
 ///     amd_endorsements,
 /// )?;
-/// let uvm = tee_attestation_verification_aci::sync::verify_uvm_endorsement(
+/// let uvm = tav::verify_uvm_endorsement(
 ///     aci_cose,
 ///     trusted_didx509,
 /// )?;
-/// let verified_report_data = tee_attestation_verification_aci::sync::verify_c_aci_attestation(
+/// let verified_report_data = tav::verify_c_aci_attestation(
 ///     report,
 ///     vec![],
 ///     vec![trusted_c_aci_policy],
@@ -86,7 +89,7 @@ const MAX_GUEST_VMPL: u32 = 3;
 /// # Ok(())
 /// # }
 /// ```
-pub mod sync {
+pub mod synchronous {
     use super::*;
 
     /// Verify the SEV-SNP attestation report and its AMD endorsements.
@@ -154,7 +157,7 @@ pub mod sync {
                     &spki, algorithm,
                 )
                 .map_err(|e| AciError::Certificate(e.to_string()))?;
-                cose::cose_verify1(
+                cose::synchronous::cose_verify1(
                     &key,
                     algorithm,
                     &parsed.protected,
@@ -205,23 +208,25 @@ pub mod sync {
 /// WebCrypto:
 ///
 /// ```no_run
+/// use tee_attestation_verification_aci::{asynchronous as tav, HOST_DATA_LEN};
+///
 /// # async fn example(
 /// #     attestation: &[u8],
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_c_aci_policy: [u8; tee_attestation_verification_aci::HOST_DATA_LEN],
+/// #     trusted_c_aci_policy: [u8; HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
-/// let report = tee_attestation_verification_aci::asynchronous::verify_attestation(
+/// let report = tav::verify_attestation(
 ///     attestation,
 ///     amd_endorsements,
 /// ).await?;
-/// let uvm = tee_attestation_verification_aci::asynchronous::verify_uvm_endorsement(
+/// let uvm = tav::verify_uvm_endorsement(
 ///     aci_cose,
 ///     trusted_didx509,
 /// ).await?;
-/// let verified_report_data = tee_attestation_verification_aci::asynchronous::verify_c_aci_attestation(
+/// let verified_report_data = tav::verify_c_aci_attestation(
 ///     report,
 ///     vec![],
 ///     vec![trusted_c_aci_policy],
@@ -309,7 +314,7 @@ pub mod asynchronous {
                     )
                     .await
                     .map_err(|e| AciError::Certificate(e.to_string()))?;
-                cose::cose_verify1_async(
+                cose::asynchronous::cose_verify1(
                     &key,
                     algorithm,
                     &parsed.protected,

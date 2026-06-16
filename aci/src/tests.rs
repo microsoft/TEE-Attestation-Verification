@@ -16,7 +16,7 @@ const ACI_SVN: u64 = 104;
 const MILAN_CPUID: u32 = 0x00A00F11;
 
 #[cfg(sync_crypto)]
-mod sync {
+mod synchronous {
     use super::*;
 
     #[cfg(target_family = "wasm")]
@@ -30,11 +30,12 @@ mod sync {
         let endorsement_refs = endorsement_refs(&endorsements);
         let reference_info = reference_info_fixture();
 
-        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
-        let uvm =
-            crate::sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
+        let report =
+            crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        let uvm = crate::synchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
+            .unwrap();
 
-        let report_data = crate::sync::verify_c_aci_attestation(
+        let report_data = crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -54,10 +55,11 @@ mod sync {
         let endorsements = amd_endorsement_fixture();
         let endorsement_refs = endorsement_refs(&endorsements);
 
-        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        let report =
+            crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
         assert_verified_attestation_matches_fixture(report);
 
-        match crate::sync::verify_attestation(&attestation, &endorsement_refs[..2]) {
+        match crate::synchronous::verify_attestation(&attestation, &endorsement_refs[..2]) {
             Err(AciError::InvalidAmdEndorsements(actual)) => {
                 assert_eq!(actual, "expected [vcek, ask, ark], got 2 certificate(s)")
             }
@@ -65,14 +67,14 @@ mod sync {
         }
 
         let truncated = &attestation[..64];
-        match crate::sync::verify_attestation(truncated, &endorsement_refs) {
+        match crate::synchronous::verify_attestation(truncated, &endorsement_refs) {
             Err(AciError::InvalidAttestation(actual)) => assert_contains(&actual, "SizeError"),
             other => panic!("expected InvalidAttestation, got {other:?}"),
         }
 
         let mut tampered = attestation.clone();
         tampered[100] ^= 0xff;
-        match crate::sync::verify_attestation(&tampered, &endorsement_refs) {
+        match crate::synchronous::verify_attestation(&tampered, &endorsement_refs) {
             Err(AciError::AttestationVerification(
                 attestation::snp::verify::VerificationError::SignatureVerificationError(actual),
             )) => assert_contains(
@@ -89,23 +91,23 @@ mod sync {
         let reference_info = reference_info_fixture();
         let expected_report = parse_attestation(&attestation_fixture()).unwrap();
 
-        let uvm =
-            crate::sync::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509).unwrap();
+        let uvm = crate::synchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
+            .unwrap();
         assert_verified_uvm_matches_fixture(&uvm, expected_report);
 
-        match crate::sync::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509) {
+        match crate::synchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509) {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
         }
 
-        match crate::sync::verify_uvm_endorsement(&reference_info, "not-a-did") {
+        match crate::synchronous::verify_uvm_endorsement(&reference_info, "not-a-did") {
             Err(AciError::DidX509(actual)) => {
                 assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
             }
             other => panic!("expected DidX509 error, got {other:?}"),
         }
 
-        match crate::sync::verify_uvm_endorsement(&reference_info, "did:x509:0:sha256:wrong") {
+        match crate::synchronous::verify_uvm_endorsement(&reference_info, "did:x509:0:sha256:wrong") {
             Err(AciError::DidX509(actual)) => assert_eq!(
                 actual,
                 "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
@@ -115,7 +117,7 @@ mod sync {
 
         let mut tampered_signature = reference_info;
         *tampered_signature.last_mut().unwrap() ^= 1;
-        match crate::sync::verify_uvm_endorsement(&tampered_signature, TRUSTED_ACI_DIDX509) {
+        match crate::synchronous::verify_uvm_endorsement(&tampered_signature, TRUSTED_ACI_DIDX509) {
             Err(AciError::Signature(actual)) => assert_contains(
                 &actual.to_ascii_lowercase(),
                 "signature verification failed",
@@ -130,12 +132,15 @@ mod sync {
         let attestation = attestation_fixture();
         let endorsements = amd_endorsement_fixture();
         let endorsement_refs = endorsement_refs(&endorsements);
-        let report = crate::sync::verify_attestation(&attestation, &endorsement_refs).unwrap();
-        let uvm =
-            crate::sync::verify_uvm_endorsement(&reference_info_fixture(), TRUSTED_ACI_DIDX509)
-                .unwrap();
+        let report =
+            crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
+        let uvm = crate::synchronous::verify_uvm_endorsement(
+            &reference_info_fixture(),
+            TRUSTED_ACI_DIDX509,
+        )
+        .unwrap();
 
-        let report_data = crate::sync::verify_c_aci_attestation(
+        let report_data = crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -146,7 +151,7 @@ mod sync {
         .unwrap();
         assert_eq!(report_data, report.report_data);
 
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -162,7 +167,7 @@ mod sync {
 
         let mut policy = report.host_data;
         policy[0] ^= 1;
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![policy],
@@ -178,7 +183,7 @@ mod sync {
 
         let mut wrong_feed = uvm.clone();
         endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -197,7 +202,7 @@ mod sync {
         let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
         let mut minimum_tcb = report.reported_tcb;
         minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             vec![(matching_cpuid, minimum_tcb)],
             vec![report.host_data],
@@ -211,7 +216,7 @@ mod sync {
 
         let mut wrong_measurement = report;
         wrong_measurement.measurement[0] ^= 1;
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             wrong_measurement,
             Vec::new(),
             vec![wrong_measurement.host_data],
@@ -227,7 +232,7 @@ mod sync {
         }
 
         let debug_report = report_with_debug_enabled();
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             debug_report,
             Vec::new(),
             vec![debug_report.host_data],
@@ -242,7 +247,7 @@ mod sync {
         }
 
         let host_report = report_with_vmpl(4);
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             host_report,
             Vec::new(),
             vec![host_report.host_data],
@@ -259,7 +264,7 @@ mod sync {
         let mut missing_svn_int = uvm.clone();
         endorsement_v1_mut(&mut missing_svn_int).payload =
             reference_payload_without_guestsvn_int(report);
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -276,7 +281,7 @@ mod sync {
         let mut uppercase_measurement = uvm;
         endorsement_v1_mut(&mut uppercase_measurement).payload =
             reference_payload_with_uppercase_measurement(report);
-        match crate::sync::verify_c_aci_attestation(
+        match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -294,7 +299,7 @@ mod sync {
 }
 
 #[cfg(async_crypto)]
-mod r#async {
+mod asynchronous {
     use super::*;
 
     #[cfg(target_family = "wasm")]

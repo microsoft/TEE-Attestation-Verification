@@ -3,10 +3,10 @@
 //! This crate is intentionally verification-only. It exposes:
 //!
 //! - [`CborValue`] for parsing CBOR/COSE envelopes;
-//! - [`cose_verify1`] for synchronous COSE_Sign1 signature verification when a
+//! - [`synchronous::cose_verify1`] for COSE_Sign1 signature verification when a
 //!   synchronous crypto backend is selected;
-//! - [`cose_verify1_async`] for asynchronous COSE_Sign1 signature verification
-//!   when an asynchronous crypto backend is selected.
+//! - [`asynchronous::cose_verify1`] for COSE_Sign1 signature verification when
+//!   an asynchronous crypto backend is selected.
 //!
 //! # Verifying a COSE_Sign1 envelope
 //!
@@ -17,7 +17,7 @@
 //!
 //! ```no_run
 //! use tee_attestation_verification_cose::{
-//!     cose_verify1, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
+//!     synchronous as tav_cose, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
 //!     SignatureKeyAlgorithm,
 //! };
 //!
@@ -47,7 +47,7 @@
 //! let algorithm = SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384);
 //! let key = <Key as KeyBackend>::from_spki_der(signer_spki_der, algorithm)?;
 //!
-//! cose_verify1(&key, algorithm, protected_header, payload, signature)?;
+//! tav::cose_verify1(&key, algorithm, protected_header, payload, signature)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -59,10 +59,14 @@ pub use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
 pub use cose::{cose_alg_for_signature_key_algorithm, signature_key_algorithm_for_cose_alg};
 
 #[cfg(sync_crypto)]
-pub use cose::cose_verify1;
+pub mod synchronous {
+    pub use crate::cose::cose_verify1;
+}
 
 #[cfg(async_crypto)]
-pub use cose::cose_verify1_async;
+pub mod asynchronous {
+    pub use crate::cose::cose_verify1_async as cose_verify1;
+}
 
 pub use crypto::{
     EcSignatureKeyAlgorithm, Key, KeyBackend, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,

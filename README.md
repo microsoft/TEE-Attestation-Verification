@@ -45,7 +45,7 @@ tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Att
 ```
 
 ```rust
-use tee_attestation_verification_lib::snp::verify::{sync, ChainVerification};
+use tee_attestation_verification_lib::snp::verify::{sync as tav, ChainVerification};
 use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
 use zerocopy::FromBytes;
 
@@ -53,7 +53,7 @@ let report = AttestationReport::read_from_bytes(attestation_report_bytes)?;
 let vcek = certificate_from_pem(vcek_pem)?;
 let ask = certificate_from_pem(ask_pem)?;
 
-sync::verify_attestation(&report, &vcek, &ChainVerification::WithPinnedArk { ask: &ask })?;
+tav::verify_attestation(&report, &vcek, &ChainVerification::WithPinnedArk { ask: &ask })?;
 ```
 
 ## Trademarks
