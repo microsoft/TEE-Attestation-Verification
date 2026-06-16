@@ -3,101 +3,14 @@
 
 #[cfg(target_family = "wasm")]
 mod wasm {
+    use cose::ffi::wasm::CborValue as WasmCborValue;
     use js_sys::{Array, Uint8Array};
     use std::collections::BTreeMap;
     use wasm_bindgen::{prelude::*, JsCast};
 
-    use crate::{
-        asynchronous, parse_aci_cose as parse_aci_cose_native, AciError, CaciUvmEndorsement,
-        CaciUvmEndorsementV1, HOST_DATA_LEN,
-    };
+    use crate::{asynchronous, AciError, HOST_DATA_LEN};
     use attestation::snp::{ffi::wasm::SnpAttestationReport, report::TcbVersionRaw, Cpuid};
     use crypto::{CertificateBackend, Crypto};
-
-    #[wasm_bindgen]
-    pub struct WasmCaciUvmEndorsement {
-        inner: CaciUvmEndorsement,
-    }
-
-    #[wasm_bindgen]
-    pub struct WasmCaciUvmEndorsementV1 {
-        inner: CaciUvmEndorsementV1,
-    }
-
-    #[wasm_bindgen]
-    impl WasmCaciUvmEndorsement {
-        pub fn version(&self) -> u32 {
-            match &self.inner {
-                CaciUvmEndorsement::V1(_) => 1,
-            }
-        }
-
-        pub fn v1(&self) -> Result<WasmCaciUvmEndorsementV1, String> {
-            match &self.inner {
-                CaciUvmEndorsement::V1(v1) => Ok(WasmCaciUvmEndorsementV1 { inner: v1.clone() }),
-            }
-        }
-    }
-
-    #[wasm_bindgen]
-    impl WasmCaciUvmEndorsementV1 {
-        pub fn protected(&self) -> Vec<u8> {
-            self.inner.protected.clone()
-        }
-
-        pub fn payload(&self) -> Vec<u8> {
-            self.inner.payload.clone()
-        }
-
-        pub fn signature(&self) -> Vec<u8> {
-            self.inner.signature.clone()
-        }
-
-        pub fn alg(&self) -> Result<i32, String> {
-            self.inner
-                .alg
-                .try_into()
-                .map_err(|_| format!("COSE alg {} does not fit i32", self.inner.alg))
-        }
-
-        pub fn content_type(&self) -> String {
-            self.inner.content_type.clone()
-        }
-
-        pub fn x5chain(&self) -> Array {
-            let chain = Array::new();
-            for cert in &self.inner.x5chain {
-                chain.push(&Uint8Array::from(cert.as_slice()));
-            }
-            chain
-        }
-
-        pub fn issuer(&self) -> String {
-            self.inner.issuer.clone()
-        }
-
-        pub fn feed(&self) -> Option<String> {
-            self.inner.feed.clone()
-        }
-
-        pub fn svn(&self) -> Option<String> {
-            self.inner.svn.clone()
-        }
-
-        pub fn signing_time_seconds(&self) -> Option<f64> {
-            self.inner
-                .signing_time
-                .map(|signing_time| signing_time.as_secs() as f64)
-        }
-    }
-
-    /// Parse an ACI/UVM endorsement COSE blob without verifying it.
-    #[wasm_bindgen]
-    pub fn parse_aci_cose(aci_cose: Vec<u8>) -> Result<WasmCaciUvmEndorsement, String> {
-        parse_aci_cose_native(&aci_cose)
-            .map(|inner| WasmCaciUvmEndorsement { inner })
-            .map_err(wasm_error)
-    }
 
     /// Split a PEM certificate bundle into individual PEM certificates.
     ///
@@ -158,11 +71,11 @@ mod wasm {
     pub async fn verify_uvm_endorsement_async(
         uvm_endorsement: Vec<u8>,
         trusted_didx509: &str,
-    ) -> Result<WasmCaciUvmEndorsement, String> {
+    ) -> Result<WasmCborValue, String> {
         let inner = asynchronous::verify_uvm_endorsement(&uvm_endorsement, trusted_didx509)
             .await
             .map_err(wasm_error)?;
-        Ok(WasmCaciUvmEndorsement { inner })
+        Ok(WasmCborValue::from_native(inner))
     }
 
     /// Verify Confidential CACI relying-party policy over staged verified artifacts.
@@ -174,7 +87,7 @@ mod wasm {
         attestation: &SnpAttestationReport,
         minimum_tcb_json: &str,
         trusted_c_aci_policies: Array,
-        uvm: &WasmCaciUvmEndorsement,
+        uvm: &WasmCborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<Vec<u8>, String> {
@@ -191,7 +104,7 @@ mod wasm {
             *attestation.report(),
             minimum_tcb,
             trusted_c_aci_policies,
-            uvm.inner.clone(),
+            uvm.as_native().clone(),
             uvm_feed,
             minimum_svn,
         )

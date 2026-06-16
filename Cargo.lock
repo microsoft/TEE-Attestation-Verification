@@ -1069,6 +1069,7 @@ dependencies = [
  "cborrs",
  "cborrs-nondet",
  "tee-attestation-verification-crypto",
+ "wasm-bindgen",
 ]
 
 [[package]]
