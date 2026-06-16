@@ -119,11 +119,11 @@ impl CertificateFetcher for KdsFetcher {
             match processor_model {
                 snp::model::Generation::Milan | snp::model::Generation::Genoa => {
                     // Milan and Genoa use full chip_id
-                    crate::utils::to_hex(&attestation_report.chip_id).to_uppercase()
+                    crypto::hex::to_hex(&attestation_report.chip_id).to_uppercase()
                 }
                 snp::model::Generation::Turin => {
                     // Turin uses only first 8 bytes of chip_id
-                    crate::utils::to_hex(&attestation_report.chip_id[0..8]).to_uppercase()
+                    crypto::hex::to_hex(&attestation_report.chip_id[0..8]).to_uppercase()
                 }
             }
         };

@@ -228,13 +228,14 @@ mod wasm {
         if hex.len() != 8 {
             return Err(format!("CPUID must be 8 hex characters, got {}", hex.len()));
         }
-        let value =
-            u32::from_str_radix(hex, 16).map_err(|e| format!("invalid CPUID hex {hex:?}: {e}"))?;
+        let bytes =
+            crypto::hex::from_hex(hex).map_err(|e| format!("invalid CPUID hex {hex:?}: {e}"))?;
+        let value = u32::from_be_bytes(bytes.try_into().expect("CPUID hex length already checked"));
         Ok(Cpuid::from(value))
     }
 
     fn parse_tcb_hex(hex: &str) -> Result<TcbVersionRaw, String> {
-        let bytes = hex_to_bytes(hex)?;
+        let bytes = crypto::hex::from_hex(hex)?;
         let raw = bytes.try_into().map_err(|bytes: Vec<u8>| {
             format!("TCB version must be 8 bytes, got {}", bytes.len())
         })?;
@@ -248,29 +249,6 @@ mod wasm {
                 bytes.len()
             )
         })
-    }
-
-    fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
-        if hex.len() % 2 != 0 {
-            return Err("hex string has odd length".to_string());
-        }
-        hex.as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = hex_nibble(pair[0])?;
-                let low = hex_nibble(pair[1])?;
-                Ok((high << 4) | low)
-            })
-            .collect()
-    }
-
-    fn hex_nibble(byte: u8) -> Result<u8, String> {
-        match byte {
-            b'0'..=b'9' => Ok(byte - b'0'),
-            b'a'..=b'f' => Ok(byte - b'a' + 10),
-            b'A'..=b'F' => Ok(byte - b'A' + 10),
-            _ => Err(format!("invalid hex digit {}", byte as char)),
-        }
     }
 
     fn wasm_error(error: AciError) -> String {

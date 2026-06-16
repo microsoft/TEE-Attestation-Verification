@@ -10,8 +10,8 @@ use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
 async fn verify(hex_input: &String) -> Result<(), String> {
     use zerocopy::FromBytes;
 
-    let bytes = tee_attestation_verification_lib::utils::from_hex(hex_input)
-        .map_err(|e| format!("Serialisation error: {}", e))?;
+    let bytes =
+        crypto::hex::from_hex(hex_input).map_err(|e| format!("Serialisation error: {}", e))?;
     // Parse the bytes as an AttestationReport
     let attestation_report = AttestationReport::read_from_bytes(&bytes)
         .map_err(|e| format!("Failed to parse attestation report from bytes: {:?}", e))?;

@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::parse::{hex_to_bytes, ReferenceInfoPayload};
+use crate::parse;
 use crypto::base64::base64_standard_decode;
 
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
@@ -181,8 +181,7 @@ mod synchronous {
             other => panic!("expected Policy error, got {other:?}"),
         }
 
-        let mut wrong_feed = uvm.clone();
-        endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
+        let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
         match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -194,7 +193,7 @@ mod synchronous {
         {
             Err(AciError::Policy(actual)) => assert_eq!(
                 actual,
-                "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
+                "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
             ),
             other => panic!("expected Policy error, got {other:?}"),
         }
@@ -261,9 +260,8 @@ mod synchronous {
             other => panic!("expected Policy error, got {other:?}"),
         }
 
-        let mut missing_svn_int = uvm.clone();
-        endorsement_v1_mut(&mut missing_svn_int).payload =
-            reference_payload_without_guestsvn_int(report);
+        let missing_svn_int =
+            replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
         match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -278,9 +276,8 @@ mod synchronous {
             other => panic!("expected Measurement error, got {other:?}"),
         }
 
-        let mut uppercase_measurement = uvm;
-        endorsement_v1_mut(&mut uppercase_measurement).payload =
-            reference_payload_with_uppercase_measurement(report);
+        let uppercase_measurement =
+            replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
         match crate::synchronous::verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -309,7 +306,7 @@ mod asynchronous {
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
         trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
-        uvm_endorsement: CaciUvmEndorsement,
+        uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
@@ -502,8 +499,7 @@ mod asynchronous {
             other => panic!("expected Policy error, got {other:?}"),
         }
 
-        let mut wrong_feed = uvm.clone();
-        endorsement_v1_mut(&mut wrong_feed).feed = Some("not-confidential-aci".to_string());
+        let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
         match verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -516,7 +512,7 @@ mod asynchronous {
         {
             Err(AciError::Policy(actual)) => assert_eq!(
                 actual,
-                "UVM feed Some(\"not-confidential-aci\") does not match trusted feed ContainerPlat-AMD-UVM"
+                "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
             ),
             other => panic!("expected Policy error, got {other:?}"),
         }
@@ -591,9 +587,8 @@ mod asynchronous {
             other => panic!("expected Policy error, got {other:?}"),
         }
 
-        let mut missing_svn_int = uvm.clone();
-        endorsement_v1_mut(&mut missing_svn_int).payload =
-            reference_payload_without_guestsvn_int(report);
+        let missing_svn_int =
+            replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
         match verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -610,9 +605,8 @@ mod asynchronous {
             other => panic!("expected Measurement error, got {other:?}"),
         }
 
-        let mut uppercase_measurement = uvm;
-        endorsement_v1_mut(&mut uppercase_measurement).payload =
-            reference_payload_with_uppercase_measurement(report);
+        let uppercase_measurement =
+            replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
         match verify_c_aci_attestation(
             report,
             Vec::new(),
@@ -633,7 +627,7 @@ mod asynchronous {
 }
 
 fn attestation_fixture() -> Vec<u8> {
-    hex_to_bytes(REPORT_HEX.trim()).unwrap()
+    crypto::hex::from_hex(REPORT_HEX.trim()).unwrap()
 }
 
 fn reference_info_fixture() -> Vec<u8> {
@@ -730,17 +724,37 @@ fn assert_verified_attestation_matches_fixture(report: AttestationReport) {
 }
 
 fn assert_verified_uvm_matches_fixture(
-    endorsement: &CaciUvmEndorsement,
+    endorsement: &CborValue,
     expected_report: AttestationReport,
 ) {
-    let v1 = endorsement_v1(endorsement);
     let payload = endorsement_payload(endorsement);
+    let protected_header = endorsement_protected_header(endorsement);
+    let issuer = parse::required_text(protected_header.map_at_str("iss").unwrap(), "iss").unwrap();
+    let feed = protected_header
+        .map_at_str("feed")
+        .ok()
+        .map(|value| parse::required_text(value, "feed"))
+        .transpose()
+        .unwrap();
+    let x5chain = parse::parse_x5chain(
+        protected_header
+            .map_at_int(cose::COSE_HEADER_X5CHAIN)
+            .unwrap(),
+    )
+    .unwrap();
 
-    assert_eq!(v1.issuer, TRUSTED_ACI_DIDX509);
-    assert_eq!(v1.feed.as_deref(), Some(ACI_FEED));
-    assert_eq!(endorsement_svn(endorsement), Some(ACI_SVN.to_string()));
-    assert!(v1.x5chain.len() >= 2);
-    assert_eq!(payload.measurement, expected_report.measurement);
+    assert_eq!(issuer, TRUSTED_ACI_DIDX509);
+    assert_eq!(feed.as_deref(), Some(ACI_FEED));
+    assert_eq!(
+        parse::json::required_str(&payload, "x-ms-sevsnpvm-guestsvn").unwrap(),
+        ACI_SVN.to_string()
+    );
+    assert!(x5chain.len() >= 2);
+    assert_eq!(
+        parse::json::required_hex::<MEASUREMENT_LEN>(&payload, "x-ms-sevsnpvm-launchmeasurement")
+            .unwrap(),
+        expected_report.measurement
+    );
 }
 
 fn report_with_debug_enabled() -> AttestationReport {
@@ -790,45 +804,69 @@ fn reference_payload_with_uppercase_measurement(report: AttestationReport) -> Ve
 }
 
 fn measurement_hex_lower(report: AttestationReport) -> String {
-    report
-        .measurement
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crypto::hex::to_hex(&report.measurement)
 }
 
 fn measurement_hex_upper(report: AttestationReport) -> String {
-    report
-        .measurement
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect()
+    crypto::hex::to_hex(&report.measurement).to_uppercase()
 }
 
-fn endorsement_v1(endorsement: &CaciUvmEndorsement) -> &CaciUvmEndorsementV1 {
+fn endorsement_protected_header(endorsement: &CborValue) -> CborValue {
+    let sign1 = cose::cose_sign1(endorsement).unwrap();
+    let protected = parse::required_bstr(sign1.array_at(0).unwrap(), "protected").unwrap();
+    CborValue::from_bytes(&protected).unwrap()
+}
+
+fn endorsement_payload(endorsement: &CborValue) -> serde_json::Value {
+    let sign1 = cose::cose_sign1(endorsement).unwrap();
+    let payload = parse::cose_payload(sign1).unwrap();
+    let protected_header = endorsement_protected_header(endorsement);
+    let content_type = parse::required_text(
+        protected_header
+            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+            .unwrap(),
+        "protected content type",
+    )
+    .unwrap();
+    assert_eq!(content_type, "application/json");
+    serde_json::from_slice(&payload).unwrap()
+}
+
+fn replace_cose_payload(mut endorsement: CborValue, payload: Vec<u8>) -> CborValue {
+    sign1_items_mut(&mut endorsement)[2] = CborValue::ByteString(payload);
+    endorsement
+}
+
+fn replace_cose_feed(mut endorsement: CborValue, feed: &str) -> CborValue {
+    let protected = match &sign1_items_mut(&mut endorsement)[0] {
+        CborValue::ByteString(protected) => protected.clone(),
+        other => panic!("expected protected header byte string, got {other:?}"),
+    };
+    let mut protected_header = CborValue::from_bytes(&protected).unwrap();
+    let protected_entries = match &mut protected_header {
+        CborValue::Map(entries) => entries,
+        other => panic!("expected protected header map, got {other:?}"),
+    };
+    let feed_claim = protected_entries
+        .iter_mut()
+        .find(|(key, _)| key == &CborValue::TextString("feed".to_string()))
+        .expect("feed claim should be present");
+    feed_claim.1 = CborValue::TextString(feed.to_string());
+    sign1_items_mut(&mut endorsement)[0] =
+        CborValue::ByteString(protected_header.to_bytes().unwrap());
+
+    endorsement
+}
+
+fn sign1_items_mut(endorsement: &mut CborValue) -> &mut Vec<CborValue> {
     match endorsement {
-        CaciUvmEndorsement::V1(v1) => v1,
-        #[allow(unreachable_patterns)]
-        _ => panic!("expected CACI UVM endorsement V1"),
+        CborValue::Tagged { payload, .. } => match payload.as_mut() {
+            CborValue::Array(items) => items,
+            other => panic!("expected tagged COSE_Sign1 array, got {other:?}"),
+        },
+        CborValue::Array(items) => items,
+        other => panic!("expected COSE_Sign1 document, got {other:?}"),
     }
-}
-
-fn endorsement_v1_mut(endorsement: &mut CaciUvmEndorsement) -> &mut CaciUvmEndorsementV1 {
-    match endorsement {
-        CaciUvmEndorsement::V1(v1) => v1,
-        #[allow(unreachable_patterns)]
-        _ => panic!("expected CACI UVM endorsement V1"),
-    }
-}
-
-fn endorsement_payload(endorsement: &CaciUvmEndorsement) -> ReferenceInfoPayload {
-    let v1 = endorsement_v1(endorsement);
-    measurement_from_payload(&v1.payload, &v1.content_type).unwrap()
-}
-
-fn endorsement_svn(endorsement: &CaciUvmEndorsement) -> Option<String> {
-    let v1 = endorsement_v1(endorsement);
-    endorsement_payload(endorsement).svn.or(v1.svn.clone())
 }
 
 fn assert_contains(actual: &str, expected: &str) {

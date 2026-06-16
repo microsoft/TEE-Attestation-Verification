@@ -58,7 +58,6 @@
 pub(crate) use crypto;
 pub mod pinned_arks;
 pub mod snp;
-pub mod utils;
 
 use crypto::{CertificateBackend, Crypto};
 

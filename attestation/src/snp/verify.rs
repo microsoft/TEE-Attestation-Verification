@@ -270,8 +270,8 @@ pub(crate) fn verify_tcb_values(
             return Err(format!(
                 "Mismatched value OID {} : {} != {}",
                 oid,
-                crate::utils::to_hex(&ext_value),
-                crate::utils::to_hex(&expected)
+                crypto::hex::to_hex(&ext_value),
+                crypto::hex::to_hex(&expected)
             )
             .into());
         }

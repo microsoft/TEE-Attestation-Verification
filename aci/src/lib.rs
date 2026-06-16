@@ -33,11 +33,12 @@ use didx509::verify_didx509_root;
 #[cfg(async_crypto)]
 use didx509::verify_didx509_root_async;
 use parse::{
-    measurement_from_payload, parse_amd_endorsements, parse_attestation, parse_x5chain_certs,
+    parse_amd_endorsements, parse_attestation, parse_x5chain_certs, required_bstr, required_int,
+    required_text,
 };
 
 pub use attestation::snp;
-pub use parse::{parse_aci_cose, CaciUvmEndorsement, CaciUvmEndorsementV1};
+pub use cose::CborValue;
 
 const fn attestation_report_field_len<const N: usize>(
     _: fn(&AttestationReport) -> &[u8; N],
@@ -51,6 +52,9 @@ pub const HOST_DATA_LEN: usize = attestation_report_field_len(|report| &report.h
 /// Length of the SNP `REPORT_DATA` field.
 pub const REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &report.report_data);
 const MAX_GUEST_VMPL: u32 = 3;
+const JSON_LAUNCH_MEASUREMENT: &str = "x-ms-sevsnpvm-launchmeasurement";
+const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";
+const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
 
 #[cfg(sync_crypto)]
 /// Synchronous staged ACI verification.
@@ -96,8 +100,8 @@ pub mod synchronous {
     ///
     /// `amd_endorsements` must contain certificate bytes ordered as `[vcek,
     /// ask, ark]`. Successful verification authenticates the report signature,
-    /// validates the AMD certificate chain, and checks report TCB values against
-    /// the VCEK certificate.
+    /// validates the AMD certificate chain, vcek -> ask -> ark, and checks report
+    ///  TCB values against the VCEK certificate.
     pub fn verify_attestation(
         report: &[u8],
         amd_endorsements: &[&[u8]],
@@ -123,54 +127,58 @@ pub mod synchronous {
     pub fn verify_uvm_endorsement(
         aci_cose: &[u8],
         trusted_didx509: &str,
-    ) -> Result<CaciUvmEndorsement, AciError> {
-        let parsed = parse_aci_cose(aci_cose)?;
-        match parsed {
-            CaciUvmEndorsement::V1(parsed) => {
-                verify_didx509_root(trusted_didx509, &parsed.issuer, &parsed.x5chain)?;
+    ) -> Result<CborValue, AciError> {
+        let parsed = CborValue::from_bytes(aci_cose).map_err(AciError::Cose)?;
+        let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
+        let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
+        let _unprotected = sign1.array_at(1).map_err(AciError::Cose)?;
+        let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
+        let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
+        let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
+        let x5chain = parse::parse_x5chain(
+            protected_header
+                .map_at_int(cose::COSE_HEADER_X5CHAIN)
+                .map_err(AciError::Cose)?,
+        )?;
+        let issuer = required_text(
+            protected_header.map_at_str("iss").map_err(AciError::Cose)?,
+            "iss",
+        )?;
 
-                let (root, intermediates, leaf) = parse_x5chain_certs(&parsed.x5chain)?;
-                let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-                if let Some(signing_time) = parsed.signing_time {
-                    <crypto::Crypto as CryptoBackend>::verify_chain(
-                        &root,
-                        &intermediate_refs,
-                        &leaf,
-                        Some(signing_time),
-                    )
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                } else {
-                    <crypto::Crypto as CryptoBackend>::verify_chain(
-                        &root,
-                        &intermediate_refs,
-                        &leaf,
-                        None,
-                    )
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                }
+        // Verify x5chain
+        verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
 
-                let algorithm = cose::signature_key_algorithm_for_cose_alg(parsed.alg)
-                    .map_err(AciError::Cose)?;
-                let spki = crypto::Crypto::get_public_key(&leaf)
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                let key = <<crypto::Crypto as CryptoBackend>::Key as KeyBackend>::from_spki_der(
-                    &spki, algorithm,
-                )
+        let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
+        let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
+        <crypto::Crypto as CryptoBackend>::verify_chain(
+            &root,
+            &intermediate_refs,
+            &leaf,
+            protected_header
+                .map_at_str(parse::SIGNING_TIME)
+                .ok()
+                .map(parse::parse_signing_time)
+                .transpose()?,
+        )
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
+
+        // Verify signature
+        let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
+            protected_header
+                .map_at_int(cose::COSE_HEADER_ALG)
+                .map_err(AciError::Cose)?,
+            "protected alg",
+        )?)
+        .map_err(AciError::Cose)?;
+        let spki = crypto::Crypto::get_public_key(&leaf)
+            .map_err(|e| AciError::Certificate(e.to_string()))?;
+        let key =
+            <<crypto::Crypto as CryptoBackend>::Key as KeyBackend>::from_spki_der(&spki, algorithm)
                 .map_err(|e| AciError::Certificate(e.to_string()))?;
-                cose::synchronous::cose_verify1(
-                    &key,
-                    algorithm,
-                    &parsed.protected,
-                    &parsed.payload,
-                    &parsed.signature,
-                )
-                .map_err(AciError::Signature)?;
+        cose::synchronous::cose_verify1(&key, algorithm, &protected, &payload, &signature)
+            .map_err(AciError::Signature)?;
 
-                Ok(CaciUvmEndorsement::V1(parsed))
-            }
-            #[allow(unreachable_patterns)]
-            _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
-        }
+        Ok(parsed)
     }
 
     /// Verify Confidential ACI relying-party policy over staged verified artifacts.
@@ -186,7 +194,7 @@ pub mod synchronous {
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
         trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
-        uvm_endorsement: CaciUvmEndorsement,
+        uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
@@ -276,59 +284,62 @@ pub mod asynchronous {
     pub async fn verify_uvm_endorsement(
         aci_cose: &[u8],
         trusted_didx509: &str,
-    ) -> Result<CaciUvmEndorsement, AciError> {
-        let parsed = parse_aci_cose(aci_cose)?;
-        match parsed {
-            CaciUvmEndorsement::V1(parsed) => {
-                verify_didx509_root_async(trusted_didx509, &parsed.issuer, &parsed.x5chain).await?;
+    ) -> Result<CborValue, AciError> {
+        let parsed = CborValue::from_bytes(aci_cose).map_err(AciError::Cose)?;
+        let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
+        let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
+        let _unprotected = sign1.array_at(1).map_err(AciError::Cose)?;
+        let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
+        let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
+        let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
+        let x5chain = parse::parse_x5chain(
+            protected_header
+                .map_at_int(cose::COSE_HEADER_X5CHAIN)
+                .map_err(AciError::Cose)?,
+        )?;
+        let issuer = required_text(
+            protected_header.map_at_str("iss").map_err(AciError::Cose)?,
+            "iss",
+        )?;
 
-                let (root, intermediates, leaf) = parse_x5chain_certs(&parsed.x5chain)?;
-                let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-                if let Some(signing_time) = parsed.signing_time {
-                    <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                        &root,
-                        &intermediate_refs,
-                        &leaf,
-                        Some(signing_time),
-                    )
-                    .await
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                } else {
-                    <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                        &root,
-                        &intermediate_refs,
-                        &leaf,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                }
+        // Verify x5chain
+        verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
 
-                let algorithm = cose::signature_key_algorithm_for_cose_alg(parsed.alg)
-                    .map_err(AciError::Cose)?;
-                let spki = crypto::Crypto::get_public_key(&leaf)
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                let key =
-                    <<crypto::Crypto as AsyncCryptoBackend>::Key as AsyncKeyBackend>::from_spki_der(
-                        &spki, algorithm,
-                    )
-                    .await
-                    .map_err(|e| AciError::Certificate(e.to_string()))?;
-                cose::asynchronous::cose_verify1(
-                    &key,
-                    algorithm,
-                    &parsed.protected,
-                    &parsed.payload,
-                    &parsed.signature,
-                )
-                .await
-                .map_err(AciError::Signature)?;
+        let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
+        let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
+        <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
+            &root,
+            &intermediate_refs,
+            &leaf,
+            protected_header
+                .map_at_str(parse::SIGNING_TIME)
+                .ok()
+                .map(parse::parse_signing_time)
+                .transpose()?,
+        )
+        .await
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
 
-                Ok(CaciUvmEndorsement::V1(parsed))
-            }
-            #[allow(unreachable_patterns)]
-            _ => Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
-        }
+        // Verify signature
+        let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
+            protected_header
+                .map_at_int(cose::COSE_HEADER_ALG)
+                .map_err(AciError::Cose)?,
+            "protected alg",
+        )?)
+        .map_err(AciError::Cose)?;
+        let spki = crypto::Crypto::get_public_key(&leaf)
+            .map_err(|e| AciError::Certificate(e.to_string()))?;
+        let key = <<crypto::Crypto as AsyncCryptoBackend>::Key as AsyncKeyBackend>::from_spki_der(
+            &spki, algorithm,
+        )
+        .await
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
+        cose::asynchronous::cose_verify1(&key, algorithm, &protected, &payload, &signature)
+            .await
+            .map_err(AciError::Signature)?;
+
+        Ok(parsed)
     }
 
     /// Verify Confidential ACI relying-party policy over staged verified artifacts.
@@ -344,7 +355,7 @@ pub mod asynchronous {
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
         trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
-        uvm_endorsement: CaciUvmEndorsement,
+        uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
@@ -363,7 +374,7 @@ fn verify_c_aci_attestation_impl(
     attestation: AttestationReport,
     minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
     trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
-    uvm_endorsement: CaciUvmEndorsement,
+    uvm_endorsement: CborValue,
     uvm_feed: &str,
     minimum_svn: u64,
 ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
@@ -419,37 +430,72 @@ fn verify_c_aci_attestation_impl(
         }
     }
 
-    match uvm_endorsement {
-        CaciUvmEndorsement::V1(uvm_endorsement) => {
-            let reference_info =
-                measurement_from_payload(&uvm_endorsement.payload, &uvm_endorsement.content_type)?;
-            if reference_info.measurement != attestation.measurement {
-                return Err(AciError::Measurement(
-                    "ACI payload measurement does not match attestation measurement".to_string(),
-                ));
-            }
+    let sign1 = cose::cose_sign1(&uvm_endorsement).map_err(AciError::Cose)?;
+    let payload = parse::cose_payload(sign1)?;
+    let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
+    let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
 
-            if uvm_endorsement.feed.as_deref() != Some(uvm_feed) {
-                return Err(AciError::Policy(format!(
-                    "UVM feed {:?} does not match trusted feed {}",
-                    uvm_endorsement.feed, uvm_feed
-                )));
-            }
+    // feed matches
+    let feed = protected_header
+        .map_at_str("feed")
+        .map_err(|err| AciError::Cose(format!("failed to get feed: {err}")))
+        .and_then(|value| required_text(value, "feed"))?;
+    if feed != uvm_feed {
+        return Err(AciError::Policy(format!(
+            "UVM feed {:?} does not match trusted feed {}",
+            feed, uvm_feed
+        )));
+    }
 
-            let svn = parse_uvm_svn(
-                reference_info
-                    .svn
-                    .as_deref()
-                    .or(uvm_endorsement.svn.as_deref()),
-            )?;
-            if svn < minimum_svn {
-                return Err(AciError::Policy(format!(
-                    "UVM SVN {svn} is below trusted minimum {minimum_svn}"
-                )));
-            }
+    let content_type = protected_header
+        .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+        .map_err(|_| AciError::Cose("protected content type not found".to_string()))
+        .and_then(|value| required_text(value, "protected content type"))?;
+    let reference_info = match content_type.as_str() {
+        "application/json" => {
+            let reference_info = serde_json::from_slice::<serde_json::Value>(&payload)
+                .map_err(|e| AciError::Measurement(e.to_string()))?;
+            reference_info.as_object().ok_or_else(|| {
+                AciError::Measurement("ReferenceInfo payload must be a JSON object".into())
+            })?;
+            reference_info
         }
-        #[allow(unreachable_patterns)]
-        _ => return Err(AciError::Cose("Unsupported ACI COSE structure".to_string())),
+        other => {
+            return Err(AciError::Measurement(format!(
+                "unsupported ACI payload content type {other}"
+            )));
+        }
+    };
+
+    // svn matches
+    let svn = {
+        let svn = parse::json::required_str(&reference_info, JSON_GUEST_SVN)?;
+        if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(AciError::Policy(format!(
+                "UVM SVN {svn:?} is not a non-negative integer"
+            )));
+        }
+        let svn_int = parse::json::required_u64(&reference_info, JSON_GUEST_SVN_INT)?;
+        if svn_int.to_string() != svn {
+            return Err(AciError::Measurement(format!(
+                "{JSON_GUEST_SVN_INT} does not match {JSON_GUEST_SVN}"
+            )));
+        }
+        svn.parse::<u64>()
+            .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
+    }?;
+    if svn < minimum_svn {
+        return Err(AciError::Policy(format!(
+            "UVM SVN {svn} is below trusted minimum {minimum_svn}"
+        )));
+    }
+    // measurement matches attestation
+    let reference_info_measurement =
+        parse::json::required_hex::<MEASUREMENT_LEN>(&reference_info, JSON_LAUNCH_MEASUREMENT)?;
+    if reference_info_measurement != attestation.measurement {
+        return Err(AciError::Measurement(
+            "ACI payload measurement does not match attestation measurement".to_string(),
+        ));
     }
 
     if !trusted_c_aci_policy.contains(&attestation.host_data) {
@@ -501,17 +547,6 @@ impl std::fmt::Display for AciError {
 }
 
 impl std::error::Error for AciError {}
-
-fn parse_uvm_svn(svn: Option<&str>) -> Result<u64, AciError> {
-    let svn = svn.ok_or_else(|| AciError::Policy("UVM SVN is missing".to_string()))?;
-    if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(AciError::Policy(format!(
-            "UVM SVN {svn:?} is not a non-negative integer"
-        )));
-    }
-    svn.parse::<u64>()
-        .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
-}
 
 #[cfg(test)]
 mod tests;
