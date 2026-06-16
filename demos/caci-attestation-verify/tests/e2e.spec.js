@@ -58,7 +58,7 @@ async function verifyFixture(page, baseURL, minimumTcbJson) {
   await expect(page.locator("#output")).toContainText("feed: ContainerPlat-AMD-UVM");
   await expect(page.locator("#output")).toContainText("content_type: application/json");
   await expect(page.locator("#output")).toContainText('"iss": "did:x509:0:sha256');
-  await expect(page.locator("#output")).toContainText("<empty>");
+  await expect(page.locator("#output")).toContainText('"timestamp": h');
   await expect(page.locator("#output")).toContainText("x-ms-sevsnpvm-guestsvn: 104");
 }
 
