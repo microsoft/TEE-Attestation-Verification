@@ -47,7 +47,7 @@
 //! let algorithm = SignatureKeyAlgorithm::RsaPss(RsaPssSignatureKeyAlgorithm::Ps384);
 //! let key = <Key as KeyBackend>::from_spki_der(signer_spki_der, algorithm)?;
 //!
-//! tav::cose_verify1(&key, algorithm, protected_header, payload, signature)?;
+//! tav_cose::cose_verify1(&key, algorithm, protected_header, payload, signature)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -56,7 +56,10 @@ mod cbor;
 mod cose;
 
 pub use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
-pub use cose::{cose_alg_for_signature_key_algorithm, signature_key_algorithm_for_cose_alg};
+pub use cose::{
+    cose_alg_for_signature_key_algorithm, cose_sign1, signature_key_algorithm_for_cose_alg,
+    COSE_HEADER_ALG, COSE_HEADER_CONTENT_TYPE, COSE_HEADER_X5CHAIN,
+};
 
 #[cfg(sync_crypto)]
 pub mod synchronous {

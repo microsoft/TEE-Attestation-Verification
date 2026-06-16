@@ -8,10 +8,28 @@ use crypto::{
 // RFC 9052, Section 4.4: https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 
-// Protected header parameter label for `alg`.
-// RFC 9052, Section 3.1: https://www.rfc-editor.org/rfc/rfc9052.html#section-3.1
-// IANA "COSE Header Parameters": https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
-const COSE_HEADER_ALG: i64 = 1;
+// RFC 9052, Section 4.2: tagged COSE_Sign1 is CBOR tag 18.
+const COSE_SIGN1_TAG: u64 = 18;
+
+// IANA COSE Header Parameters registry / RFC 9052, Section 3.1.
+pub const COSE_HEADER_ALG: i64 = 1;
+pub const COSE_HEADER_CONTENT_TYPE: i64 = 3;
+// IANA COSE Header Parameters registry / RFC 9360, Section 2.
+pub const COSE_HEADER_X5CHAIN: i64 = 33;
+
+/// Return the COSE_Sign1 array from a tagged or untagged COSE_Sign1 document.
+pub fn cose_sign1(document: &CborValue) -> Result<&CborValue, String> {
+    // RFC 9052, Section 4.2: COSE_Sign1 may be encoded as CBOR tag 18
+    // wrapping the underlying COSE_Sign1 array or a raw array
+    match document {
+        CborValue::Tagged { tag, payload } if *tag == COSE_SIGN1_TAG && payload.len()? == 4 => {
+            Ok(payload.as_ref())
+        }
+        CborValue::Array(_) if document.len()? == 4 => Ok(document),
+        _ => Err("expected tagged COSE_Sign1 envelope".to_string()),
+    }
+}
+
 /// Return the backend signature algorithm for a COSE algorithm identifier.
 ///
 /// Supported identifiers are:
@@ -263,6 +281,56 @@ mod tests {
         168, 172, 208, 150, 38, 14, 34, 76, 203, 219, 160, 78, 11, 108, 193, 8, 109, 89, 223, 228,
         73,
     ];
+
+    #[test]
+    fn cose_sign1_accepts_tagged_and_untagged_sign1_arrays() {
+        let sign1 = CborValue::Array(vec![
+            CborValue::ByteString(vec![]),
+            CborValue::Map(vec![]),
+            CborValue::ByteString(vec![]),
+            CborValue::ByteString(vec![]),
+        ]);
+        let tagged = CborValue::Tagged {
+            tag: 18,
+            payload: Box::new(sign1.clone()),
+        };
+
+        assert_eq!(cose_sign1(&sign1).unwrap(), &sign1);
+        assert_eq!(cose_sign1(&tagged).unwrap(), &sign1);
+    }
+
+    #[test]
+    fn cose_sign1_rejects_non_sign1_documents() {
+        assert_eq!(
+            cose_sign1(&CborValue::Int(1)).unwrap_err(),
+            "expected tagged COSE_Sign1 envelope"
+        );
+        assert_eq!(
+            cose_sign1(&CborValue::Tagged {
+                tag: 17,
+                payload: Box::new(CborValue::Array(vec![])),
+            })
+            .unwrap_err(),
+            "expected tagged COSE_Sign1 envelope"
+        );
+    }
+
+    #[test]
+    fn validate_cose_sign1_requires_four_fields() {
+        let valid = CborValue::Array(vec![
+            CborValue::ByteString(vec![]),
+            CborValue::Map(vec![]),
+            CborValue::ByteString(vec![]),
+            CborValue::ByteString(vec![]),
+        ]);
+        let invalid = CborValue::Array(vec![CborValue::ByteString(vec![])]);
+
+        validate_cose_sign1(&valid).unwrap();
+        assert_eq!(
+            validate_cose_sign1(&invalid).unwrap_err(),
+            "COSE_Sign1 envelope must contain 4 items"
+        );
+    }
 
     fn key(
         spki: &[u8],
