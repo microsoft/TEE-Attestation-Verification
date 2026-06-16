@@ -41,7 +41,7 @@ mod wasm {
     /// `[vcek, ask, ark]`.
     #[wasm_bindgen]
     #[cfg(async_crypto)]
-    pub async fn verify_attestation_with_cert_chain_async(
+    pub async fn verify_snp_attestation_with_cert_chain_async(
         attestation_report: Vec<u8>,
         amd_endorsements: Array,
     ) -> Result<SnpAttestationReport, String> {
@@ -83,27 +83,31 @@ mod wasm {
     /// `minimum_tcb_json`, when non-empty, must be a JSON map from CPUID hex
     /// strings to TCB hex strings, for example `{ "00a10f11": "04000000000018db" }`.
     #[wasm_bindgen]
-    pub async fn verify_c_aci_attestation(
+    pub async fn verify_caci_attestation(
         attestation: &SnpAttestationReport,
         minimum_tcb_json: &str,
-        trusted_c_aci_policies: Array,
+        trusted_caci_execution_policies: Array,
         uvm: &WasmCborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<Vec<u8>, String> {
         let minimum_tcb = parse_minimum_tcb_json(minimum_tcb_json)?;
-        let trusted_c_aci_policies =
-            byte_array_values(trusted_c_aci_policies, "trusted CACI policy")?
-                .iter()
-                .map(|policy| parse_host_data_policy(policy))
-                .collect::<Result<Vec<_>, _>>()?;
-        if trusted_c_aci_policies.is_empty() {
-            return Err("at least one trusted CACI policy digest is required".to_string());
+        let trusted_caci_execution_policies = byte_array_values(
+            trusted_caci_execution_policies,
+            "trusted CACI execution policy",
+        )?
+        .iter()
+        .map(|policy| parse_host_data_policy(policy))
+        .collect::<Result<Vec<_>, _>>()?;
+        if trusted_caci_execution_policies.is_empty() {
+            return Err(
+                "at least one trusted CACI execution policy digest is required".to_string(),
+            );
         }
-        asynchronous::verify_c_aci_attestation(
+        asynchronous::verify_caci_attestation(
             *attestation.report(),
             minimum_tcb,
-            trusted_c_aci_policies,
+            trusted_caci_execution_policies,
             uvm.as_native().clone(),
             uvm_feed,
             minimum_svn,
@@ -158,7 +162,7 @@ mod wasm {
     fn parse_host_data_policy(bytes: &[u8]) -> Result<[u8; HOST_DATA_LEN], String> {
         bytes.try_into().map_err(|_| {
             format!(
-                "trusted CACI policy digest must be {HOST_DATA_LEN} bytes, got {}",
+                "trusted CACI execution policy digest must be {HOST_DATA_LEN} bytes, got {}",
                 bytes.len()
             )
         })

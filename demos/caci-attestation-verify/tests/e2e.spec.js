@@ -11,11 +11,11 @@ const FIXTURES = {
 
 const bytesToHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 
-test("Confidential CACI policy fixture verifies and returns report data", async ({ page, baseURL }) => {
+test("Confidential CACI execution policy fixture verifies and returns report data", async ({ page, baseURL }) => {
   await verifyFixture(page, baseURL, ({ reportedTcbHex }) => JSON.stringify({ "00a00f11": reportedTcbHex }));
 });
 
-test("Confidential CACI policy fixture verifies without minimum TCB policy", async ({ page, baseURL }) => {
+test("Confidential CACI execution policy fixture verifies without minimum TCB policy", async ({ page, baseURL }) => {
   await verifyFixture(page, baseURL, () => "");
 });
 
@@ -46,9 +46,20 @@ async function verifyFixture(page, baseURL, minimumTcbJson) {
   await page.locator('#caci-form button[type="submit"]').click();
 
   await expect(page.locator("#status")).toHaveClass("ok", { timeout: 30_000 });
-  await expect(page.locator("#status")).toHaveText("Confidential CACI policy verified.");
+  await expect(page.locator("#status")).toHaveText("Confidential CACI execution policy verified.");
   await expect(page.locator("#output")).toContainText("verified_report_data");
+  await expect(page.locator("#output")).toContainText("verified_snp_attestation");
+  await expect(page.locator("#output")).toContainText("verified_uvm_cose");
+  await expect(page.locator("#output")).toContainText("protected_headers");
+  await expect(page.locator("#output")).toContainText("unprotected_headers");
+  await expect(page.locator("#output")).toContainText("reference_info_payload");
   await expect(page.locator("#output")).toContainText(reportDataHex.slice(0, 32));
+  await expect(page.locator("#output")).toContainText(hostDataHex.slice(0, 32));
+  await expect(page.locator("#output")).toContainText("feed: ContainerPlat-AMD-UVM");
+  await expect(page.locator("#output")).toContainText("content_type: application/json");
+  await expect(page.locator("#output")).toContainText('"iss": "did:x509:0:sha256');
+  await expect(page.locator("#output")).toContainText("<empty>");
+  await expect(page.locator("#output")).toContainText("x-ms-sevsnpvm-guestsvn: 104");
 }
 
 test("manifest populates a good example", async ({ page }) => {

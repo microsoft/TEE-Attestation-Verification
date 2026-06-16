@@ -70,7 +70,7 @@ const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_c_aci_policy: [u8; HOST_DATA_LEN],
+/// #     trusted_caci_execution_policy: [u8; HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
 /// let report = tav::verify_attestation(
@@ -81,10 +81,10 @@ const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
 ///     aci_cose,
 ///     trusted_didx509,
 /// )?;
-/// let verified_report_data = tav::verify_c_aci_attestation(
+/// let verified_report_data = tav::verify_caci_attestation(
 ///     report,
 ///     vec![],
-///     vec![trusted_c_aci_policy],
+///     vec![trusted_caci_execution_policy],
 ///     uvm,
 ///     "ContainerPlat-AMD-UVM",
 ///     minimum_uvm_svn,
@@ -187,21 +187,21 @@ pub mod synchronous {
     /// calling this function, and [`verify_uvm_endorsement`] must be used to
     /// authenticate the UVM reference info and its did:x509 root.
     ///
-    /// `trusted_c_aci_policy` is the expected SHA-256 digest of the Confidential
+    /// `trusted_caci_execution_policy` is the expected SHA-256 digest of the Confidential
     /// ACI security policy loaded into `HOST_DATA`. The returned value is the
     /// verified `REPORT_DATA` from the SNP report.
-    pub fn verify_c_aci_attestation(
+    pub fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
-        verify_c_aci_attestation_impl(
+        verify_caci_attestation_impl(
             attestation,
             minimum_tcb,
-            trusted_c_aci_policy,
+            trusted_caci_execution_policy,
             uvm_endorsement,
             uvm_feed,
             minimum_svn,
@@ -223,7 +223,7 @@ pub mod synchronous {
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_c_aci_policy: [u8; HOST_DATA_LEN],
+/// #     trusted_caci_execution_policy: [u8; HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
 /// let report = tav::verify_attestation(
@@ -234,10 +234,10 @@ pub mod synchronous {
 ///     aci_cose,
 ///     trusted_didx509,
 /// ).await?;
-/// let verified_report_data = tav::verify_c_aci_attestation(
+/// let verified_report_data = tav::verify_caci_attestation(
 ///     report,
 ///     vec![],
-///     vec![trusted_c_aci_policy],
+///     vec![trusted_caci_execution_policy],
 ///     uvm,
 ///     "ContainerPlat-AMD-UVM",
 ///     minimum_uvm_svn,
@@ -279,7 +279,7 @@ pub mod asynchronous {
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
     /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
-    /// call [`verify_c_aci_attestation`] afterwards to bind the UVM
+    /// call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
     pub async fn verify_uvm_endorsement(
         aci_cose: &[u8],
@@ -348,21 +348,21 @@ pub mod asynchronous {
     /// calling this function, and [`verify_uvm_endorsement`] must be used to
     /// authenticate the UVM reference info and its did:x509 root.
     ///
-    /// `trusted_c_aci_policy` is the expected SHA-256 digest of the Confidential
+    /// `trusted_caci_execution_policy` is the expected SHA-256 digest of the Confidential
     /// ACI security policy loaded into `HOST_DATA`. The returned value is the
     /// verified `REPORT_DATA` from the SNP report.
-    pub async fn verify_c_aci_attestation(
+    pub async fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
-        verify_c_aci_attestation_impl(
+        verify_caci_attestation_impl(
             attestation,
             minimum_tcb,
-            trusted_c_aci_policy,
+            trusted_caci_execution_policy,
             uvm_endorsement,
             uvm_feed,
             minimum_svn,
@@ -370,10 +370,10 @@ pub mod asynchronous {
     }
 }
 
-fn verify_c_aci_attestation_impl(
+fn verify_caci_attestation_impl(
     attestation: AttestationReport,
     minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-    trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+    trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
     uvm_endorsement: CborValue,
     uvm_feed: &str,
     minimum_svn: u64,
@@ -498,7 +498,7 @@ fn verify_c_aci_attestation_impl(
         ));
     }
 
-    if !trusted_c_aci_policy.contains(&attestation.host_data) {
+    if !trusted_caci_execution_policy.contains(&attestation.host_data) {
         return Err(AciError::Policy(
             "SNP HOST_DATA does not match trusted policy".to_string(),
         ));

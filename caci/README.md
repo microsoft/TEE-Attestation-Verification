@@ -32,10 +32,10 @@ let caci_uvm_endorsement = tav::verify_uvm_endorsement(
 )?;
 let minimum_tcb: Vec<(snp::Cpuid, snp::report::TcbVersionRaw)> =
     vec![(container_cpuid, minimum_tcb_version)];
-let verified_report_data = tav::verify_c_aci_attestation(
+let verified_report_data = tav::verify_caci_attestation(
     report,
     minimum_tcb,
-    vec![trusted_c_aci_policy], // SHA-256 digest of the loaded security policy.
+    vec![trusted_caci_execution_policy], // SHA-256 digest of the loaded security policy.
     caci_uvm_endorsement,
     "ContainerPlat-AMD-UVM",
     minimum_uvm_svn,

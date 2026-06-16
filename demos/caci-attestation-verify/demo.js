@@ -3,8 +3,8 @@
 
 import init, {
   split_aci_certificate_bundle,
-  verify_attestation_with_cert_chain_async,
-  verify_c_aci_attestation,
+  verify_snp_attestation_with_cert_chain_async,
+  verify_caci_attestation,
   verify_uvm_endorsement_async,
 } from "./caci_pkg/tee_attestation_verification_caci.js";
 
@@ -118,7 +118,7 @@ async function loadExample() {
     document.getElementById("report-hex").value = attestationReportHex.trim();
     document.getElementById("amd-bundle-text").value = hostAmdCertBase64.trim();
     document.getElementById("uvm-text").value = uvmEndorsementBase64.trim();
-    document.getElementById("policy-hex").value = manifest.trusted_c_aci_policies.join("\n");
+    document.getElementById("policy-hex").value = manifest.trusted_caci_execution_policies.join("\n");
     document.getElementById("minimum-tcb-json").value =
       JSON.stringify(manifest.minimum_tcb, null, 2);
     document.getElementById("feed").value = manifest.uvm_feed;
@@ -156,6 +156,137 @@ function formatBytes(bytes) {
   return groups.join("\n  ");
 }
 
+function formatByteField(name, bytes) {
+  return `${name}:\n  ${formatBytes(bytes)}`;
+}
+
+function formatHex(value) {
+  return `0x${BigInt(value).toString(16)}`;
+}
+
+function cborInt(value) {
+  return String(value.int());
+}
+
+function cborText(value) {
+  return value.text();
+}
+
+function cborArrayOrSingleLength(value) {
+  return value.kind() === "array" ? value.len() : 1;
+}
+
+function cborTaggedEpochSeconds(value) {
+  if (value.kind() !== "tagged" || BigInt(value.tag()) !== 1n) {
+    throw new Error("signingtime must be CBOR tag 1");
+  }
+  return cborInt(value.tagged_payload());
+}
+
+function formatCborKey(value) {
+  switch (value.kind()) {
+    case "int":
+      return cborInt(value);
+    case "text":
+      return JSON.stringify(cborText(value));
+    default:
+      return `${value.kind()}(${formatCborValue(value)})`;
+  }
+}
+
+function formatCborValue(value) {
+  switch (value.kind()) {
+    case "int":
+      return cborInt(value);
+    case "simple":
+      return `simple(${value.simple()})`;
+    case "bytes":
+      return `h'${bytesToHex(value.bytes())}'`;
+    case "text":
+      return JSON.stringify(cborText(value));
+    case "array":
+      return `[${Array.from({ length: value.len() }, (_, i) => formatCborValue(value.array_at(i))).join(", ")}]`;
+    case "map":
+      return `{ ${formatCborMapEntries(value).join(", ")} }`;
+    case "tagged":
+      return `tag(${value.tag()}, ${formatCborValue(value.tagged_payload())})`;
+    default:
+      return `<unknown ${value.kind()}>`;
+  }
+}
+
+function formatCborMapEntries(value) {
+  if (value.kind() !== "map") {
+    throw new Error(`Expected map, got ${value.kind()}`);
+  }
+  return Array.from({ length: value.len() }, (_, i) => {
+    const key = value.map_key_at(i);
+    const mapValue = value.map_value_at(i);
+    return `${formatCborKey(key)}: ${formatCborValue(mapValue)}`;
+  });
+}
+
+function formatCborMapSection(title, value) {
+  const entries = formatCborMapEntries(value);
+  return [
+    `${title}:`,
+    ...(entries.length === 0 ? ["  <empty>"] : entries.map(entry => `  ${entry}`)),
+  ];
+}
+
+function referenceInfoFromCose(coseSign1) {
+  return JSON.parse(new TextDecoder().decode(coseSign1.payload()));
+}
+
+function formatVerificationDetails(attestation, uvm, reportData) {
+  const sign1 = uvm.as_cose_sign1();
+  const protectedHeader = sign1.protected_header();
+  const unprotectedHeader = sign1.unprotected();
+  const referenceInfo = referenceInfoFromCose(sign1);
+
+  return [
+    "verified_report_data:",
+    `  ${formatBytes(reportData)}`,
+    "",
+    "verified_snp_attestation:",
+    `  version: ${attestation.version}`,
+    `  guest_svn: ${attestation.guest_svn}`,
+    `  vmpl: ${attestation.vmpl}`,
+    `  policy: ${formatHex(attestation.policy)}`,
+    `  policy_abi: ${attestation.policy_abi_major}.${attestation.policy_abi_minor}`,
+    `  policy_debug: ${attestation.policy_debug}`,
+    `  signature_algo: ${attestation.signature_algo}`,
+    `  cpuid: fam=${attestation.cpuid_fam_id} mod=${attestation.cpuid_mod_id} step=${attestation.cpuid_step}`,
+    `  tcb_current: ${attestation.current_major}.${attestation.current_minor}.${attestation.current_build}`,
+    `  tcb_committed: ${attestation.committed_major}.${attestation.committed_minor}.${attestation.committed_build}`,
+    formatByteField("  reported_tcb", attestation.reported_tcb),
+    formatByteField("  launch_tcb", attestation.launch_tcb),
+    formatByteField("  measurement", attestation.measurement),
+    formatByteField("  host_data", attestation.host_data),
+    formatByteField("  report_data", attestation.report_data),
+    "",
+    "verified_uvm_cose:",
+    `  alg: ${cborInt(protectedHeader.map_at_int(1n))}`,
+    `  content_type: ${cborText(protectedHeader.map_at_int(3n))}`,
+    `  issuer: ${cborText(protectedHeader.map_at_text("iss"))}`,
+    `  feed: ${cborText(protectedHeader.map_at_text("feed"))}`,
+    `  signing_time_seconds: ${cborTaggedEpochSeconds(protectedHeader.map_at_text("signingtime"))}`,
+    `  x5chain_certificates: ${cborArrayOrSingleLength(protectedHeader.map_at_int(33n))}`,
+    "",
+    ...formatCborMapSection("protected_headers", protectedHeader),
+    "",
+    ...formatCborMapSection("unprotected_headers", unprotectedHeader),
+    "",
+    formatByteField("  protected", sign1.protected()),
+    formatByteField("  signature", sign1.signature()),
+    "",
+    "reference_info_payload:",
+    `  x-ms-sevsnpvm-guestsvn: ${referenceInfo["x-ms-sevsnpvm-guestsvn"]}`,
+    `  x-ms-sevsnpvm-guestsvn-int: ${referenceInfo["x-ms-sevsnpvm-guestsvn-int"]}`,
+    `  x-ms-sevsnpvm-launchmeasurement: ${referenceInfo["x-ms-sevsnpvm-launchmeasurement"]}`,
+  ].join("\n");
+}
+
 function requiredNonNegativeBigInt(textId, name) {
   const value = document.getElementById(textId).value.trim();
   if (!/^[0-9]+$/.test(value)) {
@@ -182,14 +313,14 @@ async function onSubmit(ev) {
     const minimumSvn = requiredNonNegativeBigInt("minimum-svn", "Minimum UVM SVN");
 
     setStatus("Verifying SEV-SNP attestation...");
-    const attestation = await verify_attestation_with_cert_chain_async(reportBytes, endorsements);
+    const attestation = await verify_snp_attestation_with_cert_chain_async(reportBytes, endorsements);
     setStatus("Verifying UVM endorsement...");
     const uvm = await verify_uvm_endorsement_async(
       uvmEndorsementBase64,
       "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2",
     );
-    setStatus("Verifying Confidential CACI policy...");
-    const reportData = await verify_c_aci_attestation(
+    setStatus("Verifying Confidential CACI execution policy...");
+    const reportData = await verify_caci_attestation(
       attestation,
       minimumTcbJson,
       policyDigests,
@@ -198,8 +329,8 @@ async function onSubmit(ev) {
       minimumSvn,
     );
 
-    setStatus("Confidential CACI policy verified.", "ok");
-    outputEl.textContent = `verified_report_data:\n  ${formatBytes(reportData)}`;
+    setStatus("Confidential CACI execution policy verified.", "ok");
+    outputEl.textContent = formatVerificationDetails(attestation, uvm, reportData);
   } catch (err) {
     console.error(err);
     const msg = err && err.message ? err.message : String(err);

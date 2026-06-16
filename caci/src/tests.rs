@@ -35,7 +35,7 @@ mod synchronous {
         let uvm = crate::synchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
             .unwrap();
 
-        let report_data = crate::synchronous::verify_c_aci_attestation(
+        let report_data = crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -140,7 +140,7 @@ mod synchronous {
         )
         .unwrap();
 
-        let report_data = crate::synchronous::verify_c_aci_attestation(
+        let report_data = crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -151,7 +151,7 @@ mod synchronous {
         .unwrap();
         assert_eq!(report_data, report.report_data);
 
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -167,7 +167,7 @@ mod synchronous {
 
         let mut policy = report.host_data;
         policy[0] ^= 1;
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![policy],
@@ -182,7 +182,7 @@ mod synchronous {
         }
 
         let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -201,7 +201,7 @@ mod synchronous {
         let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
         let mut minimum_tcb = report.reported_tcb;
         minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             vec![(matching_cpuid, minimum_tcb)],
             vec![report.host_data],
@@ -215,7 +215,7 @@ mod synchronous {
 
         let mut wrong_measurement = report;
         wrong_measurement.measurement[0] ^= 1;
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             wrong_measurement,
             Vec::new(),
             vec![wrong_measurement.host_data],
@@ -231,7 +231,7 @@ mod synchronous {
         }
 
         let debug_report = report_with_debug_enabled();
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             debug_report,
             Vec::new(),
             vec![debug_report.host_data],
@@ -246,7 +246,7 @@ mod synchronous {
         }
 
         let host_report = report_with_vmpl(4);
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             host_report,
             Vec::new(),
             vec![host_report.host_data],
@@ -262,7 +262,7 @@ mod synchronous {
 
         let missing_svn_int =
             replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -278,7 +278,7 @@ mod synchronous {
 
         let uppercase_measurement =
             replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
-        match crate::synchronous::verify_c_aci_attestation(
+        match crate::synchronous::verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -302,18 +302,18 @@ mod asynchronous {
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
 
-    async fn verify_c_aci_attestation(
+    async fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_c_aci_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
-        crate::asynchronous::verify_c_aci_attestation(
+        crate::asynchronous::verify_caci_attestation(
             attestation,
             minimum_tcb,
-            trusted_c_aci_policy,
+            trusted_caci_execution_policy,
             uvm_endorsement,
             uvm_feed,
             minimum_svn,
@@ -336,7 +336,7 @@ mod asynchronous {
             .await
             .unwrap();
 
-        let report_data = verify_c_aci_attestation(
+        let report_data = verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -453,7 +453,7 @@ mod asynchronous {
         .await
         .unwrap();
 
-        let report_data = verify_c_aci_attestation(
+        let report_data = verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -465,7 +465,7 @@ mod asynchronous {
         .unwrap();
         assert_eq!(report_data, report.report_data);
 
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -483,7 +483,7 @@ mod asynchronous {
 
         let mut policy = report.host_data;
         policy[0] ^= 1;
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             Vec::new(),
             vec![policy],
@@ -500,7 +500,7 @@ mod asynchronous {
         }
 
         let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -520,7 +520,7 @@ mod asynchronous {
         let matching_cpuid = snp::Cpuid::from(MILAN_CPUID);
         let mut minimum_tcb = report.reported_tcb;
         minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             vec![(matching_cpuid, minimum_tcb)],
             vec![report.host_data],
@@ -536,7 +536,7 @@ mod asynchronous {
 
         let mut wrong_measurement = report;
         wrong_measurement.measurement[0] ^= 1;
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             wrong_measurement,
             Vec::new(),
             vec![wrong_measurement.host_data],
@@ -554,7 +554,7 @@ mod asynchronous {
         }
 
         let debug_report = report_with_debug_enabled();
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             debug_report,
             Vec::new(),
             vec![debug_report.host_data],
@@ -571,7 +571,7 @@ mod asynchronous {
         }
 
         let host_report = report_with_vmpl(4);
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             host_report,
             Vec::new(),
             vec![host_report.host_data],
@@ -589,7 +589,7 @@ mod asynchronous {
 
         let missing_svn_int =
             replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -607,7 +607,7 @@ mod asynchronous {
 
         let uppercase_measurement =
             replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
-        match verify_c_aci_attestation(
+        match verify_caci_attestation(
             report,
             Vec::new(),
             vec![report.host_data],
