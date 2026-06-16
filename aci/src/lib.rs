@@ -14,7 +14,6 @@
 //!    measurement matches the attestation report measurement.
 //!
 
-mod base64;
 mod didx509;
 #[cfg(target_family = "wasm")]
 pub mod ffi;

@@ -3,10 +3,8 @@
 
 use super::*;
 
-use crate::{
-    base64::base64_standard_decode,
-    parse::{hex_to_bytes, ReferenceInfoPayload},
-};
+use crate::parse::{hex_to_bytes, ReferenceInfoPayload};
+use crypto::base64::base64_standard_decode;
 
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
 const REFERENCE_INFO_BASE64: &str = include_str!("../tests/fixtures/reference-info.base64");

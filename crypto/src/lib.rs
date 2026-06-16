@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+pub mod base64;
 mod x509_policy;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;

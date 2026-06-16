@@ -6,7 +6,8 @@ use crypto::AsyncCryptoBackend;
 #[cfg(sync_crypto)]
 use crypto::CryptoBackend;
 
-use crate::{base64::base64url_no_padding, AciError};
+use crate::AciError;
+use crypto::base64::base64_encode_no_padding;
 
 #[cfg(sync_crypto)]
 pub(crate) fn verify_didx509_root(
@@ -26,7 +27,7 @@ pub(crate) fn verify_didx509_root(
     let root = x5chain
         .last()
         .ok_or_else(|| AciError::Certificate("x5chain is empty".to_string()))?;
-    let actual_fingerprint = sha256_base64url_no_padding(root)?;
+    let actual_fingerprint = sha256_base64(root)?;
     verify_didx509_fingerprint(&trusted, &actual_fingerprint)
 }
 
@@ -48,7 +49,7 @@ pub(crate) async fn verify_didx509_root_async(
     let root = x5chain
         .last()
         .ok_or_else(|| AciError::Certificate("x5chain is empty".to_string()))?;
-    let actual_fingerprint = sha256_base64url_no_padding_async(root).await?;
+    let actual_fingerprint = sha256_base64_async(root).await?;
     verify_didx509_fingerprint(&trusted, &actual_fingerprint)
 }
 
@@ -57,9 +58,10 @@ fn verify_didx509_fingerprint(
     actual_fingerprint: &str,
 ) -> Result<(), AciError> {
     if actual_fingerprint != trusted.fingerprint {
-        return Err(AciError::DidX509(
-            "x5chain root certificate fingerprint does not match trusted DID".to_string(),
-        ));
+        return Err(AciError::DidX509(format!(
+            "x5chain root certificate fingerprint does not match trusted DID {}",
+            trusted.raw
+        )));
     }
 
     Ok(())
@@ -68,6 +70,7 @@ fn verify_didx509_fingerprint(
 pub(crate) struct ParsedDidX509Prefix<'a> {
     pub(crate) prefix: &'a str,
     pub(crate) fingerprint: &'a str,
+    pub(crate) raw: &'a str,
 }
 
 pub(crate) fn parse_didx509_prefix(did: &str) -> Result<ParsedDidX509Prefix<'_>, AciError> {
@@ -98,22 +101,23 @@ pub(crate) fn parse_didx509_prefix(did: &str) -> Result<ParsedDidX509Prefix<'_>,
     Ok(ParsedDidX509Prefix {
         prefix,
         fingerprint,
+        raw: did,
     })
 }
 
 #[cfg(sync_crypto)]
-pub(crate) fn sha256_base64url_no_padding(bytes: &[u8]) -> Result<String, AciError> {
+pub(crate) fn sha256_base64(bytes: &[u8]) -> Result<String, AciError> {
     let digest = <crypto::Crypto as CryptoBackend>::digest(crypto::DigestAlgorithm::Sha256, bytes)
         .map_err(|e| {
             AciError::DidX509(format!(
                 "failed to compute DID x509 SHA-256 fingerprint: {e}"
             ))
         })?;
-    Ok(base64url_no_padding(&digest))
+    Ok(base64_encode_no_padding(&digest))
 }
 
 #[cfg(async_crypto)]
-async fn sha256_base64url_no_padding_async(bytes: &[u8]) -> Result<String, AciError> {
+async fn sha256_base64_async(bytes: &[u8]) -> Result<String, AciError> {
     let digest =
         <crypto::Crypto as AsyncCryptoBackend>::digest(crypto::DigestAlgorithm::Sha256, bytes)
             .await
@@ -122,5 +126,5 @@ async fn sha256_base64url_no_padding_async(bytes: &[u8]) -> Result<String, AciEr
                     "failed to compute DID x509 SHA-256 fingerprint: {e}"
                 ))
             })?;
-    Ok(base64url_no_padding(&digest))
+    Ok(base64_encode_no_padding(&digest))
 }
