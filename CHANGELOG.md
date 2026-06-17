@@ -9,6 +9,7 @@
 - Add `tee-attestation-verification-cose`, a verification-only COSE_Sign1 crate backed by the shared crypto backends. (#56)
 - Add WASM64 build support for the COSE crate so it can continue using EverParse CBOR code that requires 64-bit `usize`. (#55)
 - Expose SNP CPU generation and add generation-aware TCB version comparisons. (#63)
+- Add `tee-attestation-verification-caci`, a high-level verification policy for CACI attestations and endorsements. (#62)
 
 ### Changed
 
