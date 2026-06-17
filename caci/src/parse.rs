@@ -7,7 +7,6 @@ use cose::CborValue;
 use crypto::CertificateBackend;
 
 // https://github.com/microsoft/confidential-aci-examples/blob/main/docs/Confidential_ACI_SCHEME.md#reference-info-base64
-pub(crate) const SIGNING_TIME: &str = "signingtime";
 pub(crate) fn parse_attestation(attestation: &[u8]) -> Result<AttestationReport, AciError> {
     AttestationReport::try_read_from_bytes(attestation)
         .map_err(|e| AciError::InvalidAttestation(format!("{e:?}")))
@@ -130,7 +129,7 @@ fn parse_certificate(cert: &[u8]) -> Result<crypto::Certificate, AciError> {
 pub(crate) fn parse_signing_time(value: &CborValue) -> Result<std::time::Duration, AciError> {
     match value {
         CborValue::Tagged { tag: 1, payload } => {
-            let signing_time = required_int(payload, SIGNING_TIME)?
+            let signing_time = required_int(payload, "signingtime")?
                 .try_into()
                 .map_err(|_| AciError::Cose("signingtime must be non-negative".to_string()))?;
             Ok(std::time::Duration::from_secs(signing_time))

@@ -9,6 +9,11 @@ use crypto::base64::base64_standard_decode;
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
 const REFERENCE_INFO_BASE64: &str = include_str!("../tests/fixtures/reference-info.base64");
 const REPORT_HEX: &str = include_str!("../tests/fixtures/report.hex");
+const HOST_AMD_CERT_SCITT_CWT_BASE64: &str =
+    include_str!("../tests/fixtures/host-amd-cert-scitt-cwt.base64");
+const REFERENCE_INFO_SCITT_CWT_BASE64: &str =
+    include_str!("../tests/fixtures/reference-info-scitt-cwt.base64");
+const REPORT_SCITT_CWT_HEX: &str = include_str!("../tests/fixtures/report-scitt-cwt.hex");
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
 const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
@@ -95,6 +100,10 @@ mod synchronous {
             .unwrap();
         assert_verified_uvm_matches_fixture(&uvm, expected_report);
 
+        let scitt_reference_info = decode_base64_fixture(REFERENCE_INFO_SCITT_CWT_BASE64);
+        crate::synchronous::verify_uvm_endorsement(&scitt_reference_info, TRUSTED_ACI_DIDX509)
+            .unwrap();
+
         match crate::synchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509) {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
@@ -131,9 +140,9 @@ mod synchronous {
     fn step3_policy_binding_works_and_rejects_invalid_inputs() {
         let attestation = attestation_fixture();
         let endorsements = amd_endorsement_fixture();
-        let endorsement_refs = endorsement_refs(&endorsements);
+        let legacy_endorsement_refs = endorsement_refs(&endorsements);
         let report =
-            crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
+            crate::synchronous::verify_attestation(&attestation, &legacy_endorsement_refs).unwrap();
         let uvm = crate::synchronous::verify_uvm_endorsement(
             &reference_info_fixture(),
             TRUSTED_ACI_DIDX509,
@@ -150,6 +159,44 @@ mod synchronous {
         )
         .unwrap();
         assert_eq!(report_data, report.report_data);
+
+        let transparent_attestation = transparent_attestation_fixture();
+        let transparent_endorsements = transparent_amd_endorsement_fixture();
+        let transparent_endorsement_refs = endorsement_refs(&transparent_endorsements);
+        let transparent_report = crate::synchronous::verify_attestation(
+            &transparent_attestation,
+            &transparent_endorsement_refs,
+        )
+        .unwrap();
+        let transparent_uvm = crate::synchronous::verify_uvm_endorsement(
+            &transparent_reference_info_fixture(),
+            TRUSTED_ACI_DIDX509,
+        )
+        .unwrap();
+        let report_data = crate::synchronous::verify_caci_attestation(
+            transparent_report,
+            Vec::new(),
+            vec![transparent_report.host_data],
+            transparent_uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .unwrap();
+        assert_eq!(report_data, transparent_report.report_data);
+
+        match crate::synchronous::verify_caci_attestation(
+            transparent_report,
+            Vec::new(),
+            vec![transparent_report.host_data],
+            transparent_uvm,
+            ACI_FEED,
+            ACI_SVN + 1,
+        ) {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "UVM SVN 104 is below trusted minimum 105")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
 
         match crate::synchronous::verify_caci_attestation(
             report,
@@ -399,6 +446,11 @@ mod asynchronous {
             .unwrap();
         assert_verified_uvm_matches_fixture(&uvm, expected_report);
 
+        let scitt_reference_info = decode_base64_fixture(REFERENCE_INFO_SCITT_CWT_BASE64);
+        crate::asynchronous::verify_uvm_endorsement(&scitt_reference_info, TRUSTED_ACI_DIDX509)
+            .await
+            .unwrap();
+
         match crate::asynchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509).await {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
@@ -442,10 +494,11 @@ mod asynchronous {
     async fn step3_policy_binding_works_and_rejects_invalid_inputs() {
         let attestation = attestation_fixture();
         let endorsements = amd_endorsement_fixture();
-        let endorsement_refs = endorsement_refs(&endorsements);
-        let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
-            .await
-            .unwrap();
+        let legacy_endorsement_refs = endorsement_refs(&endorsements);
+        let report =
+            crate::asynchronous::verify_attestation(&attestation, &legacy_endorsement_refs)
+                .await
+                .unwrap();
         let uvm = crate::asynchronous::verify_uvm_endorsement(
             &reference_info_fixture(),
             TRUSTED_ACI_DIDX509,
@@ -464,6 +517,49 @@ mod asynchronous {
         .await
         .unwrap();
         assert_eq!(report_data, report.report_data);
+
+        let transparent_attestation = transparent_attestation_fixture();
+        let transparent_endorsements = transparent_amd_endorsement_fixture();
+        let transparent_endorsement_refs = endorsement_refs(&transparent_endorsements);
+        let transparent_report = crate::asynchronous::verify_attestation(
+            &transparent_attestation,
+            &transparent_endorsement_refs,
+        )
+        .await
+        .unwrap();
+        let transparent_uvm = crate::asynchronous::verify_uvm_endorsement(
+            &transparent_reference_info_fixture(),
+            TRUSTED_ACI_DIDX509,
+        )
+        .await
+        .unwrap();
+        let report_data = verify_caci_attestation(
+            transparent_report,
+            Vec::new(),
+            vec![transparent_report.host_data],
+            transparent_uvm.clone(),
+            ACI_FEED,
+            ACI_SVN,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report_data, transparent_report.report_data);
+
+        match verify_caci_attestation(
+            transparent_report,
+            Vec::new(),
+            vec![transparent_report.host_data],
+            transparent_uvm,
+            ACI_FEED,
+            ACI_SVN + 1,
+        )
+        .await
+        {
+            Err(AciError::Policy(actual)) => {
+                assert_eq!(actual, "UVM SVN 104 is below trusted minimum 105")
+            }
+            other => panic!("expected Policy error, got {other:?}"),
+        }
 
         match verify_caci_attestation(
             report,
@@ -630,12 +726,24 @@ fn attestation_fixture() -> Vec<u8> {
     crypto::hex::from_hex(REPORT_HEX.trim()).unwrap()
 }
 
+fn transparent_attestation_fixture() -> Vec<u8> {
+    crypto::hex::from_hex(REPORT_SCITT_CWT_HEX.trim()).unwrap()
+}
+
 fn reference_info_fixture() -> Vec<u8> {
     decode_base64_fixture(REFERENCE_INFO_BASE64)
 }
 
+fn transparent_reference_info_fixture() -> Vec<u8> {
+    decode_base64_fixture(REFERENCE_INFO_SCITT_CWT_BASE64)
+}
+
 fn amd_endorsement_fixture() -> [Vec<u8>; 3] {
     endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_BASE64).unwrap()
+}
+
+fn transparent_amd_endorsement_fixture() -> [Vec<u8>; 3] {
+    endorsements_from_host_amd_cert_fixture(HOST_AMD_CERT_SCITT_CWT_BASE64).unwrap()
 }
 
 fn endorsement_refs(endorsements: &[Vec<u8>; 3]) -> [&[u8]; 3] {

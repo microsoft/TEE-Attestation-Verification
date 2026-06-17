@@ -11,11 +11,19 @@ const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 // RFC 9052, Section 4.2: tagged COSE_Sign1 is CBOR tag 18.
 const COSE_SIGN1_TAG: u64 = 18;
 
-// IANA COSE Header Parameters registry / RFC 9052, Section 3.1.
+// IANA COSE Header Parameters registry
+// https://www.iana.org/assignments/cose/cose.xhtml
 pub const COSE_HEADER_ALG: i64 = 1;
 pub const COSE_HEADER_CONTENT_TYPE: i64 = 3;
-// IANA COSE Header Parameters registry / RFC 9360, Section 2.
+pub const COSE_HEADER_CWT_CLAIMS: i64 = 15;
 pub const COSE_HEADER_X5CHAIN: i64 = 33;
+pub const COSE_HEADER_PREIMAGE_CONTENT_TYPE: i64 = 259;
+
+// IANA CWT Claims registry
+// https://www.iana.org/assignments/cwt/cwt.xhtml
+pub const CWT_CLAIMS_ISSUER: i64 = 1;
+pub const CWT_CLAIMS_SUBJECT: i64 = 2;
+pub const CWT_CLAIMS_IAT: i64 = 6;
 
 /// Return the COSE_Sign1 array from a tagged or untagged COSE_Sign1 document.
 pub fn cose_sign1(document: &CborValue) -> Result<&CborValue, String> {

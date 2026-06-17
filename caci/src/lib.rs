@@ -125,42 +125,101 @@ pub mod synchronous {
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
     /// chain root matches `trusted_didx509`.
     pub fn verify_uvm_endorsement(
-        aci_cose: &[u8],
+        uvm_endorsement: &[u8],
         trusted_didx509: &str,
     ) -> Result<CborValue, AciError> {
-        let parsed = CborValue::from_bytes(aci_cose).map_err(AciError::Cose)?;
+        let parsed = CborValue::from_bytes(uvm_endorsement).map_err(AciError::Cose)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
+        // sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
         let _unprotected = sign1.array_at(1).map_err(AciError::Cose)?;
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
+
         let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
         let x5chain = parse::parse_x5chain(
             protected_header
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
                 .map_err(AciError::Cose)?,
         )?;
-        let issuer = required_text(
-            protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-            "iss",
-        )?;
-
-        // Verify x5chain
-        verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
 
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        <crypto::Crypto as CryptoBackend>::verify_chain(
-            &root,
-            &intermediate_refs,
-            &leaf,
-            protected_header
-                .map_at_str(parse::SIGNING_TIME)
-                .ok()
-                .map(parse::parse_signing_time)
-                .transpose()?,
-        )
-        .map_err(|e| AciError::Certificate(e.to_string()))?;
+        let content_type = protected_header
+            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
+            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
+            .and_then(|value| required_text(value, "protected content type"))?;
+        match content_type.as_str() {
+            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
+            "application/json"
+                if protected_header.map_at_str("iss").is_ok()
+                    && protected_header.map_at_str("signingtime").is_ok() =>
+            {
+                let issuer = required_text(
+                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
+                    "iss",
+                )?;
+                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
+
+                let signing_time = protected_header
+                    .map_at_str("signingtime")
+                    .ok()
+                    .map(parse::parse_signing_time)
+                    .transpose()?;
+                <crypto::Crypto as CryptoBackend>::verify_chain(
+                    &root,
+                    &intermediate_refs,
+                    &leaf,
+                    signing_time,
+                )
+                .map_err(|e| AciError::Certificate(e.to_string()))?;
+            }
+            "application/octet-stream"
+                if protected_header
+                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                    .is_ok() =>
+            {
+                let cwt_claims = protected_header
+                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                    .map_err(AciError::Cose)?;
+                let issuer =
+                    required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_ISSUER).map_err(AciError::Cose)?, "CWT iss")?;
+                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
+
+                let signing_time = cwt_claims
+                    .map_at_int(cose::CWT_CLAIMS_IAT)
+                    .ok()
+                    .map(|iat| {
+                        let iat = match iat {
+                            CborValue::Tagged { tag: 1, payload } => {
+                                required_int(payload, "CWT iat")?
+                            }
+                            CborValue::Int(iat) => *iat,
+                            _ => {
+                                return Err(AciError::Cose("CWT iat must be a NumericDate".into()))
+                            }
+                        };
+                        let iat = iat
+                            .try_into()
+                            .map_err(|_| AciError::Cose("CWT iat must be non-negative".into()))?;
+                        Ok(std::time::Duration::from_secs(iat))
+                    })
+                    .transpose()?;
+                <crypto::Crypto as CryptoBackend>::verify_chain(
+                    &root,
+                    &intermediate_refs,
+                    &leaf,
+                    signing_time,
+                )
+                .map_err(|e| AciError::Certificate(e.to_string()))?;
+            }
+            other => {
+                return Err(AciError::Measurement(format!(
+                    "unsupported ACI payload content type {other}"
+                )));
+            }
+        }
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
@@ -282,10 +341,10 @@ pub mod asynchronous {
     /// call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
     pub async fn verify_uvm_endorsement(
-        aci_cose: &[u8],
+        uvm_endorsement: &[u8],
         trusted_didx509: &str,
     ) -> Result<CborValue, AciError> {
-        let parsed = CborValue::from_bytes(aci_cose).map_err(AciError::Cose)?;
+        let parsed = CborValue::from_bytes(uvm_endorsement).map_err(AciError::Cose)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
         let _unprotected = sign1.array_at(1).map_err(AciError::Cose)?;
@@ -297,28 +356,85 @@ pub mod asynchronous {
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
                 .map_err(AciError::Cose)?,
         )?;
-        let issuer = required_text(
-            protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-            "iss",
-        )?;
-
-        // Verify x5chain
-        verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
-
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-            &root,
-            &intermediate_refs,
-            &leaf,
-            protected_header
-                .map_at_str(parse::SIGNING_TIME)
-                .ok()
-                .map(parse::parse_signing_time)
-                .transpose()?,
-        )
-        .await
-        .map_err(|e| AciError::Certificate(e.to_string()))?;
+        let content_type = protected_header
+            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
+            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
+            .and_then(|value| required_text(value, "protected content type"))?;
+        match content_type.as_str() {
+            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
+            "application/json"
+                if protected_header.map_at_str("iss").is_ok()
+                    && protected_header.map_at_str("signingtime").is_ok() =>
+            {
+                let issuer = required_text(
+                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
+                    "iss",
+                )?;
+                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
+
+                let signing_time = protected_header
+                    .map_at_str("signingtime")
+                    .ok()
+                    .map(parse::parse_signing_time)
+                    .transpose()?;
+                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
+                    &root,
+                    &intermediate_refs,
+                    &leaf,
+                    signing_time,
+                )
+                .await
+                .map_err(|e| AciError::Certificate(e.to_string()))?;
+            }
+            "application/octet-stream"
+                if protected_header
+                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                    .is_ok() =>
+            {
+                let cwt_claims = protected_header
+                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                    .map_err(AciError::Cose)?;
+                let issuer =
+                    required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_ISSUER).map_err(AciError::Cose)?, "CWT iss")?;
+                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
+
+                let signing_time = cwt_claims
+                    .map_at_int(cose::CWT_CLAIMS_IAT)
+                    .ok()
+                    .map(|iat| {
+                        let iat = match iat {
+                            CborValue::Tagged { tag: 1, payload } => {
+                                required_int(payload, "CWT iat")?
+                            }
+                            CborValue::Int(iat) => *iat,
+                            _ => {
+                                return Err(AciError::Cose("CWT iat must be a NumericDate".into()))
+                            }
+                        };
+                        let iat = iat
+                            .try_into()
+                            .map_err(|_| AciError::Cose("CWT iat must be non-negative".into()))?;
+                        Ok(std::time::Duration::from_secs(iat))
+                    })
+                    .transpose()?;
+                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
+                    &root,
+                    &intermediate_refs,
+                    &leaf,
+                    signing_time,
+                )
+                .await
+                .map_err(|e| AciError::Certificate(e.to_string()))?;
+            }
+            other => {
+                return Err(AciError::Measurement(format!(
+                    "unsupported ACI payload content type {other}"
+                )));
+            }
+        }
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
@@ -435,67 +551,112 @@ fn verify_caci_attestation_impl(
     let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
     let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
 
-    // feed matches
-    let feed = protected_header
-        .map_at_str("feed")
-        .map_err(|err| AciError::Cose(format!("failed to get feed: {err}")))
-        .and_then(|value| required_text(value, "feed"))?;
-    if feed != uvm_feed {
-        return Err(AciError::Policy(format!(
-            "UVM feed {:?} does not match trusted feed {}",
-            feed, uvm_feed
-        )));
-    }
-
     let content_type = protected_header
         .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+        .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
         .map_err(|_| AciError::Cose("protected content type not found".to_string()))
         .and_then(|value| required_text(value, "protected content type"))?;
-    let reference_info = match content_type.as_str() {
-        "application/json" => {
+    match content_type.as_str() {
+        // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
+        "application/json" if protected_header.map_at_str("feed").is_ok() => {
+            // feed matches
+            let feed = protected_header
+                .map_at_str("feed")
+                .map_err(|err| AciError::Cose(format!("failed to get feed: {err}")))
+                .and_then(|value| required_text(value, "feed"))?;
+            if feed != uvm_feed {
+                return Err(AciError::Policy(format!(
+                    "UVM feed {:?} does not match trusted feed {}",
+                    feed, uvm_feed
+                )));
+            }
+
             let reference_info = serde_json::from_slice::<serde_json::Value>(&payload)
                 .map_err(|e| AciError::Measurement(e.to_string()))?;
             reference_info.as_object().ok_or_else(|| {
                 AciError::Measurement("ReferenceInfo payload must be a JSON object".into())
             })?;
-            reference_info
+
+            // svn matches
+            let svn = {
+                let svn = parse::json::required_str(&reference_info, JSON_GUEST_SVN)?;
+                if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(AciError::Policy(format!(
+                        "UVM SVN {svn:?} is not a non-negative integer"
+                    )));
+                }
+                let svn_int = parse::json::required_u64(&reference_info, JSON_GUEST_SVN_INT)?;
+                if svn_int.to_string() != svn {
+                    return Err(AciError::Measurement(format!(
+                        "{JSON_GUEST_SVN_INT} does not match {JSON_GUEST_SVN}"
+                    )));
+                }
+                svn.parse::<u64>()
+                    .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
+            }?;
+            if svn < minimum_svn {
+                return Err(AciError::Policy(format!(
+                    "UVM SVN {svn} is below trusted minimum {minimum_svn}"
+                )));
+            }
+
+            // measurement matches attestation
+            let reference_info_measurement = parse::json::required_hex::<MEASUREMENT_LEN>(
+                &reference_info,
+                JSON_LAUNCH_MEASUREMENT,
+            )?;
+            if reference_info_measurement != attestation.measurement {
+                return Err(AciError::Measurement(
+                    "ACI payload measurement does not match attestation measurement".to_string(),
+                ));
+            }
+        }
+        "application/octet-stream"
+            if protected_header
+                .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                .is_ok() =>
+        {
+            let cwt_claims = protected_header
+                .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                .map_err(AciError::Cose)?;
+            let feed = required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_SUBJECT).map_err(AciError::Cose)?, "CWT sub")?;
+            if feed != uvm_feed {
+                return Err(AciError::Policy(format!(
+                    "UVM feed {:?} does not match trusted feed {}",
+                    feed, uvm_feed
+                )));
+            }
+
+            let svn: u64 = required_int(
+                cwt_claims.map_at_str("svn").map_err(AciError::Cose)?,
+                "CWT svn",
+            )?
+            .try_into()
+            .map_err(|_| AciError::Policy("UVM SVN is not a non-negative integer".to_string()))?;
+            if svn < minimum_svn {
+                return Err(AciError::Policy(format!(
+                    "UVM SVN {svn} is below trusted minimum {minimum_svn}"
+                )));
+            }
+
+            let reference_info_measurement: [u8; MEASUREMENT_LEN] =
+                payload.try_into().map_err(|payload: Vec<u8>| {
+                    AciError::Measurement(format!(
+                        "ACI payload measurement must be {MEASUREMENT_LEN} bytes, got {}",
+                        payload.len()
+                    ))
+                })?;
+            if reference_info_measurement != attestation.measurement {
+                return Err(AciError::Measurement(
+                    "ACI payload measurement does not match attestation measurement".to_string(),
+                ));
+            }
         }
         other => {
             return Err(AciError::Measurement(format!(
                 "unsupported ACI payload content type {other}"
             )));
         }
-    };
-
-    // svn matches
-    let svn = {
-        let svn = parse::json::required_str(&reference_info, JSON_GUEST_SVN)?;
-        if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(AciError::Policy(format!(
-                "UVM SVN {svn:?} is not a non-negative integer"
-            )));
-        }
-        let svn_int = parse::json::required_u64(&reference_info, JSON_GUEST_SVN_INT)?;
-        if svn_int.to_string() != svn {
-            return Err(AciError::Measurement(format!(
-                "{JSON_GUEST_SVN_INT} does not match {JSON_GUEST_SVN}"
-            )));
-        }
-        svn.parse::<u64>()
-            .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
-    }?;
-    if svn < minimum_svn {
-        return Err(AciError::Policy(format!(
-            "UVM SVN {svn} is below trusted minimum {minimum_svn}"
-        )));
-    }
-    // measurement matches attestation
-    let reference_info_measurement =
-        parse::json::required_hex::<MEASUREMENT_LEN>(&reference_info, JSON_LAUNCH_MEASUREMENT)?;
-    if reference_info_measurement != attestation.measurement {
-        return Err(AciError::Measurement(
-            "ACI payload measurement does not match attestation measurement".to_string(),
-        ));
     }
 
     if !trusted_caci_execution_policy.contains(&attestation.host_data) {
