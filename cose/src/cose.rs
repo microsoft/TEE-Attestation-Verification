@@ -14,9 +14,9 @@ const COSE_SIGN1_TAG: u64 = 18;
 // IANA COSE Header Parameters registry
 // https://www.iana.org/assignments/cose/cose.xhtml
 pub const COSE_HEADER_ALG: i64 = 1;
-pub const COSE_HEADER_CONTENT_TYPE: i64 = 3;
 pub const COSE_HEADER_CWT_CLAIMS: i64 = 15;
 pub const COSE_HEADER_X5CHAIN: i64 = 33;
+pub const COSE_HEADER_CONTENT_TYPE: i64 = 3;
 pub const COSE_HEADER_PREIMAGE_CONTENT_TYPE: i64 = 259;
 
 // IANA CWT Claims registry

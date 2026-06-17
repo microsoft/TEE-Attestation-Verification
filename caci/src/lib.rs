@@ -183,8 +183,12 @@ pub mod synchronous {
                 let cwt_claims = protected_header
                     .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
                     .map_err(AciError::Cose)?;
-                let issuer =
-                    required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_ISSUER).map_err(AciError::Cose)?, "CWT iss")?;
+                let issuer = required_text(
+                    cwt_claims
+                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
+                        .map_err(AciError::Cose)?,
+                    "CWT iss",
+                )?;
                 verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
 
                 let signing_time = cwt_claims
@@ -397,8 +401,12 @@ pub mod asynchronous {
                 let cwt_claims = protected_header
                     .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
                     .map_err(AciError::Cose)?;
-                let issuer =
-                    required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_ISSUER).map_err(AciError::Cose)?, "CWT iss")?;
+                let issuer = required_text(
+                    cwt_claims
+                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
+                        .map_err(AciError::Cose)?,
+                    "CWT iss",
+                )?;
                 verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
 
                 let signing_time = cwt_claims
@@ -619,7 +627,12 @@ fn verify_caci_attestation_impl(
             let cwt_claims = protected_header
                 .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
                 .map_err(AciError::Cose)?;
-            let feed = required_text(cwt_claims.map_at_int(cose::CWT_CLAIMS_SUBJECT).map_err(AciError::Cose)?, "CWT sub")?;
+            let feed = required_text(
+                cwt_claims
+                    .map_at_int(cose::CWT_CLAIMS_SUBJECT)
+                    .map_err(AciError::Cose)?,
+                "CWT sub",
+            )?;
             if feed != uvm_feed {
                 return Err(AciError::Policy(format!(
                     "UVM feed {:?} does not match trusted feed {}",
