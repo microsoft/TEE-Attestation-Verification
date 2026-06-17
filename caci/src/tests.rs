@@ -366,7 +366,7 @@ mod synchronous {
         ) {
             Err(AciError::Measurement(actual)) => assert_eq!(
                 actual,
-                "x-ms-sevsnpvm-launchmeasurement must match ^[0-9a-f]+$"
+                "x-ms-sevsnpvm-launchmeasurement must be hex encoded"
             ),
             other => panic!("expected Measurement error, got {other:?}"),
         }
@@ -742,7 +742,7 @@ mod asynchronous {
         {
             Err(AciError::Measurement(actual)) => assert_eq!(
                 actual,
-                "x-ms-sevsnpvm-launchmeasurement must match ^[0-9a-f]+$"
+                "x-ms-sevsnpvm-launchmeasurement must be hex encoded"
             ),
             other => panic!("expected Measurement error, got {other:?}"),
         }

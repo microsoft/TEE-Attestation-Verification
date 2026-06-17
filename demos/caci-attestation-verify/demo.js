@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import init, {
-  split_aci_certificate_bundle,
+  split_pem_bundle,
   verify_snp_attestation_with_cert_chain_async,
   verify_caci_attestation,
   verify_uvm_endorsement_async,
@@ -140,7 +140,7 @@ function hostAmdCertToEndorsements(hostAmdCertBase64) {
   if (typeof hostAmdCert.certificateChain !== "string") {
     throw new Error("host AMD cert JSON missing string field certificateChain");
   }
-  const chain = Array.from(split_aci_certificate_bundle(hostAmdCert.certificateChain));
+  const chain = Array.from(split_pem_bundle(hostAmdCert.certificateChain));
   if (chain.length !== 2) {
     throw new Error(`expected certificateChain to contain ASK and ARK, got ${chain.length}`);
   }

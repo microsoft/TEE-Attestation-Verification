@@ -8,7 +8,7 @@ mod wasm {
     use std::collections::BTreeMap;
     use wasm_bindgen::{prelude::*, JsCast};
 
-    use crate::{asynchronous, AciError, HOST_DATA_LEN};
+    use crate::{asynchronous, AciError, SNP_HOST_DATA_LEN};
     use attestation::snp::{ffi::wasm::SnpAttestationReport, report::TcbVersionRaw, Cpuid};
     use crypto::{CertificateBackend, Crypto};
 
@@ -17,7 +17,7 @@ mod wasm {
     /// Parses the bundle with the active crypto backend and returns certificates
     /// in the same order they appeared in the input.
     #[wasm_bindgen]
-    pub fn split_aci_certificate_bundle(pem_bundle: &str) -> Result<Array, String> {
+    pub fn split_pem_bundle(pem_bundle: &str) -> Result<Array, String> {
         if pem_bundle.trim().is_empty() {
             return Err("Certificate bundle PEM is empty".into());
         }
@@ -159,10 +159,10 @@ mod wasm {
         Ok(TcbVersionRaw { raw })
     }
 
-    fn parse_host_data_policy(bytes: &[u8]) -> Result<[u8; HOST_DATA_LEN], String> {
+    fn parse_host_data_policy(bytes: &[u8]) -> Result<[u8; SNP_HOST_DATA_LEN], String> {
         bytes.try_into().map_err(|_| {
             format!(
-                "trusted CACI execution policy digest must be {HOST_DATA_LEN} bytes, got {}",
+                "trusted CACI execution policy digest must be {SNP_HOST_DATA_LEN} bytes, got {}",
                 bytes.len()
             )
         })

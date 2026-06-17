@@ -1,7 +1,11 @@
 use crate::cbor::{serialize_array, CborSlice, CborValue};
+#[cfg(async_crypto)]
+use crypto::AsyncCryptoBackend;
+#[cfg(sync_crypto)]
+use crypto::CryptoBackend;
 use crypto::{
-    compatible_key_and_signature, AsyncCryptoBackend, CryptoBackend, EcSignatureKeyAlgorithm,
-    RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
+    compatible_key_and_signature, EcSignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm,
+    SignatureBackend, SignatureKeyAlgorithm,
 };
 
 // COSE_Sign1 Sig_structure context string.
@@ -324,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_cose_sign1_requires_four_fields() {
+    fn cose_sign1_requires_four_fields() {
         let valid = CborValue::Array(vec![
             CborValue::ByteString(vec![]),
             CborValue::Map(vec![]),
@@ -333,10 +337,10 @@ mod tests {
         ]);
         let invalid = CborValue::Array(vec![CborValue::ByteString(vec![])]);
 
-        validate_cose_sign1(&valid).unwrap();
+        cose_sign1(&valid).unwrap();
         assert_eq!(
-            validate_cose_sign1(&invalid).unwrap_err(),
-            "COSE_Sign1 envelope must contain 4 items"
+            cose_sign1(&invalid).unwrap_err(),
+            "expected tagged COSE_Sign1 envelope"
         );
     }
 

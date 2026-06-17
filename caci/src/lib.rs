@@ -104,6 +104,12 @@ pub mod synchronous {
         amd_endorsements: &[&[u8]],
     ) -> Result<AttestationReport, AciError> {
         let report = parse_attestation(report)?;
+        if amd_endorsements.len() != attestation::snp::AMD_ENDORSEMENT_COUNT {
+            return Err(AciError::InvalidAmdEndorsements(format!(
+                "expected [vcek, ask, ark], got {} certificate(s)",
+                amd_endorsements.len()
+            )));
+        }
         let [vcek, ask, ark] = amd_endorsements
             .iter()
             .map(|cert| parse::parse_certificate(cert))
@@ -326,6 +332,12 @@ pub mod asynchronous {
     ) -> Result<AttestationReport, AciError> {
         let report = parse_attestation(report)?;
         let amd_endorsements: &[&[u8]] = amd_endorsements;
+        if amd_endorsements.len() != attestation::snp::AMD_ENDORSEMENT_COUNT {
+            return Err(AciError::InvalidAmdEndorsements(format!(
+                "expected [vcek, ask, ark], got {} certificate(s)",
+                amd_endorsements.len()
+            )));
+        }
         let [vcek, ask, ark] = amd_endorsements
             .iter()
             .map(|cert| parse::parse_certificate(cert))
