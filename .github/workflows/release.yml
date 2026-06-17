@@ -27,7 +27,6 @@ jobs:
       tag: ${{ steps.prepare.outputs.tag }}
       version: ${{ steps.prepare.outputs.version }}
       commit_sha: ${{ steps.prepare.outputs.commit_sha }}
-      crate_name: ${{ steps.prepare.outputs.crate_name }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -56,18 +55,19 @@ jobs:
 
           commit_sha=$(git rev-parse "refs/tags/${candidate_tag}^{commit}")
           normalized_version="${candidate_tag#tav-}"
-          manifest_name=$(git show "${commit_sha}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["name"])')
-          manifest_version=$(git show "${commit_sha}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["version"])')
 
-          if [[ "${manifest_version}" != "${normalized_version}" ]]; then
-            echo "Tag ${candidate_tag} does not match Cargo.toml version ${manifest_version}" >&2
-            exit 1
-          fi
+          for manifest in attestation/Cargo.toml caci/Cargo.toml; do
+            manifest_version=$(git show "${commit_sha}:${manifest}" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["version"])')
+
+            if [[ "${manifest_version}" != "${normalized_version}" ]]; then
+              echo "Tag ${candidate_tag} does not match ${manifest} version ${manifest_version}" >&2
+              exit 1
+            fi
+          done
 
           echo "tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
-          echo "version=${manifest_version}" >> "${GITHUB_OUTPUT}"
+          echo "version=${normalized_version}" >> "${GITHUB_OUTPUT}"
           echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
-          echo "crate_name=${manifest_name}" >> "${GITHUB_OUTPUT}"
 
   validate_release:
     name: Validate release
@@ -164,11 +164,10 @@ jobs:
         run: npm test
 
   package_wasm:
-    name: Package WASM artifact
+    name: Package WASM artifacts
     runs-on: ubuntu-latest
     needs: prepare_release
     env:
-      CRATE_NAME: ${{ needs.prepare_release.outputs.crate_name }}
       VERSION: ${{ needs.prepare_release.outputs.version }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -180,35 +179,67 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
+          rustup update nightly
+          rustup +nightly component add rust-src
 
       - name: Setup WASM tooling
         shell: bash
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.92 --locked
+          cargo install wasm-bindgen-cli --version 0.2.122 --locked
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build release WASM with WebCrypto crypto
+      - name: Build tav-attestation WASM bundle with WebCrypto crypto
         shell: bash
         working-directory: attestation
         run: |
           set -euo pipefail
-          wasm-pack build --target web --release --no-default-features --features "crypto_webcrypto"
 
-          mkdir -p dist
-          wasm_archive="${CRATE_NAME}-${VERSION}-wasm-webcrypto.tar.gz"
-          tar -C pkg -czf "dist/${wasm_archive}" .
+          mkdir -p ../dist/tav-attestation ../release-artifacts
+
+          wasm-pack build \
+            --target web \
+            --release \
+            --out-dir ../dist/tav-attestation \
+            --no-default-features \
+            --features "crypto_webcrypto"
+
+          tar -C ../dist -czf "../release-artifacts/tav-attestation-${VERSION}.tar.gz" tav-attestation
+
+      - name: Build tav-caci WASM bundle with WebCrypto crypto
+        shell: bash
+        working-directory: caci
+        run: |
+          set -euo pipefail
+
+          mkdir -p ../dist/tav-caci ../release-artifacts
+
+          cargo +nightly build -Z build-std=std,panic_abort \
+            --target wasm64-unknown-unknown \
+            --no-default-features \
+            --features "crypto_webcrypto" \
+            --release
+          wasm-bindgen --target web \
+            --out-dir ../dist/tav-caci \
+            ../target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
+
+          tar -C ../dist -czf "../release-artifacts/tav-caci-${VERSION}.tar.gz" tav-caci
+
+      - name: Generate release artifact checksums
+        shell: bash
+        run: |
+          set -euo pipefail
 
           (
-            cd dist
-            sha256sum "${wasm_archive}" > SHA256SUMS
+            cd release-artifacts
+            sha256sum tav-attestation-${VERSION}.tar.gz tav-caci-${VERSION}.tar.gz > SHA256SUMS
           )
 
       - name: Upload WASM release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-artifacts
-          path: attestation/dist/*
+          path: release-artifacts/*
 
   create_release:
     name: Create release
