@@ -383,11 +383,11 @@ mod asynchronous {
     async fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; SNP_HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
-    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+    ) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
         crate::asynchronous::verify_caci_attestation(
             attestation,
             minimum_tcb,
@@ -878,7 +878,7 @@ fn assert_verified_uvm_matches_fixture(
             ACI_SVN.to_string()
         );
         assert_eq!(
-            parse::json::required_hex::<MEASUREMENT_LEN>(
+            parse::json::required_hex::<SNP_MEASUREMENT_LEN>(
                 &payload,
                 "x-ms-sevsnpvm-launchmeasurement"
             )

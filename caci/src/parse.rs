@@ -85,14 +85,12 @@ pub(crate) mod json {
     ) -> Result<[u8; N], AciError> {
         let hex = required_str(object, key)?;
         if !is_lower_hex(hex) {
-            return Err(AciError::Measurement(format!(
-                "{key} must match ^[0-9a-f]+$"
-            )));
+            return Err(AciError::Measurement(format!("{key} must be hex encoded")));
         }
         let bytes = crypto::hex::from_hex(hex).map_err(AciError::Measurement)?;
-        bytes.try_into().map_err(|bytes: Vec<u8>| {
-            AciError::Measurement(format!("{key} must be {N} bytes, got {}", bytes.len()))
-        })
+        bytes
+            .try_into()
+            .map_err(|_| AciError::Measurement(format!("{key} must be a {N}-byte hex string")))
     }
 
     fn is_lower_hex(value: &str) -> bool {

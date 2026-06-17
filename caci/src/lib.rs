@@ -32,10 +32,7 @@ use crypto::{CryptoBackend, KeyBackend};
 use didx509::verify_didx509_root;
 #[cfg(async_crypto)]
 use didx509::verify_didx509_root_async;
-use parse::{
-    parse_amd_endorsements, parse_attestation, parse_x5chain_certs, required_bstr, required_int,
-    required_text,
-};
+use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
 
 pub use attestation::snp;
 pub use cose::CborValue;
@@ -46,11 +43,11 @@ const fn attestation_report_field_len<const N: usize>(
     N
 }
 
-const MEASUREMENT_LEN: usize = attestation_report_field_len(|report| &report.measurement);
+const SNP_MEASUREMENT_LEN: usize = attestation_report_field_len(|report| &report.measurement);
 /// Length of the SNP `HOST_DATA` field.
-pub const HOST_DATA_LEN: usize = attestation_report_field_len(|report| &report.host_data);
+pub const SNP_HOST_DATA_LEN: usize = attestation_report_field_len(|report| &report.host_data);
 /// Length of the SNP `REPORT_DATA` field.
-pub const REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &report.report_data);
+pub const SNP_REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &report.report_data);
 const MAX_GUEST_VMPL: u32 = 3;
 const JSON_LAUNCH_MEASUREMENT: &str = "x-ms-sevsnpvm-launchmeasurement";
 const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";
@@ -63,14 +60,14 @@ const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
 /// verification:
 ///
 /// ```no_run
-/// use tee_attestation_verification_caci::{synchronous as tav, HOST_DATA_LEN};
+/// use tee_attestation_verification_caci::{synchronous as tav, SNP_HOST_DATA_LEN};
 ///
 /// # fn example(
 /// #     attestation: &[u8],
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_caci_execution_policy: [u8; HOST_DATA_LEN],
+/// #     trusted_caci_execution_policy: [u8; SNP_HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
 /// let report = tav::verify_attestation(
@@ -256,16 +253,16 @@ pub mod synchronous {
     /// authenticate the UVM reference info and its did:x509 root.
     ///
     /// `trusted_caci_execution_policy` is the expected SHA-256 digest of the Confidential
-    /// ACI security policy loaded into `HOST_DATA`. The returned value is the
-    /// verified `REPORT_DATA` from the SNP report.
+    /// ACI security policy loaded into `SNP_HOST_DATA`. The returned value is the
+    /// verified `SNP_REPORT_DATA` from the SNP report.
     pub fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; SNP_HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
-    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+    ) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
         verify_caci_attestation_impl(
             attestation,
             minimum_tcb,
@@ -284,14 +281,14 @@ pub mod synchronous {
 /// WebCrypto:
 ///
 /// ```no_run
-/// use tee_attestation_verification_caci::{asynchronous as tav, HOST_DATA_LEN};
+/// use tee_attestation_verification_caci::{asynchronous as tav, SNP_HOST_DATA_LEN};
 ///
 /// # async fn example(
 /// #     attestation: &[u8],
 /// #     amd_endorsements: &[&[u8]],
 /// #     aci_cose: &[u8],
 /// #     trusted_didx509: &str,
-/// #     trusted_caci_execution_policy: [u8; HOST_DATA_LEN],
+/// #     trusted_caci_execution_policy: [u8; SNP_HOST_DATA_LEN],
 /// #     minimum_uvm_svn: u64,
 /// # ) -> Result<(), Box<dyn std::error::Error>> {
 /// let report = tav::verify_attestation(
@@ -483,16 +480,16 @@ pub mod asynchronous {
     /// authenticate the UVM reference info and its did:x509 root.
     ///
     /// `trusted_caci_execution_policy` is the expected SHA-256 digest of the Confidential
-    /// ACI security policy loaded into `HOST_DATA`. The returned value is the
-    /// verified `REPORT_DATA` from the SNP report.
+    /// ACI security policy loaded into `SNP_HOST_DATA`. The returned value is the
+    /// verified `SNP_REPORT_DATA` from the SNP report.
     pub async fn verify_caci_attestation(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-        trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
+        trusted_caci_execution_policy: Vec<[u8; SNP_HOST_DATA_LEN]>,
         uvm_endorsement: CborValue,
         uvm_feed: &str,
         minimum_svn: u64,
-    ) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+    ) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
         verify_caci_attestation_impl(
             attestation,
             minimum_tcb,
@@ -507,11 +504,11 @@ pub mod asynchronous {
 fn verify_caci_attestation_impl(
     attestation: AttestationReport,
     minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
-    trusted_caci_execution_policy: Vec<[u8; HOST_DATA_LEN]>,
+    trusted_caci_execution_policy: Vec<[u8; SNP_HOST_DATA_LEN]>,
     uvm_endorsement: CborValue,
     uvm_feed: &str,
     minimum_svn: u64,
-) -> Result<[u8; REPORT_DATA_LEN], AciError> {
+) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
     if attestation.policy().debug() {
         return Err(AciError::Policy(
             "SNP guest policy allows debug mode".to_string(),
@@ -619,7 +616,7 @@ fn verify_caci_attestation_impl(
             }
 
             // measurement matches attestation
-            let reference_info_measurement = parse::json::required_hex::<MEASUREMENT_LEN>(
+            let reference_info_measurement = parse::json::required_hex::<SNP_MEASUREMENT_LEN>(
                 &reference_info,
                 JSON_LAUNCH_MEASUREMENT,
             )?;
@@ -662,10 +659,10 @@ fn verify_caci_attestation_impl(
                 )));
             }
 
-            let reference_info_measurement: [u8; MEASUREMENT_LEN] =
+            let reference_info_measurement: [u8; SNP_MEASUREMENT_LEN] =
                 payload.try_into().map_err(|payload: Vec<u8>| {
                     AciError::Measurement(format!(
-                        "ACI payload measurement must be {MEASUREMENT_LEN} bytes, got {}",
+                        "ACI payload measurement must be {SNP_MEASUREMENT_LEN} bytes, got {}",
                         payload.len()
                     ))
                 })?;
