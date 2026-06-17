@@ -9,6 +9,24 @@ than loading its own WASM module.
 
 ## Build and run
 
+Use either a release bundle or a local build.
+
+### Option A: use a release bundle
+
+Download `tav-attestation-<version>.tar.gz` from the matching GitHub release,
+then extract it into the demo's expected `pkg/` directory:
+
+```sh
+cd demos/web-verify-kernel
+mkdir -p pkg
+tar -xzf /path/to/tav-attestation-<version>.tar.gz --strip-components=1 -C pkg
+python3 -m http.server 8000
+```
+
+Open <http://localhost:8000/> in a browser.
+
+### Option B: build from source
+
 1. From the repository root, build the WASM package with the WebCrypto
    backend, emitting `pkg/` directly inside this demo directory (which is
    what `index.html` imports via `./pkg/...`):

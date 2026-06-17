@@ -41,3 +41,22 @@ let verified_report_data = tav::verify_caci_attestation(
     minimum_uvm_svn,
 )?;
 ```
+
+## WASM
+
+Release tags use the `tav-<crate-version>` format.
+
+Releases include `tav-caci-<version>.tar.gz`, a WASM64 and JS wrapper tarball
+for direct consumption. Download and extract the matching GitHub release asset
+for your chosen tag and then import those in your project:
+
+```js
+import init, {
+  split_pem_bundle,
+  verify_snp_attestation_with_cert_chain_async,
+  verify_caci_attestation,
+  verify_uvm_endorsement_async,
+} from "./tav-caci/tee_attestation_verification_caci.js";
+
+await init();
+```

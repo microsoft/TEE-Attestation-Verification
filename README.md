@@ -15,14 +15,13 @@ and returning authenticated report claims to callers.
 | `cose/` | `tee-attestation-verification-cose` | COSE signing and verification helpers. |
 | `caci/` | `tee-attestation-verification-caci` | CACI UVM endorsement verification against SEV-SNP attestations and DID x509 roots of trust. |
 | `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, KDS support, C ABI, and WASM bindings. |
-| `demos/web-verify-kernel/` | n/a | Browser demo that exercises the WASM attestation bindings. |
+| `demos/web-verify-kernel/` | n/a | Browser demo verifying an SNP attestation using the WASM bindings. |
+| `demos/caci-attestation-verify/` | n/a | Browser demo verifying an SNP CACI attestation using the WASM bindings. |
 
 Read the crate-specific docs for API details:
 
 - [`attestation/README.md`](attestation/README.md)
 - [`caci/README.md`](caci/README.md)
-- [`crypto/README.md`](crypto/README.md)
-- [`demos/web-verify-kernel/README.md`](demos/web-verify-kernel/README.md)
 
 ## Crypto backend selection
 
