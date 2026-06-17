@@ -48,7 +48,18 @@ Release tags use the `tav-<crate-version>` format.
 
 Releases include `tav-caci-<version>.tar.gz`, a WASM64 and JS wrapper tarball
 for direct consumption. Download and extract the matching GitHub release asset
-for your chosen tag and then import those in your project:
+for your chosen tag into a directory served by your application:
+
+```sh
+mkdir -p public/vendor/tav-caci
+tar -xzf tav-caci-<version>.tar.gz --strip-components=1 -C public/vendor/tav-caci
+```
+
+Keep the generated `.js` and `.wasm` files together. By default, the JS wrapper
+loads `tee_attestation_verification_caci_bg.wasm` next to itself using
+`import.meta.url`.
+
+Import the generated JS wrapper from your application code:
 
 ```js
 import init, {
@@ -56,7 +67,7 @@ import init, {
   verify_snp_attestation_with_cert_chain_async,
   verify_caci_attestation,
   verify_uvm_endorsement_async,
-} from "./tav-caci/tee_attestation_verification_caci.js";
+} from "/vendor/tav-caci/tee_attestation_verification_caci.js";
 
 await init();
 ```
