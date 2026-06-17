@@ -60,21 +60,15 @@ pub(crate) mod json {
     ) -> Result<&'a str, AciError> {
         object
             .as_object()
-            .ok_or_else(|| {
-                AciError::Measurement("ReferenceInfo payload must be a JSON object".into())
-            })?
-            .get(key)
+            .and_then(|object| object.get(key))
             .and_then(|value| value.as_str())
-            .ok_or_else(|| AciError::Measurement(format!("ReferenceInfo payload missing {key}")))
+            .ok_or_else(|| AciError::Measurement(format!("{key} must be a JSON string")))
     }
 
     pub(crate) fn required_u64(object: &serde_json::Value, key: &str) -> Result<u64, AciError> {
         object
             .as_object()
-            .ok_or_else(|| {
-                AciError::Measurement("ReferenceInfo payload must be a JSON object".into())
-            })?
-            .get(key)
+            .and_then(|object| object.get(key))
             .and_then(|value| value.as_u64())
             .ok_or_else(|| AciError::Measurement(format!("{key} must be a JSON integer")))
     }
@@ -84,20 +78,17 @@ pub(crate) mod json {
         key: &str,
     ) -> Result<[u8; N], AciError> {
         let hex = required_str(object, key)?;
-        if !is_lower_hex(hex) {
+        if hex.is_empty()
+            || !hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(AciError::Measurement(format!("{key} must be hex encoded")));
         }
         let bytes = crypto::hex::from_hex(hex).map_err(AciError::Measurement)?;
         bytes
             .try_into()
             .map_err(|_| AciError::Measurement(format!("{key} must be a {N}-byte hex string")))
-    }
-
-    fn is_lower_hex(value: &str) -> bool {
-        !value.is_empty()
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     }
 }
 

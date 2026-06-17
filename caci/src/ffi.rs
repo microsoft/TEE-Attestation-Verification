@@ -82,6 +82,7 @@ mod wasm {
     ///
     /// `minimum_tcb_json`, when non-empty, must be a JSON map from CPUID hex
     /// strings to TCB hex strings, for example `{ "00a10f11": "04000000000018db" }`.
+    /// In the future this can be checked against a transparent statement from CACI.
     #[wasm_bindgen]
     pub async fn verify_caci_attestation(
         attestation: &SnpAttestationReport,

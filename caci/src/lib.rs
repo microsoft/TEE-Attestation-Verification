@@ -205,17 +205,15 @@ pub mod synchronous {
                     .map(|iat| {
                         let iat = match iat {
                             CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat")?
+                                required_int(payload, "CWT iat").map_err(|_| ())
                             }
-                            CborValue::Int(iat) => *iat,
-                            _ => {
-                                return Err(AciError::Cose("CWT iat must be a NumericDate".into()))
-                            }
-                        };
-                        let iat = iat
-                            .try_into()
-                            .map_err(|_| AciError::Cose("CWT iat must be non-negative".into()))?;
-                        Ok(std::time::Duration::from_secs(iat))
+                            CborValue::Int(iat) => Ok(*iat),
+                            _ => Err(()),
+                        }
+                        .and_then(|iat| iat.try_into().map_err(|_| ()))
+                        .map(std::time::Duration::from_secs)
+                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
+                        Ok(iat)
                     })
                     .transpose()?;
                 <crypto::Crypto as CryptoBackend>::verify_chain(
@@ -369,10 +367,12 @@ pub mod asynchronous {
     ) -> Result<CborValue, AciError> {
         let parsed = CborValue::from_bytes(uvm_endorsement).map_err(AciError::Cose)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
+        // Sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
         let _unprotected = sign1.array_at(1).map_err(AciError::Cose)?;
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
+
         let protected_header = CborValue::from_bytes(&protected).map_err(AciError::Cose)?;
         let x5chain = parse::parse_x5chain(
             protected_header
@@ -434,17 +434,15 @@ pub mod asynchronous {
                     .map(|iat| {
                         let iat = match iat {
                             CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat")?
+                                required_int(payload, "CWT iat").map_err(|_| ())
                             }
-                            CborValue::Int(iat) => *iat,
-                            _ => {
-                                return Err(AciError::Cose("CWT iat must be a NumericDate".into()))
-                            }
-                        };
-                        let iat = iat
-                            .try_into()
-                            .map_err(|_| AciError::Cose("CWT iat must be non-negative".into()))?;
-                        Ok(std::time::Duration::from_secs(iat))
+                            CborValue::Int(iat) => Ok(*iat),
+                            _ => Err(()),
+                        }
+                        .and_then(|iat| iat.try_into().map_err(|_| ()))
+                        .map(std::time::Duration::from_secs)
+                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
+                        Ok(iat)
                     })
                     .transpose()?;
                 <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
@@ -537,26 +535,14 @@ fn verify_caci_attestation_impl(
         let generation = attestation
             .cpu_generation()
             .map_err(|e| AciError::Policy(format!("Unsupported SNP CPU generation: {e}")))?;
-        let matching_minimum_tcb = minimum_tcb
-            .iter()
-            .map(|(cpuid, minimum_tcb)| {
-                Ok::<_, AciError>((
-                    Generation::from_cpuid(cpuid).map_err(|e| {
-                        AciError::Policy(format!("Unsupported minimum TCB CPUID {cpuid:?}: {e}"))
-                    })?,
-                    minimum_tcb,
-                ))
-            })
-            .find_map(|entry| match entry {
-                Ok((minimum_generation, minimum_tcb)) if minimum_generation == generation => {
-                    Some(Ok(minimum_tcb))
-                }
-                Ok(_) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .transpose()?;
 
-        if let Some(minimum_tcb) = matching_minimum_tcb {
+        for (cpuid, minimum_tcb) in &minimum_tcb {
+            let minimum_generation = Generation::from_cpuid(cpuid).map_err(|e| {
+                AciError::Policy(format!("Unsupported minimum TCB CPUID {cpuid:?}: {e}"))
+            })?;
+            if minimum_generation != generation {
+                continue;
+            }
             let minimum_tcb = TcbVersionForGeneration::new(*minimum_tcb, generation);
             let reported_tcb = TcbVersionForGeneration::new(attestation.reported_tcb, generation);
             if !(minimum_tcb <= reported_tcb) {
@@ -565,11 +551,6 @@ fn verify_caci_attestation_impl(
                     attestation.reported_tcb, generation, minimum_tcb.tcb
                 )));
             }
-        } else {
-            return Err(AciError::Policy(format!(
-                "Minimum TCB specified but no entry matches SNP CPU generation {}",
-                generation
-            )));
         }
     }
 
@@ -605,25 +586,16 @@ fn verify_caci_attestation_impl(
             })?;
 
             // svn matches
-            let svn = {
-                let svn = parse::json::required_str(&reference_info, JSON_GUEST_SVN)?;
-                if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
-                    return Err(AciError::Policy(format!(
-                        "UVM SVN {svn:?} is not a non-negative integer"
-                    )));
-                }
-                let svn_int = parse::json::required_u64(&reference_info, JSON_GUEST_SVN_INT)?;
-                if svn_int.to_string() != svn {
-                    return Err(AciError::Measurement(format!(
-                        "{JSON_GUEST_SVN_INT} does not match {JSON_GUEST_SVN}"
-                    )));
-                }
-                svn.parse::<u64>()
-                    .map_err(|e| AciError::Policy(format!("UVM SVN {svn:?} is out of range: {e}")))
-            }?;
-            if svn < minimum_svn {
+            let svn = parse::json::required_str(&reference_info, JSON_GUEST_SVN)?;
+            if svn.is_empty() || !svn.bytes().all(|byte| byte.is_ascii_digit()) {
                 return Err(AciError::Policy(format!(
-                    "UVM SVN {svn} is below trusted minimum {minimum_svn}"
+                    "UVM SVN {svn:?} is not a non-negative integer"
+                )));
+            }
+            let svn_int = parse::json::required_u64(&reference_info, JSON_GUEST_SVN_INT)?;
+            if svn_int < minimum_svn {
+                return Err(AciError::Policy(format!(
+                    "UVM SVN {svn_int} is below trusted minimum {minimum_svn}"
                 )));
             }
 
