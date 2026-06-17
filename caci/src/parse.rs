@@ -12,23 +12,6 @@ pub(crate) fn parse_attestation(attestation: &[u8]) -> Result<AttestationReport,
         .map_err(|e| AciError::InvalidAttestation(format!("{e:?}")))
 }
 
-pub(crate) fn parse_amd_endorsements(
-    amd_endorsements: &[&[u8]],
-) -> Result<[crypto::Certificate; attestation::snp::AMD_ENDORSEMENT_COUNT], AciError> {
-    if amd_endorsements.len() != attestation::snp::AMD_ENDORSEMENT_COUNT {
-        return Err(AciError::InvalidAmdEndorsements(format!(
-            "expected [vcek, ask, ark], got {} certificate(s)",
-            amd_endorsements.len()
-        )));
-    }
-
-    Ok([
-        parse_certificate(amd_endorsements[0])?,
-        parse_certificate(amd_endorsements[1])?,
-        parse_certificate(amd_endorsements[2])?,
-    ])
-}
-
 pub(crate) fn cose_payload(sign1: &CborValue) -> Result<Vec<u8>, AciError> {
     required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")
 }
@@ -120,7 +103,7 @@ pub(crate) mod json {
     }
 }
 
-fn parse_certificate(cert: &[u8]) -> Result<crypto::Certificate, AciError> {
+pub(crate) fn parse_certificate(cert: &[u8]) -> Result<crypto::Certificate, AciError> {
     crypto::Crypto::from_pem(cert)
         .or_else(|_| crypto::Crypto::from_der(cert))
         .map_err(|e| AciError::Certificate(e.to_string()))

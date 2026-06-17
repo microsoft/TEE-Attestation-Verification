@@ -107,7 +107,12 @@ pub mod synchronous {
         amd_endorsements: &[&[u8]],
     ) -> Result<AttestationReport, AciError> {
         let report = parse_attestation(report)?;
-        let [vcek, ask, ark] = parse_amd_endorsements(amd_endorsements)?;
+        let [vcek, ask, ark] = amd_endorsements
+            .iter()
+            .map(|cert| parse::parse_certificate(cert))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| AciError::InvalidAmdEndorsements("".to_string()))?;
         attestation::snp::verify::sync::verify_attestation(
             &report,
             &vcek,
@@ -324,7 +329,12 @@ pub mod asynchronous {
     ) -> Result<AttestationReport, AciError> {
         let report = parse_attestation(report)?;
         let amd_endorsements: &[&[u8]] = amd_endorsements;
-        let [vcek, ask, ark] = parse_amd_endorsements(amd_endorsements)?;
+        let [vcek, ask, ark] = amd_endorsements
+            .iter()
+            .map(|cert| parse::parse_certificate(cert))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| AciError::InvalidAmdEndorsements("".to_string()))?;
         attestation::snp::verify::asynchronous::verify_attestation(
             &report,
             &vcek,
