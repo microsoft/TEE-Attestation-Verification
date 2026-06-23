@@ -1,8 +1,8 @@
 # C FFI demo
 
-This demo builds the main Rust crate and links a C program against the public
-header in `include/tav/tav.h`. It links dynamically by default, or statically
-when configured with `-DTAV_LINK_STATIC=ON`.
+This Linux-only demo builds the main Rust crate and links a C program against
+the public header in `include/tav/tav.h`. It links dynamically by default, or
+statically when configured with `-DTAV_LINK_STATIC=ON`.
 
 Run these commands from this directory:
 

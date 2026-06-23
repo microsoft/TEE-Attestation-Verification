@@ -5,11 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#if defined(_WIN32) && !defined(TAV_STATIC)
-#define TAV_API __declspec(dllimport)
-#else
 #define TAV_API
-#endif
 
 #ifdef __cplusplus
 extern "C" {

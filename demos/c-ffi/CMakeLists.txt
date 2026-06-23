@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "The C FFI demo supports Linux only.")
+endif()
+
 option(TAV_LINK_STATIC "Link the demo against the Rust static library" OFF)
 
 get_filename_component(TAV_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
@@ -18,23 +22,8 @@ if(TAV_LINK_STATIC)
     set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
 else()
     set(TAV_RUST_LIBRARY_KIND SHARED)
-    if(WIN32)
-        set(TAV_RUST_LIBRARY_NAME "tee_attestation_verification_lib.dll")
-        set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
-        if(MSVC)
-            set(TAV_RUST_IMPORT_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/tee_attestation_verification_lib.dll.lib")
-        else()
-            set(TAV_RUST_IMPORT_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/libtee_attestation_verification_lib.dll.a")
-        endif()
-    elseif(APPLE)
-        set(TAV_RUST_LIBRARY_NAME "libtee_attestation_verification_lib.dylib")
-        set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
-        set(TAV_RUST_IMPORT_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${TAV_RUST_LIBRARY_NAME}")
-    else()
-        set(TAV_RUST_LIBRARY_NAME "libtee_attestation_verification_lib.so")
-        set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
-        set(TAV_RUST_IMPORT_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${TAV_RUST_LIBRARY_NAME}")
-    endif()
+    set(TAV_RUST_LIBRARY_NAME "libtee_attestation_verification_lib.so")
+    set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
 endif()
 set(TAV_DEMO_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${TAV_RUST_LIBRARY_NAME}")
 
@@ -57,33 +46,18 @@ add_dependencies(tav tav_c_abi)
 set_target_properties(tav PROPERTIES
     IMPORTED_LOCATION "${TAV_DEMO_LIBRARY}")
 
-if(DEFINED TAV_RUST_IMPORT_LIBRARY)
-    set_target_properties(tav PROPERTIES
-        IMPORTED_IMPLIB "${TAV_RUST_IMPORT_LIBRARY}")
-endif()
-
 if(TAV_LINK_STATIC)
     find_package(OpenSSL REQUIRED)
+    find_package(Threads REQUIRED)
     set_property(TARGET tav APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        OpenSSL::SSL OpenSSL::Crypto)
-
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        find_package(Threads REQUIRED)
-        set_property(TARGET tav APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-            Threads::Threads ${CMAKE_DL_LIBS} m)
-    endif()
+        OpenSSL::SSL OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
 add_executable(tav-c-ffi-demo demo.c)
 target_include_directories(tav-c-ffi-demo PRIVATE "${TAV_REPO_ROOT}/include")
 target_compile_definitions(tav-c-ffi-demo PRIVATE TAV_REPO_ROOT="${TAV_REPO_ROOT}")
 target_link_libraries(tav-c-ffi-demo PRIVATE tav)
-
-if(MSVC)
-    target_compile_options(tav-c-ffi-demo PRIVATE /W4 /WX)
-else()
-    target_compile_options(tav-c-ffi-demo PRIVATE -Wall -Wextra -Werror)
-endif()
+target_compile_options(tav-c-ffi-demo PRIVATE -Wall -Wextra -Werror)
 
 if(NOT TAV_LINK_STATIC)
     add_custom_command(
@@ -95,13 +69,7 @@ if(NOT TAV_LINK_STATIC)
         VERBATIM)
 endif()
 
-if(TAV_LINK_STATIC)
-    # Static mode has no runtime library search path to configure.
-elseif(APPLE)
-    set_target_properties(tav-c-ffi-demo PROPERTIES
-        BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "@loader_path")
-elseif(UNIX)
+if(NOT TAV_LINK_STATIC)
     set_target_properties(tav-c-ffi-demo PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "$ORIGIN")
