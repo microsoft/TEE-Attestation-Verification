@@ -1,5 +1,4 @@
-#ifndef TAV_TAV_H
-#define TAV_TAV_H
+#pragma once
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -9,7 +8,6 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif
 
 /*
  * C ABI for caller-provided-certificate SNP attestation verification.
