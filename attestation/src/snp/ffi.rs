@@ -7,10 +7,8 @@
 //! verification failures in a form suitable for non-Rust callers.
 //! Target-specific bindings live under submodules; the `wasm` submodule is
 //! compiled only for WASM targets and exposes the caller-provided-certificate
-//! WebAssembly API.
-//!
-//! A sync `verify_attestation` for C FFI consumers will be added alongside the
-//! C FFI bindings.
+//! WebAssembly API. The `c` submodule is compiled for native targets and exports
+//! the C ABI declared in `include/tav/tav.h`.
 
 use crate::snp::verify::VerificationError;
 
@@ -24,15 +22,19 @@ use wasm_bindgen::prelude::*;
 /// Error categories for verification failures.
 ///
 /// The numbering convention is stable and intended to match the C FFI
-/// `TAVErrorCode` values when that surface is added:
+/// `TAVErrorCode` values:
 /// - 1: input parsing / validation
+/// - 2: null error handle passed to an error accessor
 /// - 101–105: attestation verification (mapped from [`VerificationError`])
 #[cfg_attr(target_family = "wasm", wasm_bindgen)]
-#[repr(u32)]
+#[cfg_attr(target_family = "wasm", repr(u32))]
+#[cfg_attr(not(target_family = "wasm"), repr(C))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
     /// Input bytes or certificate text could not be parsed.
     InvalidArgument = 1,
+    /// A null `TavError` pointer was passed to a C error accessor.
+    ErrorCodeIsNull = 2,
     /// The report's processor family/model is not supported.
     UnsupportedProcessor = 101,
     /// The selected or provided ARK certificate is not a valid trusted root.
@@ -158,6 +160,510 @@ mod tests {
         let err = VerifyError::from(VerificationError::CertificateChainError("broken".into()));
 
         assert_eq!(err.to_string(), "Certificate chain error: broken");
+    }
+
+    #[test]
+    fn c_header_error_codes_match_rust_error_codes() {
+        let header = include_str!("../../../include/tav/tav.h");
+
+        assert_eq!(c_header_error_code(header, "TAV_ERROR_OK"), Some(0));
+
+        let expected = [
+            (
+                "TAV_ERROR_INVALID_ARGUMENT",
+                ErrorCode::InvalidArgument as i32,
+            ),
+            (
+                "TAV_ERROR_ERROR_CODE_IS_NULL",
+                ErrorCode::ErrorCodeIsNull as i32,
+            ),
+            (
+                "TAV_ERROR_UNSUPPORTED_PROCESSOR",
+                ErrorCode::UnsupportedProcessor as i32,
+            ),
+            (
+                "TAV_ERROR_INVALID_ROOT_CERTIFICATE",
+                ErrorCode::InvalidRootCertificate as i32,
+            ),
+            (
+                "TAV_ERROR_CERTIFICATE_CHAIN_ERROR",
+                ErrorCode::CertificateChainError as i32,
+            ),
+            (
+                "TAV_ERROR_SIGNATURE_VERIFICATION_ERROR",
+                ErrorCode::SignatureVerificationError as i32,
+            ),
+            (
+                "TAV_ERROR_TCB_VERIFICATION_ERROR",
+                ErrorCode::TcbVerificationError as i32,
+            ),
+        ];
+
+        for (name, rust_value) in expected {
+            assert_eq!(
+                c_header_error_code(header, name),
+                Some(rust_value),
+                "{name} in include/tav/tav.h must match Rust ErrorCode"
+            );
+        }
+    }
+
+    fn c_header_error_code(header: &str, name: &str) -> Option<i32> {
+        let line = header
+            .lines()
+            .find(|line| line.trim_start().starts_with(name))?;
+        let (_, value) = line.split_once('=')?;
+        value.trim().trim_end_matches(',').parse().ok()
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub mod c {
+    //! C ABI bindings for caller-provided-certificate SNP attestation verification.
+    //!
+    //! This module exports the symbols declared in `include/tav/tav.h`.
+    //!
+    //! [`tav_snp_verify_attestation`] returns a null [`TavError`] pointer on
+    //! success and an owned [`TavError`] pointer on failure. On success it
+    //! writes an owned [`TAVSnpAttestationReport`] handle to `out_report`.
+    //! Callers release these handles with [`tav_error_free`] and
+    //! [`tav_snp_attestation_report_free`].
+    //!
+    //! Report accessors assume their pointers are valid handles
+    //! returned by this library. Passing null, dangling, freed, or otherwise
+    //! invalid pointers to report accessors is undefined behavior. Error
+    //! accessors are defensive for null pointers: [`tav_error_code`] returns
+    //! [`ErrorCode::ErrorCodeIsNull`] and [`tav_error_message`] returns a static
+    //! diagnostic string. Freeing a null report or error pointer is a no-op.
+    //!
+    //! Byte-slice report accessors return borrowed views by writing a pointer
+    //! and length to caller-provided out-parameters. The borrowed pointer remains
+    //! valid only until the owning report handle is freed, and must not be freed
+    //! by the caller.
+
+    use std::ffi::CString;
+    use std::os::raw::c_char;
+    use std::ptr;
+
+    use zerocopy::FromBytes;
+
+    use super::{ErrorCode, VerifyError};
+    use crate::snp::verify::{self, ChainVerification};
+    use crate::{certificate_from_pem, AttestationReport};
+
+    const MAX_VERIFY_INPUT_LEN: usize = 1024 * 1024 * 1024;
+    const NULL_ERROR_MESSAGE: &[u8] = b"null TAVError pointer\0";
+
+    pub struct TAVSnpAttestationReport {
+        bytes: Vec<u8>,
+    }
+
+    pub struct TavError {
+        code: ErrorCode,
+        message: CString,
+    }
+
+    impl TavError {
+        fn invalid_argument(message: impl Into<String>) -> Self {
+            VerifyError::invalid_argument(message.into()).into()
+        }
+    }
+
+    impl From<VerifyError> for TavError {
+        fn from(value: VerifyError) -> Self {
+            Self {
+                code: value.code(),
+                message: c_string(value.message()),
+            }
+        }
+    }
+
+    impl TAVSnpAttestationReport {
+        fn report(&self) -> &AttestationReport {
+            AttestationReport::ref_from_bytes(&self.bytes).expect(
+                "TAVSnpAttestationReport is only constructed from verified bytes so parsing should not fail",
+            )
+        }
+    }
+
+    fn c_string(message: String) -> CString {
+        CString::new(message.replace('\0', "\\0")).expect("NUL bytes were replaced")
+    }
+
+    macro_rules! scalar_accessor {
+        ($name:ident, $return_ty:ty, |$report:ident| $value:expr) => {
+            #[no_mangle]
+            pub unsafe extern "C" fn $name(report: *const TAVSnpAttestationReport) -> $return_ty {
+                let report = unsafe { &*report };
+                let $report = report.report();
+                $value
+            }
+        };
+    }
+
+    macro_rules! bytes_accessor {
+        ($name:ident, |$report:ident| $value:expr) => {
+            #[no_mangle]
+            pub unsafe extern "C" fn $name(
+                report: *const TAVSnpAttestationReport,
+                data: *mut *const u8,
+                len: *mut usize,
+            ) {
+                let report = unsafe { &*report };
+                let $report = report.report();
+                let bytes = $value;
+                unsafe {
+                    *data = bytes.as_ptr();
+                    *len = bytes.len();
+                }
+            }
+        };
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_snp_verify_attestation(
+        report_bytes: *const u8,
+        report_len: usize,
+        ark_pem: *const u8,
+        ark_pem_len: usize,
+        ask_pem: *const u8,
+        ask_pem_len: usize,
+        vcek_pem: *const u8,
+        vcek_pem_len: usize,
+        out_report: *mut *mut TAVSnpAttestationReport,
+    ) -> *mut TavError {
+        let result = (|| -> Result<TAVSnpAttestationReport, TavError> {
+            if out_report.is_null() {
+                return Err(TavError::invalid_argument("out_report pointer is null"));
+            }
+            if unsafe { !(*out_report).is_null() } {
+                return Err(TavError::invalid_argument(
+                    "out_report must point to NULL before verification",
+                ));
+            }
+
+            if report_bytes.is_null() {
+                return Err(TavError::invalid_argument(
+                    "attestation report pointer is null",
+                ));
+            }
+            if report_len == 0 {
+                return Err(TavError::invalid_argument("attestation report is empty"));
+            }
+            if report_len > MAX_VERIFY_INPUT_LEN {
+                return Err(TavError::invalid_argument(
+                    "attestation report exceeds maximum input size",
+                ));
+            }
+            let report_bytes = unsafe { std::slice::from_raw_parts(report_bytes, report_len) };
+            let report = AttestationReport::ref_from_bytes(report_bytes).map_err(|_| {
+                TavError::invalid_argument(format!(
+                    "Invalid attestation report: expected {} bytes, got {}",
+                    std::mem::size_of::<AttestationReport>(),
+                    report_len
+                ))
+            })?;
+
+            if ark_pem.is_null() {
+                return Err(TavError::invalid_argument("ARK pointer is null"));
+            }
+            if ark_pem_len == 0 {
+                return Err(TavError::invalid_argument("ARK is empty"));
+            }
+            if ark_pem_len > MAX_VERIFY_INPUT_LEN {
+                return Err(TavError::invalid_argument("ARK exceeds maximum input size"));
+            }
+            let ark_pem = unsafe { std::slice::from_raw_parts(ark_pem, ark_pem_len) };
+            let ark = certificate_from_pem(ark_pem).map_err(|error| {
+                TavError::invalid_argument(format!("Failed to parse ARK PEM: {error}"))
+            })?;
+
+            if ask_pem.is_null() {
+                return Err(TavError::invalid_argument("ASK pointer is null"));
+            }
+            if ask_pem_len == 0 {
+                return Err(TavError::invalid_argument("ASK is empty"));
+            }
+            if ask_pem_len > MAX_VERIFY_INPUT_LEN {
+                return Err(TavError::invalid_argument("ASK exceeds maximum input size"));
+            }
+            let ask_pem = unsafe { std::slice::from_raw_parts(ask_pem, ask_pem_len) };
+            let ask = certificate_from_pem(ask_pem).map_err(|error| {
+                TavError::invalid_argument(format!("Failed to parse ASK PEM: {error}"))
+            })?;
+
+            if vcek_pem.is_null() {
+                return Err(TavError::invalid_argument("VCEK pointer is null"));
+            }
+            if vcek_pem_len == 0 {
+                return Err(TavError::invalid_argument("VCEK is empty"));
+            }
+            if vcek_pem_len > MAX_VERIFY_INPUT_LEN {
+                return Err(TavError::invalid_argument(
+                    "VCEK exceeds maximum input size",
+                ));
+            }
+            let vcek_pem = unsafe { std::slice::from_raw_parts(vcek_pem, vcek_pem_len) };
+            let vcek = certificate_from_pem(vcek_pem).map_err(|error| {
+                TavError::invalid_argument(format!("Failed to parse VCEK PEM: {error}"))
+            })?;
+
+            verify::sync::verify_attestation(
+                report,
+                &vcek,
+                &ChainVerification::WithProvidedArk {
+                    ask: &ask,
+                    ark: &ark,
+                },
+            )
+            .map_err(VerifyError::from)
+            .map_err(TavError::from)?;
+
+            Ok(TAVSnpAttestationReport {
+                bytes: report_bytes.to_vec(),
+            })
+        })();
+
+        match result {
+            Ok(report) => {
+                unsafe {
+                    *out_report = Box::into_raw(Box::new(report));
+                }
+                ptr::null_mut()
+            }
+            Err(error) => Box::into_raw(Box::new(error)),
+        }
+    }
+
+    scalar_accessor!(tav_snp_attestation_report_version, u32, |report| report
+        .version
+        .get());
+    scalar_accessor!(tav_snp_attestation_report_guest_svn, u32, |report| report
+        .guest_svn
+        .get());
+    scalar_accessor!(tav_snp_attestation_report_policy, u64, |report| report
+        .policy
+        .get());
+    scalar_accessor!(tav_snp_attestation_report_policy_abi_minor, u8, |report| {
+        report.policy().abi_minor()
+    });
+    scalar_accessor!(tav_snp_attestation_report_policy_abi_major, u8, |report| {
+        report.policy().abi_major()
+    });
+    scalar_accessor!(tav_snp_attestation_report_policy_smt, bool, |report| report
+        .policy()
+        .smt());
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_migrate_ma,
+        bool,
+        |report| report.policy().migrate_ma()
+    );
+    scalar_accessor!(tav_snp_attestation_report_policy_debug, bool, |report| {
+        report.policy().debug()
+    });
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_single_socket,
+        bool,
+        |report| report.policy().single_socket()
+    );
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_cxl_allow,
+        bool,
+        |report| report.policy().cxl_allow()
+    );
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_mem_aes_256_xts,
+        bool,
+        |report| report.policy().mem_aes_256_xts()
+    );
+    scalar_accessor!(tav_snp_attestation_report_policy_rapl_dis, bool, |report| {
+        report.policy().rapl_dis()
+    });
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_ciphertext_hiding_dram,
+        bool,
+        |report| report.policy().ciphertext_hiding_dram()
+    );
+    scalar_accessor!(
+        tav_snp_attestation_report_policy_page_swap_disable,
+        bool,
+        |report| report.policy().page_swap_disable()
+    );
+    scalar_accessor!(tav_snp_attestation_report_vmpl, u32, |report| report
+        .vmpl
+        .get());
+    scalar_accessor!(tav_snp_attestation_report_signature_algo, u32, |report| {
+        report.signature_algo.get()
+    });
+    scalar_accessor!(tav_snp_attestation_report_platform_info, u64, |report| {
+        report.platform_info.get()
+    });
+    scalar_accessor!(tav_snp_attestation_report_flags, u32, |report| report
+        .flags
+        .get());
+    scalar_accessor!(
+        tav_snp_attestation_report_flags_author_key_en,
+        bool,
+        |report| report.flags().author_key_en()
+    );
+    scalar_accessor!(
+        tav_snp_attestation_report_flags_mask_chip_key,
+        bool,
+        |report| report.flags().mask_chip_key()
+    );
+    scalar_accessor!(tav_snp_attestation_report_flags_signing_key, u8, |report| {
+        report.flags().signing_key().raw()
+    });
+    scalar_accessor!(tav_snp_attestation_report_cpuid_fam_id, u8, |report| report
+        .cpuid_fam_id);
+    scalar_accessor!(tav_snp_attestation_report_cpuid_mod_id, u8, |report| report
+        .cpuid_mod_id);
+    scalar_accessor!(tav_snp_attestation_report_cpuid_step, u8, |report| report
+        .cpuid_step);
+    scalar_accessor!(tav_snp_attestation_report_current_build, u8, |report| {
+        report.current_build
+    });
+    scalar_accessor!(tav_snp_attestation_report_current_minor, u8, |report| {
+        report.current_minor
+    });
+    scalar_accessor!(tav_snp_attestation_report_current_major, u8, |report| {
+        report.current_major
+    });
+    scalar_accessor!(tav_snp_attestation_report_committed_build, u8, |report| {
+        report.committed_build
+    });
+    scalar_accessor!(tav_snp_attestation_report_committed_minor, u8, |report| {
+        report.committed_minor
+    });
+    scalar_accessor!(tav_snp_attestation_report_committed_major, u8, |report| {
+        report.committed_major
+    });
+
+    bytes_accessor!(tav_snp_attestation_report_family_id, |report| &report
+        .family_id);
+    bytes_accessor!(tav_snp_attestation_report_image_id, |report| &report
+        .image_id);
+    bytes_accessor!(tav_snp_attestation_report_platform_version, |report| {
+        &report.platform_version.raw
+    });
+    bytes_accessor!(tav_snp_attestation_report_report_data, |report| &report
+        .report_data);
+    bytes_accessor!(tav_snp_attestation_report_measurement, |report| &report
+        .measurement);
+    bytes_accessor!(tav_snp_attestation_report_host_data, |report| &report
+        .host_data);
+    bytes_accessor!(tav_snp_attestation_report_id_key_digest, |report| &report
+        .id_key_digest);
+    bytes_accessor!(tav_snp_attestation_report_author_key_digest, |report| {
+        &report.author_key_digest
+    });
+    bytes_accessor!(tav_snp_attestation_report_report_id, |report| &report
+        .report_id);
+    bytes_accessor!(tav_snp_attestation_report_report_id_ma, |report| &report
+        .report_id_ma);
+    bytes_accessor!(tav_snp_attestation_report_reported_tcb, |report| &report
+        .reported_tcb
+        .raw);
+    bytes_accessor!(tav_snp_attestation_report_chip_id, |report| &report.chip_id);
+    bytes_accessor!(tav_snp_attestation_report_committed_tcb, |report| &report
+        .committed_tcb
+        .raw);
+    bytes_accessor!(tav_snp_attestation_report_launch_tcb, |report| &report
+        .launch_tcb
+        .raw);
+    bytes_accessor!(tav_snp_attestation_report_signature_r, |report| &report
+        .signature
+        .r);
+    bytes_accessor!(tav_snp_attestation_report_signature_s, |report| &report
+        .signature
+        .s);
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_snp_attestation_report_free(report: *mut TAVSnpAttestationReport) {
+        if !report.is_null() {
+            unsafe {
+                drop(Box::from_raw(report));
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_error_code(error: *const TavError) -> ErrorCode {
+        if error.is_null() {
+            return ErrorCode::ErrorCodeIsNull;
+        }
+
+        let error = unsafe { &*error };
+        error.code
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_error_message(error: *const TavError) -> *const c_char {
+        if error.is_null() {
+            return NULL_ERROR_MESSAGE.as_ptr().cast();
+        }
+
+        let error = unsafe { &*error };
+        error.message.as_ptr()
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_error_free(error: *mut TavError) {
+        if !error.is_null() {
+            unsafe {
+                drop(Box::from_raw(error));
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn verify_rejects_inputs_larger_than_one_gib() {
+            let mut report = ptr::null_mut();
+
+            let error = unsafe {
+                tav_snp_verify_attestation(
+                    std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                    MAX_VERIFY_INPUT_LEN + 1,
+                    std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                    1,
+                    std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                    1,
+                    std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                    1,
+                    &mut report,
+                )
+            };
+
+            assert!(!error.is_null());
+            let error = unsafe { Box::from_raw(error) };
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert_eq!(
+                error.message.to_str().unwrap(),
+                "attestation report exceeds maximum input size"
+            );
+            assert!(report.is_null());
+        }
+
+        #[test]
+        fn error_accessors_handle_null_errors_defensively() {
+            let message = unsafe { tav_error_message(ptr::null()) };
+
+            assert_eq!(
+                unsafe { tav_error_code(ptr::null()) },
+                ErrorCode::ErrorCodeIsNull
+            );
+            assert!(!message.is_null());
+            assert_eq!(
+                unsafe { std::ffi::CStr::from_ptr(message) }
+                    .to_str()
+                    .unwrap(),
+                "null TAVError pointer"
+            );
+        }
     }
 }
 
