@@ -92,8 +92,7 @@ jobs:
             attestation/tests/test_data/milan_ask.pem \
             attestation/tests/test_data/milan_vcek.pem \
             > c-ffi-demo-output.txt
-          grep '^version ' c-ffi-demo-output.txt
-          grep '^report_data ' c-ffi-demo-output.txt
+          diff -u demos/c-ffi/test-data/milan-output.golden.txt c-ffi-demo-output.txt
 
       - name: Run C FFI demo failure path
         run: |
@@ -110,7 +109,7 @@ jobs:
           set -e
           test "$code" -eq 1
           test ! -s c-ffi-demo-failure-output.txt
-          grep -Fx 'attestation report is empty' c-ffi-demo-failure-error.txt
+          diff -u demos/c-ffi/test-data/empty-report-error.golden.txt c-ffi-demo-failure-error.txt
 
       - name: Build and run statically linked C FFI demo
         run: |
@@ -122,8 +121,7 @@ jobs:
             attestation/tests/test_data/milan_ask.pem \
             attestation/tests/test_data/milan_vcek.pem \
             > c-ffi-demo-static-output.txt
-          grep '^version ' c-ffi-demo-static-output.txt
-          grep '^report_data ' c-ffi-demo-static-output.txt
+          diff -u demos/c-ffi/test-data/milan-output.golden.txt c-ffi-demo-static-output.txt
           : > c-ffi-empty-report.bin
           set +e
           ./demos/c-ffi/build-static/tav-c-ffi-demo \
@@ -137,4 +135,4 @@ jobs:
           set -e
           test "$code" -eq 1
           test ! -s c-ffi-demo-static-failure-output.txt
-          grep -Fx 'attestation report is empty' c-ffi-demo-static-failure-error.txt
+          diff -u demos/c-ffi/test-data/empty-report-error.golden.txt c-ffi-demo-static-failure-error.txt
