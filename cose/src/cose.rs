@@ -195,6 +195,10 @@ fn validate_protected_header_algorithm(
 }
 
 fn protected_header_alg(phdr: &[u8]) -> Result<Option<i64>, String> {
+    if phdr.is_empty() {
+        return Ok(None);
+    }
+
     let protected = CborValue::from_bytes(phdr)?;
     for (key, value) in protected.iter_map()? {
         if key == &CborValue::Int(COSE_HEADER_ALG) {
@@ -443,6 +447,19 @@ mod tests {
         let key = key(P256_SPKI, algorithm);
 
         let err = cose_verify1(&key, algorithm, &[0xa0], PAYLOAD, P256_SIG).unwrap_err();
+        assert!(
+            err.contains("signature verification failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_allows_empty_protected_header() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        let err = cose_verify1(&key, algorithm, &[], PAYLOAD, P256_SIG).unwrap_err();
         assert!(
             err.contains("signature verification failed"),
             "unexpected error: {err}"

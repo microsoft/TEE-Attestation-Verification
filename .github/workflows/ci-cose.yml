@@ -43,7 +43,7 @@ jobs:
         run: cargo +nightly test -Z build-std=std,panic_abort --manifest-path cose/Cargo.toml --target wasm64-unknown-unknown --no-default-features --features "crypto_pure_rust" --no-run
 
   native:
-    name: Native pure-Rust build and test
+    name: Native build and test
     runs-on: ubuntu-latest
 
     steps:
@@ -57,3 +57,6 @@ jobs:
 
       - name: Test native with pure-Rust backend
         run: cargo test --manifest-path cose/Cargo.toml --no-default-features --features "crypto_pure_rust" -- --nocapture
+
+      - name: Build C FFI library
+        run: cargo build --manifest-path cose/Cargo.toml --no-default-features --features "crypto_openssl"

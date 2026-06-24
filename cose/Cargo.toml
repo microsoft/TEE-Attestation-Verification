@@ -9,7 +9,7 @@ authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
 default = ["crypto/default"]

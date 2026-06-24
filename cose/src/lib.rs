@@ -54,7 +54,6 @@
 
 mod cbor;
 mod cose;
-#[cfg(target_family = "wasm")]
 pub mod ffi;
 
 pub use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
