@@ -8,6 +8,7 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
 
 /*
  * C ABI for caller-provided-certificate SNP attestation verification.
@@ -216,6 +217,4 @@ TAV_API void tav_error_free(TavError *error);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif
