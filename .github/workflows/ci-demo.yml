@@ -57,6 +57,42 @@ jobs:
             demos/web-verify-kernel/tests/test-results/
             demos/web-verify-kernel/tests/playwright-report/
 
+  cose-c-ffi:
+    name: COSE C FFI demo
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Build COSE C FFI demo
+        run: |
+          cmake -S demos/cose-c-ffi -B demos/cose-c-ffi/build -G Ninja
+          cmake --build demos/cose-c-ffi/build
+
+      - name: Check COSE C FFI exports
+        run: |
+          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
+            | grep ' tav_cbor_value_from_bytes'
+          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
+            | grep ' tav_cose_error_code'
+
+      - name: Run COSE C FFI demo
+        run: |
+          ./demos/cose-c-ffi/build/tav-cose-c-ffi-demo \
+            > cose-c-ffi-demo-output.txt
+          diff -u demos/cose-c-ffi/test-data/sample-output.golden.txt cose-c-ffi-demo-output.txt
+
+      - name: Build and run statically linked COSE C FFI demo
+        run: |
+          cmake -S demos/cose-c-ffi -B demos/cose-c-ffi/build-static -G Ninja -DTAV_LINK_STATIC=ON
+          cmake --build demos/cose-c-ffi/build-static
+          ./demos/cose-c-ffi/build-static/tav-cose-c-ffi-demo \
+            > cose-c-ffi-demo-static-output.txt
+          diff -u demos/cose-c-ffi/test-data/sample-output.golden.txt cose-c-ffi-demo-static-output.txt
+
   caci-attestation-verify:
     name: E2E test of CACI attestation verification
     runs-on: ubuntu-latest

@@ -2,3 +2,13 @@
 target/
 dist/
 pkg/
+
+# COSE C FFI demo CMake/Ninja build outputs
+demos/cose-c-ffi/build/
+demos/cose-c-ffi/build-static/
+demos/cose-c-ffi/CMakeFiles/
+demos/cose-c-ffi/CMakeCache.txt
+demos/cose-c-ffi/cmake_install.cmake
+demos/cose-c-ffi/build.ninja
+demos/cose-c-ffi/.ninja_deps
+demos/cose-c-ffi/.ninja_log
