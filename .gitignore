@@ -12,3 +12,13 @@ demos/cose-c-ffi/cmake_install.cmake
 demos/cose-c-ffi/build.ninja
 demos/cose-c-ffi/.ninja_deps
 demos/cose-c-ffi/.ninja_log
+
+# C FFI demo CMake/Ninja build outputs
+demos/c-ffi/build/
+demos/c-ffi/build-static/
+demos/c-ffi/CMakeFiles/
+demos/c-ffi/CMakeCache.txt
+demos/c-ffi/cmake_install.cmake
+demos/c-ffi/build.ninja
+demos/c-ffi/.ninja_deps
+demos/c-ffi/.ninja_log
