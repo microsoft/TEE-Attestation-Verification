@@ -256,8 +256,11 @@ pub mod c {
         inner: NativeCborValue,
     }
 
+    #[repr(C)]
+    #[derive(Debug)]
     pub struct TavCoseByteBuffer {
-        bytes: Vec<u8>,
+        data: *mut u8,
+        len: usize,
     }
 
     pub struct TavCoseError {
@@ -372,6 +375,20 @@ pub mod c {
         unsafe { out_ptr(out, name) }
     }
 
+    unsafe fn byte_buffer_out_ptr(
+        out: *mut TavCoseByteBuffer,
+        name: &str,
+    ) -> Result<(), TavCoseError> {
+        unsafe { out_ptr(out, name) }?;
+        unsafe {
+            *out = TavCoseByteBuffer {
+                data: ptr::null_mut(),
+                len: 0,
+            };
+        }
+        Ok(())
+    }
+
     unsafe fn cbor_value<'a>(
         value: *const TavCborValue,
         name: &str,
@@ -459,14 +476,17 @@ pub mod c {
     #[no_mangle]
     pub unsafe extern "C" fn tav_cbor_value_to_bytes(
         value: *const TavCborValue,
-        out_bytes: *mut *mut TavCoseByteBuffer,
+        out_bytes: *mut TavCoseByteBuffer,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { owned_out_ptr(out_bytes, "out_bytes") }?;
+            unsafe { byte_buffer_out_ptr(out_bytes, "out_bytes") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let bytes = value.to_bytes().map_err(TavCoseError::cbor)?;
+            let bytes = bytes.into_boxed_slice();
+            let len = bytes.len();
+            let data = Box::into_raw(bytes).cast::<u8>();
             unsafe {
-                *out_bytes = Box::into_raw(Box::new(TavCoseByteBuffer { bytes }));
+                *out_bytes = TavCoseByteBuffer { data, len };
             }
             Ok(())
         })())
@@ -794,38 +814,19 @@ pub mod c {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_cose_byte_buffer_data(
-        bytes: *const TavCoseByteBuffer,
-        data: *mut *const u8,
-        len: *mut usize,
-    ) {
-        if !data.is_null() {
-            unsafe {
-                *data = ptr::null();
-            }
-        }
-        if !len.is_null() {
-            unsafe {
-                *len = 0;
-            }
-        }
-        if bytes.is_null() || data.is_null() || len.is_null() {
+    pub unsafe extern "C" fn tav_cose_byte_buffer_free(bytes: *mut TavCoseByteBuffer) {
+        if bytes.is_null() {
             return;
         }
 
-        let bytes = unsafe { &*bytes };
-        unsafe {
-            *data = bytes.bytes.as_ptr();
-            *len = bytes.bytes.len();
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn tav_cose_byte_buffer_free(bytes: *mut TavCoseByteBuffer) {
-        if !bytes.is_null() {
+        let bytes = unsafe { &mut *bytes };
+        if !bytes.data.is_null() {
+            let data = std::ptr::slice_from_raw_parts_mut(bytes.data, bytes.len);
             unsafe {
-                drop(Box::from_raw(bytes));
+                drop(Box::from_raw(data));
             }
+            bytes.data = ptr::null_mut();
+            bytes.len = 0;
         }
     }
 
@@ -1113,29 +1114,34 @@ pub mod c {
             assert!(err.is_null());
             assert!(!root.is_null());
 
-            let mut bytes = ptr::NonNull::<TavCoseByteBuffer>::dangling().as_ptr();
+            let mut bytes = TavCoseByteBuffer {
+                data: ptr::NonNull::<u8>::dangling().as_ptr(),
+                len: usize::MAX,
+            };
             let err = unsafe { tav_cbor_value_to_bytes(root, &mut bytes) };
             assert!(err.is_null());
-            assert!(!bytes.is_null());
+            assert!(!bytes.data.is_null());
+            assert_ne!(bytes.len, 0);
 
             unsafe {
-                tav_cose_byte_buffer_free(bytes);
+                tav_cose_byte_buffer_free(&mut bytes);
                 tav_cbor_value_free(root);
             }
+            assert!(bytes.data.is_null());
+            assert_eq!(bytes.len, 0);
         }
 
         #[test]
-        fn byte_buffer_data_is_defensive_for_null_pointers() {
-            let mut data = ptr::NonNull::<u8>::dangling().as_ptr().cast_const();
-            let mut len = 42;
-            unsafe { tav_cose_byte_buffer_data(ptr::null(), &mut data, &mut len) };
-            assert!(data.is_null());
-            assert_eq!(len, 0);
+        fn byte_buffer_free_is_defensive_for_null_and_empty_buffers() {
+            unsafe { tav_cose_byte_buffer_free(ptr::null_mut()) };
 
-            unsafe { tav_cose_byte_buffer_data(ptr::null(), ptr::null_mut(), &mut len) };
-            assert_eq!(len, 0);
-            unsafe { tav_cose_byte_buffer_data(ptr::null(), &mut data, ptr::null_mut()) };
-            assert!(data.is_null());
+            let mut bytes = TavCoseByteBuffer {
+                data: ptr::null_mut(),
+                len: 0,
+            };
+            unsafe { tav_cose_byte_buffer_free(&mut bytes) };
+            assert!(bytes.data.is_null());
+            assert_eq!(bytes.len, 0);
         }
 
         #[test]

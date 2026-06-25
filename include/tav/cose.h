@@ -21,8 +21,8 @@ extern "C" {
  *   ancestor owned TAVCborValue remains alive.
  * - Byte/text accessors return borrowed views. The returned data remains valid
  *   only while the owning or ancestor TAVCborValue remains alive.
- * - tav_cbor_value_to_bytes returns an owned TAVCoseByteBuffer. Release it with
- *   tav_cose_byte_buffer_free.
+ * - tav_cbor_value_to_bytes writes owned bytes to a TAVCoseByteBuffer. Release
+ *   it with tav_cose_byte_buffer_free.
  * - Freeing NULL owned handles is a no-op.
  * - Owned out-parameters are write-only: pass a non-NULL pointer to a handle
  *   slot. The slot is set to NULL before any fallible work and set to an owned
@@ -85,8 +85,12 @@ typedef enum TAVCwtClaim {
 } TAVCwtClaim;
 
 typedef struct TAVCborValue TAVCborValue;
-typedef struct TAVCoseByteBuffer TAVCoseByteBuffer;
 typedef struct TAVCoseError TAVCoseError;
+
+typedef struct TAVCoseByteBuffer {
+    uint8_t *data;
+    size_t len;
+} TAVCoseByteBuffer;
 
 TAV_COSE_API TAVCoseError *tav_cbor_value_from_bytes(
     const uint8_t *bytes,
@@ -95,7 +99,7 @@ TAV_COSE_API TAVCoseError *tav_cbor_value_from_bytes(
 
 TAV_COSE_API TAVCoseError *tav_cbor_value_to_bytes(
     const TAVCborValue *value,
-    TAVCoseByteBuffer **out_bytes);
+    TAVCoseByteBuffer *out_bytes);
 
 /* value must be a valid, non-NULL TAVCborValue handle. */
 TAV_COSE_API TAVCborKind tav_cbor_value_kind(const TAVCborValue *value);
@@ -178,11 +182,6 @@ TAV_COSE_API TAVCoseError *tav_cose_sign1_validate(
     const TAVCborValue **out_sign1);
 
 TAV_COSE_API void tav_cbor_value_free(TAVCborValue *value);
-
-TAV_COSE_API void tav_cose_byte_buffer_data(
-    const TAVCoseByteBuffer *bytes,
-    const uint8_t **data,
-    size_t *len);
 
 TAV_COSE_API void tav_cose_byte_buffer_free(TAVCoseByteBuffer *bytes);
 
