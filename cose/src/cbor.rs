@@ -187,13 +187,8 @@ impl CborValue {
 
     /// Return whether a map has a [`CborValue`] key.
     ///
-    /// Only integer and text-string keys are supported. Returns an error if
-    /// this value is not a map or if the key type is unsupported.
+    /// Returns an error if this value is not a map.
     pub fn map_has_key(&self, key: &CborValue) -> Result<bool, String> {
-        match key {
-            CborValue::Int(_) | CborValue::TextString(_) => {}
-            _ => return Err("Map keys can only be Int or TextString".into()),
-        }
         match self {
             CborValue::Map(entries) => Ok(entries.iter().any(|(k, _)| k == key)),
             other => Err(format!("Expected Map, got {:?}", other.type_name())),
@@ -202,14 +197,8 @@ impl CborValue {
 
     /// Look up a map value by a [`CborValue`] key.
     ///
-    /// Only integer and text-string keys are supported. Returns an error if
-    /// this value is not a map, if the key type is unsupported, or if the key is
-    /// absent.
+    /// Returns an error if this value is not a map or if the key is absent.
     pub fn map_at(&self, key: &CborValue) -> Result<&CborValue, String> {
-        match key {
-            CborValue::Int(_) | CborValue::TextString(_) => {}
-            _ => return Err("Map keys can only be Int or TextString".into()),
-        }
         match self {
             CborValue::Map(entries) => entries
                 .iter()
@@ -665,6 +654,7 @@ mod tests {
         let map = CborValue::Map(vec![
             (CborValue::Int(1), CborValue::TextString("one".into())),
             (CborValue::TextString("key".into()), CborValue::Int(42)),
+            (CborValue::ByteString(vec![0xaa]), CborValue::Simple(21)),
         ]);
 
         assert!(map.map_has_int_key(1).unwrap());
@@ -675,14 +665,22 @@ mod tests {
         assert!(map
             .map_has_key(&CborValue::TextString("key".into()))
             .unwrap());
+        assert!(map.map_has_key(&CborValue::ByteString(vec![0xaa])).unwrap());
+        assert!(!map.map_has_key(&CborValue::Array(vec![])).unwrap());
     }
 
     #[test]
-    fn map_at_invalid_key_type() {
-        let map = CborValue::Map(vec![]);
-        let bad_key = CborValue::ByteString(vec![]);
-        assert!(map.map_at(&bad_key).is_err());
-        assert!(map.map_has_key(&bad_key).is_err());
+    fn map_at_cbor_key() {
+        let map = CborValue::Map(vec![(
+            CborValue::ByteString(vec![0xaa]),
+            CborValue::Simple(21),
+        )]);
+
+        assert_eq!(
+            map.map_at(&CborValue::ByteString(vec![0xaa])).unwrap(),
+            &CborValue::Simple(21)
+        );
+        assert!(map.map_at(&CborValue::Array(vec![])).is_err());
     }
 
     #[test]
