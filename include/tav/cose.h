@@ -59,6 +59,31 @@ typedef enum TAVCoseAlgorithm {
     TAV_COSE_ALG_PS512 = -39,
 } TAVCoseAlgorithm;
 
+typedef enum TAVCoseTag {
+    TAV_COSE_TAG_SIGN1 = 18,
+} TAVCoseTag;
+
+typedef enum TAVCoseSign1Field {
+    TAV_COSE_SIGN1_PROTECTED = 0,
+    TAV_COSE_SIGN1_UNPROTECTED = 1,
+    TAV_COSE_SIGN1_PAYLOAD = 2,
+    TAV_COSE_SIGN1_SIGNATURE = 3,
+} TAVCoseSign1Field;
+
+typedef enum TAVCoseHeaderLabel {
+    TAV_COSE_HEADER_ALG = 1,
+    TAV_COSE_HEADER_CWT_CLAIMS = 15,
+    TAV_COSE_HEADER_X5CHAIN = 33,
+    TAV_COSE_HEADER_CONTENT_TYPE = 3,
+    TAV_COSE_HEADER_PREIMAGE_CONTENT_TYPE = 259,
+} TAVCoseHeaderLabel;
+
+typedef enum TAVCwtClaim {
+    TAV_CWT_CLAIMS_ISSUER = 1,
+    TAV_CWT_CLAIMS_SUBJECT = 2,
+    TAV_CWT_CLAIMS_IAT = 6,
+} TAVCwtClaim;
+
 typedef struct TAVCborValue TAVCborValue;
 typedef struct TAVCoseSign1 TAVCoseSign1;
 typedef struct TAVCoseByteBuffer TAVCoseByteBuffer;
@@ -165,25 +190,6 @@ TAV_COSE_API void tav_cose_byte_buffer_data(
     size_t *len);
 
 TAV_COSE_API void tav_cose_byte_buffer_free(TAVCoseByteBuffer *bytes);
-
-TAV_COSE_API TAVCoseError *tav_cose_sign1_protected(
-    const TAVCoseSign1 *sign1,
-    const uint8_t **data,
-    size_t *len);
-
-TAV_COSE_API TAVCoseError *tav_cose_sign1_unprotected(
-    const TAVCoseSign1 *sign1,
-    const TAVCborValue **out_value);
-
-TAV_COSE_API TAVCoseError *tav_cose_sign1_payload(
-    const TAVCoseSign1 *sign1,
-    const uint8_t **data,
-    size_t *len);
-
-TAV_COSE_API TAVCoseError *tav_cose_sign1_signature(
-    const TAVCoseSign1 *sign1,
-    const uint8_t **data,
-    size_t *len);
 
 /*
  * Parses the protected header bytes and returns an owned CBOR value. Release it

@@ -13,7 +13,11 @@ use crypto::{
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 
 // RFC 9052, Section 4.2: tagged COSE_Sign1 is CBOR tag 18.
-const COSE_SIGN1_TAG: u64 = 18;
+pub const COSE_SIGN1_TAG: u64 = 18;
+pub const COSE_SIGN1_PROTECTED: usize = 0;
+pub const COSE_SIGN1_UNPROTECTED: usize = 1;
+pub const COSE_SIGN1_PAYLOAD: usize = 2;
+pub const COSE_SIGN1_SIGNATURE: usize = 3;
 
 // IANA COSE Header Parameters registry
 // https://www.iana.org/assignments/cose/cose.xhtml
