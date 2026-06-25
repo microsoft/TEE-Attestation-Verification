@@ -3,6 +3,7 @@
 
 #[cfg(target_family = "wasm")]
 pub mod wasm {
+    use js_sys::Array;
     use wasm_bindgen::prelude::*;
 
     use crate::CborValue as NativeCborValue;
@@ -133,12 +134,13 @@ pub mod wasm {
                 .map(CborValue::from_native)
         }
 
-        pub fn map_key_at(&self, index: u32) -> Result<CborValue, String> {
-            map_entry_at(&self.inner, index).map(|(key, _)| CborValue::from_native(key.clone()))
-        }
-
-        pub fn map_value_at(&self, index: u32) -> Result<CborValue, String> {
-            map_entry_at(&self.inner, index).map(|(_, value)| CborValue::from_native(value.clone()))
+        pub fn map_entry_at(&self, index: u32) -> Result<Array, String> {
+            map_entry_at(&self.inner, index).map(|(key, value)| {
+                let entry = Array::new();
+                entry.push(&CborValue::from_native(key.clone()).into());
+                entry.push(&CborValue::from_native(value.clone()).into());
+                entry
+            })
         }
 
         pub fn as_cose_sign1(&self) -> Result<CoseSign1, String> {
@@ -254,11 +256,6 @@ pub mod c {
         inner: NativeCborValue,
     }
 
-    #[repr(transparent)]
-    pub struct TavCoseSign1 {
-        inner: NativeCborValue,
-    }
-
     pub struct TavCoseByteBuffer {
         bytes: Vec<u8>,
     }
@@ -294,16 +291,6 @@ pub mod c {
             Self { inner }
         }
 
-        fn as_native(&self) -> &NativeCborValue {
-            &self.inner
-        }
-
-        fn borrowed(value: &NativeCborValue) -> *const Self {
-            value as *const NativeCborValue as *const Self
-        }
-    }
-
-    impl TavCoseSign1 {
         fn as_native(&self) -> &NativeCborValue {
             &self.inner
         }
@@ -395,15 +382,6 @@ pub mod c {
         Ok(unsafe { (*value).as_native() })
     }
 
-    unsafe fn cose_sign1_value<'a>(
-        sign1: *const TavCoseSign1,
-    ) -> Result<&'a NativeCborValue, TavCoseError> {
-        if sign1.is_null() {
-            return Err(TavCoseError::invalid_argument("sign1 is null"));
-        }
-        Ok(unsafe { (*sign1).as_native() })
-    }
-
     fn kind(value: &NativeCborValue) -> TavCborKind {
         match value {
             NativeCborValue::Int(_) => TavCborKind::Int,
@@ -426,14 +404,6 @@ pub mod c {
                 "{name} must be a byte string"
             ))),
         }
-    }
-
-    fn protected_header(value: &NativeCborValue) -> Result<NativeCborValue, TavCoseError> {
-        let protected = borrowed_bytes(value, "protected")?;
-        if protected.is_empty() {
-            return Ok(NativeCborValue::Map(vec![]));
-        }
-        NativeCborValue::from_bytes(protected).map_err(TavCoseError::cbor)
     }
 
     fn require_detached_payload(sign1: &NativeCborValue) -> Result<(), TavCoseError> {
@@ -779,33 +749,19 @@ pub mod c {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_cbor_value_map_key_at(
+    pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
         value: *const TavCborValue,
         index: usize,
+        out_key: *mut *const TavCborValue,
         out_value: *mut *const TavCborValue,
     ) -> *mut TavCoseError {
         into_result((|| {
+            unsafe { borrowed_out_ptr(out_key, "out_key") }?;
             unsafe { borrowed_out_ptr(out_value, "out_value") }?;
             let value = unsafe { cbor_value(value, "value") }?;
-            let (key, _) = map_entry_at(value, index)?;
+            let (key, child) = map_entry_at(value, index)?;
             unsafe {
-                *out_value = TavCborValue::borrowed(key);
-            }
-            Ok(())
-        })())
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn tav_cbor_value_map_value_at(
-        value: *const TavCborValue,
-        index: usize,
-        out_value: *mut *const TavCborValue,
-    ) -> *mut TavCoseError {
-        into_result((|| {
-            unsafe { borrowed_out_ptr(out_value, "out_value") }?;
-            let value = unsafe { cbor_value(value, "value") }?;
-            let (_, child) = map_entry_at(value, index)?;
-            unsafe {
+                *out_key = TavCborValue::borrowed(key);
                 *out_value = TavCborValue::borrowed(child);
             }
             Ok(())
@@ -813,16 +769,16 @@ pub mod c {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_cbor_value_as_cose_sign1(
+    pub unsafe extern "C" fn tav_cose_sign1_validate(
         value: *const TavCborValue,
-        out_sign1: *mut *const TavCoseSign1,
+        out_sign1: *mut *const TavCborValue,
     ) -> *mut TavCoseError {
         into_result((|| {
             unsafe { borrowed_out_ptr(out_sign1, "out_sign1") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let sign1 = cose_sign1(value).map_err(TavCoseError::cbor)?;
             unsafe {
-                *out_sign1 = TavCoseSign1::borrowed(sign1);
+                *out_sign1 = TavCborValue::borrowed(sign1);
             }
             Ok(())
         })())
@@ -874,30 +830,15 @@ pub mod c {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_cose_sign1_protected_header(
-        sign1: *const TavCoseSign1,
-        out_value: *mut *mut TavCborValue,
-    ) -> *mut TavCoseError {
-        into_result((|| {
-            unsafe { owned_out_ptr(out_value, "out_value") }?;
-            let sign1 = unsafe { cose_sign1_value(sign1) }?;
-            let protected = protected_header(sign1_field(sign1, 0, "protected")?)?;
-            unsafe {
-                *out_value = Box::into_raw(Box::new(TavCborValue::from_native(protected)));
-            }
-            Ok(())
-        })())
-    }
-
-    #[no_mangle]
     pub unsafe extern "C" fn tav_cose_sign1_verify_embedded(
-        sign1: *const TavCoseSign1,
+        sign1: *const TavCborValue,
         spki_der: *const u8,
         spki_der_len: usize,
         cose_alg: i32,
     ) -> *mut TavCoseError {
         into_result((|| {
-            let sign1 = unsafe { cose_sign1_value(sign1) }?;
+            let value = unsafe { cbor_value(sign1, "sign1") }?;
+            let sign1 = cose_sign1(value).map_err(TavCoseError::cbor)?;
             let payload = borrowed_bytes(sign1_field(sign1, 2, "payload")?, "payload")?;
             verify_sign1(sign1, payload, spki_der, spki_der_len, cose_alg)
         })())
@@ -905,7 +846,7 @@ pub mod c {
 
     #[no_mangle]
     pub unsafe extern "C" fn tav_cose_sign1_verify_detached(
-        sign1: *const TavCoseSign1,
+        sign1: *const TavCborValue,
         payload: *const u8,
         payload_len: usize,
         spki_der: *const u8,
@@ -913,7 +854,8 @@ pub mod c {
         cose_alg: i32,
     ) -> *mut TavCoseError {
         into_result((|| {
-            let sign1 = unsafe { cose_sign1_value(sign1) }?;
+            let value = unsafe { cbor_value(sign1, "sign1") }?;
+            let sign1 = cose_sign1(value).map_err(TavCoseError::cbor)?;
             require_detached_payload(sign1)?;
             let payload = unsafe { input_bytes(payload, payload_len, "payload", true) }?;
             verify_sign1(sign1, payload, spki_der, spki_der_len, cose_alg)
@@ -1108,11 +1050,8 @@ pub mod c {
             assert!(err.is_null());
 
             let mut key = ptr::null();
-            let err = unsafe { tav_cbor_value_map_key_at(root, 0, &mut key) };
-            assert!(err.is_null());
-
             let mut value = ptr::null();
-            let err = unsafe { tav_cbor_value_map_at(root, key, &mut value) };
+            let err = unsafe { tav_cbor_value_map_entry_at(root, 0, &mut key, &mut value) };
             assert!(err.is_null());
             let mut text = ptr::null();
             let mut text_len = 0;
@@ -1145,7 +1084,8 @@ pub mod c {
             assert!(has_key);
 
             let mut byte_string_key = ptr::null();
-            let err = unsafe { tav_cbor_value_map_key_at(root, 2, &mut byte_string_key) };
+            let err =
+                unsafe { tav_cbor_value_map_entry_at(root, 2, &mut byte_string_key, &mut value) };
             assert!(err.is_null());
             let err = unsafe { tav_cbor_value_map_at(root, byte_string_key, &mut value) };
             assert!(err.is_null());
@@ -1199,45 +1139,6 @@ pub mod c {
         }
 
         #[test]
-        fn cose_sign1_protected_header_accepts_empty_protected_bytes() {
-            let envelope = NativeCborValue::Tagged {
-                tag: 18,
-                payload: Box::new(NativeCborValue::Array(vec![
-                    NativeCborValue::ByteString(vec![]),
-                    NativeCborValue::Map(vec![]),
-                    NativeCborValue::ByteString(vec![]),
-                    NativeCborValue::ByteString(vec![]),
-                ])),
-            }
-            .to_bytes()
-            .unwrap();
-
-            let mut root = ptr::null_mut();
-            let err =
-                unsafe { tav_cbor_value_from_bytes(envelope.as_ptr(), envelope.len(), &mut root) };
-            assert!(err.is_null());
-
-            let mut sign1 = ptr::null();
-            let err = unsafe { tav_cbor_value_as_cose_sign1(root, &mut sign1) };
-            assert!(err.is_null());
-
-            let mut protected = ptr::null_mut();
-            let err = unsafe { tav_cose_sign1_protected_header(sign1, &mut protected) };
-            assert!(err.is_null());
-            assert_eq!(unsafe { tav_cbor_value_kind(protected) }, TavCborKind::Map);
-
-            let mut len = usize::MAX;
-            let err = unsafe { tav_cbor_value_len(protected, &mut len) };
-            assert!(err.is_null());
-            assert_eq!(len, 0);
-
-            unsafe {
-                tav_cbor_value_free(protected);
-                tav_cbor_value_free(root);
-            }
-        }
-
-        #[test]
         fn cose_sign1_embedded_verification_succeeds() {
             let envelope = NativeCborValue::Tagged {
                 tag: 18,
@@ -1257,9 +1158,10 @@ pub mod c {
             assert!(err.is_null());
 
             let mut sign1 = ptr::null();
-            let err = unsafe { tav_cbor_value_as_cose_sign1(root, &mut sign1) };
+            let err = unsafe { tav_cose_sign1_validate(root, &mut sign1) };
             assert!(err.is_null());
             assert!(!sign1.is_null());
+            assert_eq!(unsafe { tav_cbor_value_kind(sign1) }, TavCborKind::Array);
 
             let err = unsafe {
                 tav_cose_sign1_verify_embedded(sign1, P256_SPKI.as_ptr(), P256_SPKI.len(), -7)
@@ -1289,7 +1191,7 @@ pub mod c {
             assert!(err.is_null());
 
             let mut sign1 = ptr::null();
-            let err = unsafe { tav_cbor_value_as_cose_sign1(root, &mut sign1) };
+            let err = unsafe { tav_cose_sign1_validate(root, &mut sign1) };
             assert!(err.is_null());
 
             let err = unsafe {
@@ -1339,7 +1241,7 @@ pub mod c {
             assert!(err.is_null());
 
             let mut sign1 = ptr::null();
-            let err = unsafe { tav_cbor_value_as_cose_sign1(root, &mut sign1) };
+            let err = unsafe { tav_cose_sign1_validate(root, &mut sign1) };
             assert!(err.is_null());
 
             let err = unsafe {

@@ -16,9 +16,9 @@ extern "C" {
  * Ownership and lifetime:
  * - tav_cbor_value_from_bytes returns an owned TAVCborValue. Release it with
  *   tav_cbor_value_free.
- * - CBOR child accessors, including array/map/tag and COSE_Sign1 accessors,
- *   return borrowed handles. Borrowed handles must not be freed and remain valid
- *   only while the ancestor owned TAVCborValue remains alive.
+ * - CBOR child accessors, including array/map/tag accessors, return borrowed
+ *   handles. Borrowed handles must not be freed and remain valid only while the
+ *   ancestor owned TAVCborValue remains alive.
  * - Byte/text accessors return borrowed views. The returned data remains valid
  *   only while the owning or ancestor TAVCborValue remains alive.
  * - tav_cbor_value_to_bytes returns an owned TAVCoseByteBuffer. Release it with
@@ -85,7 +85,6 @@ typedef enum TAVCwtClaim {
 } TAVCwtClaim;
 
 typedef struct TAVCborValue TAVCborValue;
-typedef struct TAVCoseSign1 TAVCoseSign1;
 typedef struct TAVCoseByteBuffer TAVCoseByteBuffer;
 typedef struct TAVCoseError TAVCoseError;
 
@@ -168,19 +167,15 @@ TAV_COSE_API TAVCoseError *tav_cbor_value_map_has_key(
     const TAVCborValue *key,
     bool *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_key_at(
+TAV_COSE_API TAVCoseError *tav_cbor_value_map_entry_at(
     const TAVCborValue *value,
     size_t index,
+    const TAVCborValue **out_key,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_value_at(
+TAV_COSE_API TAVCoseError *tav_cose_sign1_validate(
     const TAVCborValue *value,
-    size_t index,
-    const TAVCborValue **out_value);
-
-TAV_COSE_API TAVCoseError *tav_cbor_value_as_cose_sign1(
-    const TAVCborValue *value,
-    const TAVCoseSign1 **out_sign1);
+    const TAVCborValue **out_sign1);
 
 TAV_COSE_API void tav_cbor_value_free(TAVCborValue *value);
 
@@ -191,23 +186,14 @@ TAV_COSE_API void tav_cose_byte_buffer_data(
 
 TAV_COSE_API void tav_cose_byte_buffer_free(TAVCoseByteBuffer *bytes);
 
-/*
- * Parses the protected header bytes and returns an owned CBOR value. Release it
- * with tav_cbor_value_free. Per RFC 9052, a zero-length protected-header byte
- * string is returned as an empty CBOR map.
- */
-TAV_COSE_API TAVCoseError *tav_cose_sign1_protected_header(
-    const TAVCoseSign1 *sign1,
-    TAVCborValue **out_value);
-
 TAV_COSE_API TAVCoseError *tav_cose_sign1_verify_embedded(
-    const TAVCoseSign1 *sign1,
+    const TAVCborValue *sign1,
     const uint8_t *spki_der,
     size_t spki_der_len,
     int32_t cose_alg);
 
 TAV_COSE_API TAVCoseError *tav_cose_sign1_verify_detached(
-    const TAVCoseSign1 *sign1,
+    const TAVCborValue *sign1,
     const uint8_t *payload,
     size_t payload_len,
     const uint8_t *spki_der,

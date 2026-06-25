@@ -151,8 +151,7 @@ static void print_map(const TAVCborValue *value, size_t indent) {
     for (size_t i = 0; i < len; i++) {
         const TAVCborValue *key = NULL;
         const TAVCborValue *child = NULL;
-        check_cose_error(tav_cbor_value_map_key_at(value, i, &key), "read map key");
-        check_cose_error(tav_cbor_value_map_value_at(value, i, &child), "read map value");
+        check_cose_error(tav_cbor_value_map_entry_at(value, i, &key, &child), "read map entry");
 
         print_indent(indent + 1);
         printf("entry[%zu].key\n", i);
