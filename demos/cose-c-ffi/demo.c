@@ -3,69 +3,65 @@
 
 #include "tav/cose.h"
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct Buffer {
     uint8_t *data;
     size_t len;
 } Buffer;
 
-static const uint8_t SAMPLE_CBOR[] = {
-    0xa4,
-    0x66, 0x69, 0x73, 0x73, 0x75, 0x65, 0x72,
-    0x67, 0x63, 0x6f, 0x6e, 0x74, 0x6f, 0x73, 0x6f,
-    0x6b, 0x6d, 0x65, 0x61, 0x73, 0x75, 0x72, 0x65, 0x6d, 0x65, 0x6e, 0x74,
-    0x44, 0x01, 0x02, 0x03, 0x04,
-    0x66, 0x63, 0x6c, 0x61, 0x69, 0x6d, 0x73,
-    0x83, 0x01, 0xf5, 0xf6,
-    0x66, 0x73, 0x69, 0x67, 0x6e, 0x65, 0x72,
-    0xa2, 0x01, 0x26, 0x63, 0x6b, 0x69, 0x64, 0x43, 0x0a, 0x0b, 0x0c,
-};
+static void free_buffer(Buffer *buffer) {
+    free(buffer->data);
+    buffer->data = NULL;
+    buffer->len = 0;
+}
 
-static Buffer read_file(const char *path) {
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        perror(path);
+static int hex_nibble(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+static Buffer decode_hex(const char *hex) {
+    size_t hex_len = strlen(hex);
+    if (hex_len % 2 != 0) {
+        fprintf(stderr, "hex input must contain an even number of digits\n");
         exit(1);
     }
-
-    if (fseek(file, 0, SEEK_END) != 0) {
-        perror("fseek");
-        exit(1);
-    }
-
-    long size = ftell(file);
-    if (size < 0) {
-        perror("ftell");
-        exit(1);
-    }
-    rewind(file);
 
     Buffer buffer = {
-        .data = malloc((size_t)size),
-        .len = (size_t)size,
+        .data = malloc(hex_len / 2),
+        .len = hex_len / 2,
     };
     if (buffer.data == NULL && buffer.len != 0) {
         perror("malloc");
         exit(1);
     }
 
-    if (buffer.len != 0 && fread(buffer.data, 1, buffer.len, file) != buffer.len) {
-        perror("fread");
-        exit(1);
+    for (size_t i = 0; i < buffer.len; i++) {
+        int high = hex_nibble(hex[i * 2]);
+        int low = hex_nibble(hex[i * 2 + 1]);
+        if (high < 0 || low < 0) {
+            fprintf(stderr, "hex input contains a non-hex character at byte offset %zu\n", i);
+            free_buffer(&buffer);
+            exit(1);
+        }
+        buffer.data[i] = (uint8_t)((high << 4) | low);
     }
 
-    fclose(file);
     return buffer;
-}
-
-static void free_buffer(Buffer *buffer) {
-    free(buffer->data);
-    buffer->data = NULL;
-    buffer->len = 0;
 }
 
 static void check_cose_error(TAVCoseError *error, const char *context) {
@@ -127,6 +123,28 @@ static void print_escaped_text(const char *text, size_t len) {
 
 static void print_cbor_value(const TAVCborValue *value, size_t indent);
 
+static void print_protected_header(const TAVCborValue *value, size_t indent) {
+    const uint8_t *data = NULL;
+    size_t len = 0;
+    check_cose_error(tav_cbor_value_bytes(value, &data, &len), "read protected header bytes");
+
+    print_indent(indent);
+    printf("protected_header\n");
+
+    if (len == 0) {
+        print_indent(indent + 1);
+        printf("map(len=0)\n");
+        return;
+    }
+
+    TAVCborValue *protected_header = NULL;
+    check_cose_error(
+        tav_cbor_value_from_bytes(data, len, &protected_header),
+        "parse protected header");
+    print_cbor_value(protected_header, indent + 1);
+    tav_cbor_value_free(protected_header);
+}
+
 static void print_array(const TAVCborValue *value, size_t indent) {
     size_t len = 0;
     check_cose_error(tav_cbor_value_len(value, &len), "read array length");
@@ -139,6 +157,24 @@ static void print_array(const TAVCborValue *value, size_t indent) {
         print_indent(indent + 1);
         printf("[%zu]\n", i);
         print_cbor_value(child, indent + 2);
+    }
+}
+
+static void print_cose_sign1(const TAVCborValue *value, size_t indent) {
+    size_t len = 0;
+    check_cose_error(tav_cbor_value_len(value, &len), "read COSE_Sign1 length");
+
+    print_indent(indent);
+    printf("array(len=%zu)\n", len);
+    for (size_t i = 0; i < len; i++) {
+        const TAVCborValue *child = NULL;
+        check_cose_error(tav_cbor_value_array_at(value, i, &child), "read COSE_Sign1 field");
+        print_indent(indent + 1);
+        printf("[%zu]\n", i);
+        print_cbor_value(child, indent + 2);
+        if (i == TAV_COSE_SIGN1_PROTECTED) {
+            print_protected_header(child, indent + 2);
+        }
     }
 }
 
@@ -220,34 +256,31 @@ static void print_cbor_value(const TAVCborValue *value, size_t indent) {
             check_cose_error(tav_cbor_value_tagged_payload(value, &payload), "read tag payload");
             print_indent(indent);
             printf("tag(%" PRIu64 ")\n", tag);
-            print_cbor_value(payload, indent + 1);
+            if (tag == TAV_COSE_TAG_SIGN1) {
+                print_cose_sign1(payload, indent + 1);
+            } else {
+                print_cbor_value(payload, indent + 1);
+            }
             break;
         }
     }
 }
 
 int main(int argc, char **argv) {
-    if (argc > 2) {
-        fprintf(stderr, "usage: %s [payload.cbor]\n", argv[0]);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <payload-hex>\n", argv[0]);
         return 1;
     }
 
-    Buffer file = {0};
-    const uint8_t *payload = SAMPLE_CBOR;
-    size_t payload_len = sizeof(SAMPLE_CBOR);
-    if (argc == 2) {
-        file = read_file(argv[1]);
-        payload = file.data;
-        payload_len = file.len;
-    }
+    Buffer payload = decode_hex(argv[1]);
 
     TAVCborValue *root = NULL;
-    TAVCoseError *error = tav_cbor_value_from_bytes(payload, payload_len, &root);
+    TAVCoseError *error = tav_cbor_value_from_bytes(payload.data, payload.len, &root);
     if (error != NULL) {
         TAVCoseErrorCode code = tav_cose_error_code(error);
         fprintf(stderr, "parse CBOR payload: %s\n", tav_cose_error_message(error));
         tav_cose_error_free(error);
-        free_buffer(&file);
+        free_buffer(&payload);
         return code == TAV_COSE_ERROR_OK ? 1 : (int)code;
     }
 
@@ -255,6 +288,6 @@ int main(int argc, char **argv) {
     print_cbor_value(root, 0);
 
     tav_cbor_value_free(root);
-    free_buffer(&file);
+    free_buffer(&payload);
     return 0;
 }

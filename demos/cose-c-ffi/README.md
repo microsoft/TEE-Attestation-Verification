@@ -9,13 +9,7 @@ Run these commands from this directory:
 ```sh
 cmake -S . -B build -G Ninja
 cmake --build build
-./build/tav-cose-c-ffi-demo
-```
-
-To parse a CBOR file instead of the built-in sample:
-
-```sh
-./build/tav-cose-c-ffi-demo path/to/payload.cbor
+./build/tav-cose-c-ffi-demo "$(cat test-data/caci-uvm-endorsement.hex)"
 ```
 
 To build the same demo with static linking:
@@ -23,7 +17,7 @@ To build the same demo with static linking:
 ```sh
 cmake -S . -B build-static -G Ninja -DTAV_LINK_STATIC=ON
 cmake --build build-static
-./build-static/tav-cose-c-ffi-demo
+./build-static/tav-cose-c-ffi-demo "$(cat test-data/caci-uvm-endorsement.hex)"
 ```
 
 The CMake build invokes:

@@ -81,7 +81,9 @@ jobs:
 
       - name: Run COSE C FFI demo
         run: |
+          uvm_hex="$(cat demos/cose-c-ffi/test-data/caci-uvm-endorsement.hex)"
           ./demos/cose-c-ffi/build/tav-cose-c-ffi-demo \
+            "$uvm_hex" \
             > cose-c-ffi-demo-output.txt
           diff -u demos/cose-c-ffi/test-data/sample-output.golden.txt cose-c-ffi-demo-output.txt
 
@@ -89,7 +91,9 @@ jobs:
         run: |
           cmake -S demos/cose-c-ffi -B demos/cose-c-ffi/build-static -G Ninja -DTAV_LINK_STATIC=ON
           cmake --build demos/cose-c-ffi/build-static
+          uvm_hex="$(cat demos/cose-c-ffi/test-data/caci-uvm-endorsement.hex)"
           ./demos/cose-c-ffi/build-static/tav-cose-c-ffi-demo \
+            "$uvm_hex" \
             > cose-c-ffi-demo-static-output.txt
           diff -u demos/cose-c-ffi/test-data/sample-output.golden.txt cose-c-ffi-demo-static-output.txt
 
