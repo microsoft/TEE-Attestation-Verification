@@ -143,6 +143,14 @@ pub mod wasm {
             })
         }
 
+        pub fn map_key_at(&self, index: u32) -> Result<CborValue, String> {
+            map_entry_at(&self.inner, index).map(|(key, _)| CborValue::from_native(key.clone()))
+        }
+
+        pub fn map_value_at(&self, index: u32) -> Result<CborValue, String> {
+            map_entry_at(&self.inner, index).map(|(_, value)| CborValue::from_native(value.clone()))
+        }
+
         pub fn as_cose_sign1(&self) -> Result<CoseSign1, String> {
             crate::cose_sign1(&self.inner)
                 .cloned()
