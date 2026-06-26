@@ -205,10 +205,13 @@ pub mod wasm {
         value: &NativeCborValue,
         index: u32,
     ) -> Result<(&NativeCborValue, &NativeCborValue), String> {
-        value
-            .iter_map()?
-            .nth(index as usize)
-            .ok_or_else(|| format!("Index {index} out of bounds"))
+        match value {
+            NativeCborValue::Map(entries) => entries
+                .get(index as usize)
+                .map(|(key, value)| (key, value))
+                .ok_or_else(|| format!("Index {index} out of bounds")),
+            other => Err(format!("Expected Map, got {:?}", other)),
+        }
     }
 }
 
@@ -371,6 +374,14 @@ pub mod c {
         Ok(())
     }
 
+    unsafe fn scalar_out_ptr<T: Default>(out: *mut T, name: &str) -> Result<(), TavCoseError> {
+        unsafe { out_ptr(out, name) }?;
+        unsafe {
+            *out = T::default();
+        }
+        Ok(())
+    }
+
     unsafe fn owned_out_ptr<T>(out: *mut *mut T, name: &str) -> Result<(), TavCoseError> {
         unsafe { out_ptr(out, name) }?;
         unsafe {
@@ -380,7 +391,11 @@ pub mod c {
     }
 
     unsafe fn borrowed_out_ptr<T>(out: *mut *const T, name: &str) -> Result<(), TavCoseError> {
-        unsafe { out_ptr(out, name) }
+        unsafe { out_ptr(out, name) }?;
+        unsafe {
+            *out = ptr::null();
+        }
+        Ok(())
     }
 
     unsafe fn byte_buffer_out_ptr(
@@ -457,11 +472,13 @@ pub mod c {
         value: &NativeCborValue,
         index: usize,
     ) -> Result<(&NativeCborValue, &NativeCborValue), TavCoseError> {
-        value
-            .iter_map()
-            .map_err(TavCoseError::cbor)?
-            .nth(index)
-            .ok_or_else(|| TavCoseError::cbor(format!("Index {index} out of bounds")))
+        match value {
+            NativeCborValue::Map(entries) => entries
+                .get(index)
+                .map(|(key, value)| (key, value))
+                .ok_or_else(|| TavCoseError::cbor(format!("Index {index} out of bounds"))),
+            _ => Err(TavCoseError::unexpected_type("value must be a map")),
+        }
     }
 
     #[no_mangle]
@@ -511,7 +528,7 @@ pub mod c {
         out: *mut i64,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let int = match value {
                 NativeCborValue::Int(value) => *value,
@@ -530,7 +547,7 @@ pub mod c {
         out: *mut u8,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let simple = match value {
                 NativeCborValue::Simple(value) => *value,
@@ -552,7 +569,7 @@ pub mod c {
         into_result((|| {
             unsafe {
                 borrowed_out_ptr(data, "data")?;
-                out_ptr(len, "len")?;
+                scalar_out_ptr(len, "len")?;
             }
             let value = unsafe { cbor_value(value, "value") }?;
             let bytes = borrowed_bytes(value, "value")?;
@@ -573,7 +590,7 @@ pub mod c {
         into_result((|| {
             unsafe {
                 borrowed_out_ptr(text, "text")?;
-                out_ptr(len, "len")?;
+                scalar_out_ptr(len, "len")?;
             }
             let value = unsafe { cbor_value(value, "value") }?;
             let value = match value {
@@ -594,7 +611,7 @@ pub mod c {
         out: *mut u64,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let tag = match value {
                 NativeCborValue::Tagged { tag, .. } => *tag,
@@ -632,7 +649,7 @@ pub mod c {
         out: *mut usize,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let value_len = value.len().map_err(TavCoseError::cbor)?;
             unsafe {
@@ -720,10 +737,7 @@ pub mod c {
         out: *mut bool,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
-            unsafe {
-                *out = false;
-            }
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let has_key = value.map_has_int_key(key).map_err(TavCoseError::cbor)?;
             unsafe {
@@ -741,10 +755,7 @@ pub mod c {
         out: *mut bool,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
-            unsafe {
-                *out = false;
-            }
+            unsafe { scalar_out_ptr(out, "out") }?;
             let key = unsafe { input_text(key, key_len, "key") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let has_key = value.map_has_str_key(key).map_err(TavCoseError::cbor)?;
@@ -762,10 +773,7 @@ pub mod c {
         out: *mut bool,
     ) -> *mut TavCoseError {
         into_result((|| {
-            unsafe { out_ptr(out, "out") }?;
-            unsafe {
-                *out = false;
-            }
+            unsafe { scalar_out_ptr(out, "out") }?;
             let value = unsafe { cbor_value(value, "value") }?;
             let key = unsafe { cbor_value(key, "key") }?;
             let has_key = value.map_has_key(key).map_err(TavCoseError::cbor)?;
@@ -1044,6 +1052,55 @@ pub mod c {
                 unsafe { std::slice::from_raw_parts(bytes, len) },
                 &[0xaa, 0xbb]
             );
+
+            unsafe { tav_cbor_value_free(root) };
+        }
+
+        #[test]
+        fn failed_accessors_clear_out_parameters() {
+            let cbor = [0x82, 0x01, 0x42, 0xaa, 0xbb];
+            let mut root = ptr::null_mut();
+            let err = unsafe { tav_cbor_value_from_bytes(cbor.as_ptr(), cbor.len(), &mut root) };
+            assert!(err.is_null());
+
+            let mut int_child = ptr::null();
+            let err = unsafe { tav_cbor_value_array_at(root, 0, &mut int_child) };
+            assert!(err.is_null());
+
+            let mut data = ptr::NonNull::<u8>::dangling().as_ptr().cast_const();
+            let mut len = usize::MAX;
+            let err = unsafe { tav_cbor_value_bytes(int_child, &mut data, &mut len) };
+            assert_eq!(
+                unsafe { tav_cose_error_code(err) },
+                TavCoseErrorCode::UnexpectedType
+            );
+            assert!(data.is_null());
+            assert_eq!(len, 0);
+            unsafe { tav_cose_error_free(err) };
+
+            let mut scalar = i64::MAX;
+            let err = unsafe { tav_cbor_value_int(ptr::null(), &mut scalar) };
+            assert_eq!(
+                unsafe { tav_cose_error_code(err) },
+                TavCoseErrorCode::InvalidArgument
+            );
+            assert_eq!(scalar, 0);
+            unsafe { tav_cose_error_free(err) };
+
+            let mut key = ptr::NonNull::<TavCborValue>::dangling()
+                .as_ptr()
+                .cast_const();
+            let mut value = ptr::NonNull::<TavCborValue>::dangling()
+                .as_ptr()
+                .cast_const();
+            let err = unsafe { tav_cbor_value_map_entry_at(root, 99, &mut key, &mut value) };
+            assert_eq!(
+                unsafe { tav_cose_error_code(err) },
+                TavCoseErrorCode::UnexpectedType
+            );
+            assert!(key.is_null());
+            assert!(value.is_null());
+            unsafe { tav_cose_error_free(err) };
 
             unsafe { tav_cbor_value_free(root) };
         }

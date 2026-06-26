@@ -27,6 +27,9 @@ extern "C" {
  * - Owned out-parameters are write-only: pass a non-NULL pointer to a handle
  *   slot. The slot is set to NULL before any fallible work and set to an owned
  *   handle only on success.
+ * - Error accessors are defensive for NULL TAVCoseError pointers:
+ *   tav_cose_error_code returns TAV_COSE_ERROR_ERROR_IS_NULL and
+ *   tav_cose_error_message returns a static diagnostic string.
  */
 
 typedef enum TAVCoseErrorCode {
@@ -199,6 +202,7 @@ TAV_COSE_API TAVCoseError *tav_cose_sign1_verify_detached(
     size_t spki_der_len,
     int32_t cose_alg);
 
+/* Error accessors. NULL error pointers return defensive diagnostics. */
 TAV_COSE_API TAVCoseErrorCode tav_cose_error_code(const TAVCoseError *error);
 TAV_COSE_API const char *tav_cose_error_message(const TAVCoseError *error);
 TAV_COSE_API void tav_cose_error_free(TAVCoseError *error);
