@@ -14,6 +14,7 @@
 ### Changed
 
 - Expose the crypto backend as its own crate. (#51)
+- Add `wasm32-unknown-unknown` compatibility for COSE/CACI by bumping EverParse CBOR (`cborrs`/`cborrs-nondet`) to include project-everest/everparse#296, allowing WASM builds to use stable `wasm-pack`. (#71)
 
 ## [1.0.1]
 
