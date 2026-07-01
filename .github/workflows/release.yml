@@ -104,15 +104,15 @@ jobs:
 
       - name: Build WASM with WebCrypto crypto
         working-directory: attestation
-        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --release --no-default-features --features "crypto_webcrypto"
 
       - name: Test WASM offline
         working-directory: attestation
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
+        run: wasm-pack test --node --release --no-default-features --features "crypto_pure_rust"
 
       - name: Test WASM offline with WebCrypto backend
         working-directory: attestation
-        run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack test --node --release --no-default-features --features "crypto_webcrypto"
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -121,7 +121,7 @@ jobs:
 
       - name: Build WASM for the web-verify-kernel demo
         working-directory: attestation
-        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --release --no-default-features --features "crypto_webcrypto"
 
       - name: Install web-verify-kernel demo test deps
         working-directory: demos/web-verify-kernel/tests
@@ -135,7 +135,7 @@ jobs:
 
       - name: Build WASM for the caci-attestation-verify demo
         working-directory: caci
-        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg --release --no-default-features --features "crypto_webcrypto"
 
       - name: Install caci-attestation-verify demo test deps
         working-directory: demos/caci-attestation-verify/tests
