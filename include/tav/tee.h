@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "tav/utils.h"
+
 #define TAV_API
 
 #ifdef __cplusplus
@@ -14,21 +16,21 @@ extern "C" {
  * C ABI for caller-provided-certificate SNP attestation verification.
  *
  * Usage summary:
- * - Call tav_snp_verify_attestation with the raw attestation report and the
+ * - Call tav_verify_snp_attestation with the raw attestation report and the
  *   ARK, ASK, and VCEK certificates in PEM format.
  * - On success, verification writes a TAVSnpAttestationReport* to out_report.
  *   Pass that report handle to the tav_snp_attestation_report_* accessors.
  * - Free the report handle with tav_snp_attestation_report_free when finished.
  *
  * Error behavior:
- * - tav_snp_verify_attestation returns NULL on success, or an owned TavError*
+ * - tav_verify_snp_attestation returns NULL on success, or an owned TavError*
  *   on failure. Inspect failures with tav_error_code and tav_error_message,
  *   then free them with tav_error_free.
- * - tav_snp_verify_attestation reports invalid verification inputs and invalid
+ * - tav_verify_snp_attestation reports invalid verification inputs and invalid
  *   out_report state as TavError failures. Each input buffer is capped at
  *   1 GiB.
  * - Error accessors are defensive for NULL TavError pointers: tav_error_code
- *   returns TAV_ERROR_ERROR_CODE_IS_NULL and tav_error_message returns a static
+ *   returns TAV_ERROR_ERROR_IS_NULL and tav_error_message returns a static
  *   diagnostic string.
  * - Report accessors require valid handles and valid out-parameters where
  *   applicable. Passing NULL, dangling, freed, or otherwise invalid pointers is
@@ -38,20 +40,7 @@ extern "C" {
  *   the owning report handle is freed, and must not be freed by the caller.
  */
 
-typedef enum TAVErrorCode {
-    TAV_ERROR_OK = 0,
-    TAV_ERROR_INVALID_ARGUMENT = 1,
-    TAV_ERROR_ERROR_CODE_IS_NULL = 2,
-    TAV_ERROR_UNSUPPORTED_PROCESSOR = 101,
-    TAV_ERROR_INVALID_ROOT_CERTIFICATE = 102,
-    TAV_ERROR_CERTIFICATE_CHAIN_ERROR = 103,
-    TAV_ERROR_SIGNATURE_VERIFICATION_ERROR = 104,
-    TAV_ERROR_TCB_VERIFICATION_ERROR = 105,
-} TAVErrorCode;
-
 typedef struct TAVSnpAttestationReport TAVSnpAttestationReport;
-typedef struct TavError TavError;
-
 /*
  * Verify an SNP attestation report using caller-provided ARK, ASK, and VCEK
  * certificates in PEM format.
@@ -60,7 +49,7 @@ typedef struct TavError TavError;
  * NULL on entry. If out_report is NULL, or if *out_report is non-NULL, this
  * returns TAV_ERROR_INVALID_ARGUMENT and does not overwrite an existing handle.
  */
-TAV_API TavError *tav_snp_verify_attestation(
+TAV_API TavError *tav_verify_snp_attestation(
     const uint8_t *report_bytes,
     size_t report_len,
     const uint8_t *ark_pem,
@@ -204,16 +193,8 @@ TAV_API void tav_snp_attestation_report_signature_s(
     const uint8_t **data,
     size_t *len);
 
-/* Frees a report handle returned by tav_snp_verify_attestation. NULL is a no-op. */
+/* Frees a report handle returned by tav_verify_snp_attestation. NULL is a no-op. */
 TAV_API void tav_snp_attestation_report_free(TAVSnpAttestationReport *report);
-
-/* Error accessors. NULL error pointers return defensive diagnostics. */
-TAV_API TAVErrorCode tav_error_code(const TavError *error);
-
-TAV_API const char *tav_error_message(const TavError *error);
-
-/* Frees an error returned by tav_snp_verify_attestation. NULL is a no-op. */
-TAV_API void tav_error_free(TavError *error);
 
 #ifdef __cplusplus
 }

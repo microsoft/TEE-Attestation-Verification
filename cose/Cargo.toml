@@ -19,9 +19,11 @@ crypto_webcrypto = ["crypto/crypto_webcrypto"]
 
 [dependencies]
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.2", path = "../crypto", default-features = false }
+ffi-utils = { package = "tee-attestation-verification-ffi-utils", version = "1.0.2", path = "../ffi-utils" }
 cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "f4cd5ffa183edd5cc824d66588012bcf8d0bdccd" } # v2026.02.25
 cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "f4cd5ffa183edd5cc824d66588012bcf8d0bdccd" } # v2026.02.25
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"

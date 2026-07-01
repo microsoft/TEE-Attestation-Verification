@@ -15,7 +15,6 @@
 //!
 
 mod didx509;
-#[cfg(target_family = "wasm")]
 pub mod ffi;
 mod parse;
 

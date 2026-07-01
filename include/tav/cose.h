@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "tav/utils.h"
+
 #define TAV_COSE_API
 
 #ifdef __cplusplus
@@ -21,27 +23,13 @@ extern "C" {
  *   ancestor owned TAVCborValue remains alive.
  * - Byte/text accessors return borrowed views. The returned data remains valid
  *   only while the owning or ancestor TAVCborValue remains alive.
- * - tav_cbor_value_to_bytes writes owned bytes to a TAVCoseByteBuffer. Release
- *   it with tav_cose_byte_buffer_free.
+ * - tav_cbor_value_to_bytes writes owned bytes to a TavByteBuffer. Release
+ *   it with tav_byte_buffer_free.
  * - Freeing NULL owned handles is a no-op.
  * - Owned out-parameters are write-only: pass a non-NULL pointer to a handle
  *   slot. The slot is set to NULL before any fallible work and set to an owned
  *   handle only on success.
- * - Error accessors are defensive for NULL TAVCoseError pointers:
- *   tav_cose_error_code returns TAV_COSE_ERROR_ERROR_IS_NULL and
- *   tav_cose_error_message returns a static diagnostic string.
  */
-
-typedef enum TAVCoseErrorCode {
-    TAV_COSE_ERROR_OK = 0,
-    TAV_COSE_ERROR_INVALID_ARGUMENT = 1,
-    TAV_COSE_ERROR_ERROR_IS_NULL = 2,
-    TAV_COSE_ERROR_CBOR = 201,
-    TAV_COSE_ERROR_UNEXPECTED_TYPE = 202,
-    TAV_COSE_ERROR_UNSUPPORTED_ALGORITHM = 203,
-    TAV_COSE_ERROR_KEY_IMPORT = 204,
-    TAV_COSE_ERROR_VERIFICATION = 205,
-} TAVCoseErrorCode;
 
 typedef enum TAVCborKind {
     TAV_CBOR_KIND_INT = 1,
@@ -88,124 +76,111 @@ typedef enum TAVCwtClaim {
 } TAVCwtClaim;
 
 typedef struct TAVCborValue TAVCborValue;
-typedef struct TAVCoseError TAVCoseError;
 
-typedef struct TAVCoseByteBuffer {
-    uint8_t *data;
-    size_t len;
-} TAVCoseByteBuffer;
-
-TAV_COSE_API TAVCoseError *tav_cbor_value_from_bytes(
+TAV_COSE_API TavError *tav_cbor_value_from_bytes(
     const uint8_t *bytes,
     size_t len,
     TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_to_bytes(
+TAV_COSE_API TavError *tav_cbor_value_to_bytes(
     const TAVCborValue *value,
-    TAVCoseByteBuffer *out_bytes);
+    TavByteBuffer *out_bytes);
 
 /* value must be a valid, non-NULL TAVCborValue handle. */
 TAV_COSE_API TAVCborKind tav_cbor_value_kind(const TAVCborValue *value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_int(
+TAV_COSE_API TavError *tav_cbor_value_int(
     const TAVCborValue *value,
     int64_t *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_simple(
+TAV_COSE_API TavError *tav_cbor_value_simple(
     const TAVCborValue *value,
     uint8_t *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_bytes(
+TAV_COSE_API TavError *tav_cbor_value_bytes(
     const TAVCborValue *value,
     const uint8_t **data,
     size_t *len);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_text(
+TAV_COSE_API TavError *tav_cbor_value_text(
     const TAVCborValue *value,
     const char **text,
     size_t *len);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_tag(
+TAV_COSE_API TavError *tav_cbor_value_tag(
     const TAVCborValue *value,
     uint64_t *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_tagged_payload(
+TAV_COSE_API TavError *tav_cbor_value_tagged_payload(
     const TAVCborValue *value,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_len(
+TAV_COSE_API TavError *tav_cbor_value_len(
     const TAVCborValue *value,
     size_t *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_array_at(
+TAV_COSE_API TavError *tav_cbor_value_array_at(
     const TAVCborValue *value,
     size_t index,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_at_int(
+TAV_COSE_API TavError *tav_cbor_value_map_at_int(
     const TAVCborValue *value,
     int64_t key,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_at_text(
+TAV_COSE_API TavError *tav_cbor_value_map_at_text(
     const TAVCborValue *value,
     const char *key,
     size_t key_len,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_at(
+TAV_COSE_API TavError *tav_cbor_value_map_at(
     const TAVCborValue *value,
     const TAVCborValue *key,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_has_int_key(
+TAV_COSE_API TavError *tav_cbor_value_map_has_int_key(
     const TAVCborValue *value,
     int64_t key,
     bool *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_has_text_key(
+TAV_COSE_API TavError *tav_cbor_value_map_has_text_key(
     const TAVCborValue *value,
     const char *key,
     size_t key_len,
     bool *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_has_key(
+TAV_COSE_API TavError *tav_cbor_value_map_has_key(
     const TAVCborValue *value,
     const TAVCborValue *key,
     bool *out);
 
-TAV_COSE_API TAVCoseError *tav_cbor_value_map_entry_at(
+TAV_COSE_API TavError *tav_cbor_value_map_entry_at(
     const TAVCborValue *value,
     size_t index,
     const TAVCborValue **out_key,
     const TAVCborValue **out_value);
 
-TAV_COSE_API TAVCoseError *tav_cose_sign1_validate(
+TAV_COSE_API TavError *tav_validate_cose_sign1(
     const TAVCborValue *value,
     const TAVCborValue **out_sign1);
 
 TAV_COSE_API void tav_cbor_value_free(TAVCborValue *value);
 
-TAV_COSE_API void tav_cose_byte_buffer_free(TAVCoseByteBuffer *bytes);
-
-TAV_COSE_API TAVCoseError *tav_cose_sign1_verify_embedded(
+TAV_COSE_API TavError *tav_verify_cose_sign1_embedded(
     const TAVCborValue *sign1,
     const uint8_t *spki_der,
     size_t spki_der_len,
     int32_t cose_alg);
 
-TAV_COSE_API TAVCoseError *tav_cose_sign1_verify_detached(
+TAV_COSE_API TavError *tav_verify_cose_sign1_detached(
     const TAVCborValue *sign1,
     const uint8_t *payload,
     size_t payload_len,
     const uint8_t *spki_der,
     size_t spki_der_len,
     int32_t cose_alg);
-
-/* Error accessors. NULL error pointers return defensive diagnostics. */
-TAV_COSE_API TAVCoseErrorCode tav_cose_error_code(const TAVCoseError *error);
-TAV_COSE_API const char *tav_cose_error_message(const TAVCoseError *error);
-TAV_COSE_API void tav_cose_error_free(TAVCoseError *error);
 
 #ifdef __cplusplus
 }

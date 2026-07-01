@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#include "tav/tav.h"
+#include "tav/tee.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -192,7 +192,7 @@ int main(int argc, char **argv) {
     Buffer vcek = read_file(argv[4]);
 
     TAVSnpAttestationReport *report = NULL;
-    TavError *error = tav_snp_verify_attestation(
+    TavError *error = tav_verify_snp_attestation(
         attestation.data,
         attestation.len,
         ark.data,
@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
         &report);
 
     if (error != NULL) {
-        TAVErrorCode code = tav_error_code(error);
+        TavErrorCode code = tav_error_code(error);
         fprintf(stderr, "%s\n", tav_error_message(error));
         tav_error_free(error);
         free_buffer(&attestation);

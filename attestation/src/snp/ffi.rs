@@ -3,132 +3,55 @@
 
 //! FFI types and target-specific bindings for SNP attestation verification.
 //!
-//! [`crate::snp::ffi::ErrorCode`] and [`crate::snp::ffi::VerifyError`] classify
-//! verification failures in a form suitable for non-Rust callers.
+//! [`ffi_utils::TavError`] classifies verification failures in a form suitable
+//! for non-Rust callers.
 //! Target-specific bindings live under submodules; the `wasm` submodule is
 //! compiled only for WASM targets and exposes the caller-provided-certificate
 //! WebAssembly API. The `c` submodule is compiled for native targets and exports
-//! the C ABI declared in `include/tav/tav.h`.
+//! the C ABI declared in `include/tav/tee.h`.
 
+#[cfg(not(target_family = "wasm"))]
 use crate::snp::verify::VerificationError;
+#[cfg(not(target_family = "wasm"))]
+use ffi_utils::{TavError, TavErrorCode};
 
-#[cfg(target_family = "wasm")]
-use wasm_bindgen::prelude::*;
-
-// ---------------------------------------------------------------------------
-// Error types
-// ---------------------------------------------------------------------------
-
-/// Error categories for verification failures.
-///
-/// The numbering convention is stable and intended to match the C FFI
-/// `TAVErrorCode` values:
-/// - 1: input parsing / validation
-/// - 2: null error handle passed to an error accessor
-/// - 101–105: attestation verification (mapped from [`VerificationError`])
-#[cfg_attr(target_family = "wasm", wasm_bindgen)]
-#[cfg_attr(target_family = "wasm", repr(u32))]
-#[cfg_attr(not(target_family = "wasm"), repr(C))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorCode {
-    /// Input bytes or certificate text could not be parsed.
-    InvalidArgument = 1,
-    /// A null `TavError` pointer was passed to a C error accessor.
-    ErrorCodeIsNull = 2,
-    /// The report's processor family/model is not supported.
-    UnsupportedProcessor = 101,
-    /// The selected or provided ARK certificate is not a valid trusted root.
-    InvalidRootCertificate = 102,
-    /// The ARK → ASK → VCEK certificate chain could not be verified.
-    CertificateChainError = 103,
-    /// The attestation report signature could not be verified with the VCEK.
-    SignatureVerificationError = 104,
-    /// Report TCB values did not match the corresponding VCEK extensions.
-    TcbVerificationError = 105,
-}
-
-/// An error returned by the verify functions.
-#[cfg_attr(target_family = "wasm", wasm_bindgen)]
-#[derive(Debug)]
-pub struct VerifyError {
-    code: ErrorCode,
-    message: String,
-}
-
-#[cfg_attr(target_family = "wasm", wasm_bindgen)]
-impl VerifyError {
-    /// The error category.
-    #[cfg_attr(target_family = "wasm", wasm_bindgen(getter))]
-    pub fn code(&self) -> ErrorCode {
-        self.code
-    }
-
-    /// The human-readable error message.
-    #[cfg_attr(target_family = "wasm", wasm_bindgen(getter))]
-    pub fn message(&self) -> String {
-        self.message.clone()
-    }
-}
-
-impl VerifyError {
-    // Only used by the wasm module today; the C FFI layer will use it too
-    // when it lands. Silence dead_code on builds without any consumer.
-    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
-    pub(crate) fn invalid_argument(message: String) -> Self {
-        Self {
-            code: ErrorCode::InvalidArgument,
-            message,
+#[cfg(not(target_family = "wasm"))]
+fn tav_error_from_verification_error(error: VerificationError) -> TavError {
+    let code = match &error {
+        VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
+        VerificationError::InvalidRootCertificate(_) => TavErrorCode::InvalidRootCertificate,
+        VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
+        VerificationError::SignatureVerificationError(_) => {
+            TavErrorCode::SignatureVerificationError
         }
-    }
-}
-
-impl std::fmt::Display for VerifyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for VerifyError {}
-
-impl From<VerificationError> for VerifyError {
-    fn from(e: VerificationError) -> Self {
-        let code = match &e {
-            VerificationError::UnsupportedProcessor(_) => ErrorCode::UnsupportedProcessor,
-            VerificationError::InvalidRootCertificate(_) => ErrorCode::InvalidRootCertificate,
-            VerificationError::CertificateChainError(_) => ErrorCode::CertificateChainError,
-            VerificationError::SignatureVerificationError(_) => {
-                ErrorCode::SignatureVerificationError
-            }
-            VerificationError::TcbVerificationError(_) => ErrorCode::TcbVerificationError,
-        };
-        Self {
-            code,
-            message: e.to_string(),
-        }
-    }
+        VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
+    };
+    TavError::new(code, error.to_string())
 }
 
 // ---------------------------------------------------------------------------
 // Error mapping test (backend-independent; runs on native CI)
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
 
     #[test]
-    fn error_code_from_all_verification_error_variants() {
+    fn tav_error_from_all_verification_error_variants() {
         // Exhaustive match: adding a new VerificationError variant forces the
-        // compiler to update this test alongside the From impl.
-        fn expected_code(err: &VerificationError) -> ErrorCode {
+        // compiler to update this test alongside tav_error_from_verification_error.
+        fn expected_code(err: &VerificationError) -> TavErrorCode {
             match err {
-                VerificationError::UnsupportedProcessor(_) => ErrorCode::UnsupportedProcessor,
-                VerificationError::InvalidRootCertificate(_) => ErrorCode::InvalidRootCertificate,
-                VerificationError::CertificateChainError(_) => ErrorCode::CertificateChainError,
-                VerificationError::SignatureVerificationError(_) => {
-                    ErrorCode::SignatureVerificationError
+                VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
+                VerificationError::InvalidRootCertificate(_) => {
+                    TavErrorCode::InvalidRootCertificate
                 }
-                VerificationError::TcbVerificationError(_) => ErrorCode::TcbVerificationError,
+                VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
+                VerificationError::SignatureVerificationError(_) => {
+                    TavErrorCode::SignatureVerificationError
+                }
+                VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
             }
         }
 
@@ -142,78 +65,26 @@ mod tests {
 
         for verif_err in cases {
             let want = expected_code(&verif_err);
-            let err = VerifyError::from(verif_err);
+            let err = tav_error_from_verification_error(verif_err);
             assert_eq!(err.code(), want);
         }
     }
 
     #[test]
-    fn invalid_argument_error_preserves_code_and_message() {
-        let err = VerifyError::invalid_argument("bad input".into());
+    fn tav_error_invalid_argument_preserves_code_and_message() {
+        let err = TavError::invalid_argument("bad input");
 
-        assert_eq!(err.code(), ErrorCode::InvalidArgument);
+        assert_eq!(err.code(), TavErrorCode::InvalidArgument);
         assert_eq!(err.message(), "bad input");
     }
 
     #[test]
     fn display_prints_message() {
-        let err = VerifyError::from(VerificationError::CertificateChainError("broken".into()));
+        let err = tav_error_from_verification_error(VerificationError::CertificateChainError(
+            "broken".into(),
+        ));
 
         assert_eq!(err.to_string(), "Certificate chain error: broken");
-    }
-
-    #[test]
-    fn c_header_error_codes_match_rust_error_codes() {
-        let header = include_str!("../../../include/tav/tav.h");
-
-        assert_eq!(c_header_error_code(header, "TAV_ERROR_OK"), Some(0));
-
-        let expected = [
-            (
-                "TAV_ERROR_INVALID_ARGUMENT",
-                ErrorCode::InvalidArgument as i32,
-            ),
-            (
-                "TAV_ERROR_ERROR_CODE_IS_NULL",
-                ErrorCode::ErrorCodeIsNull as i32,
-            ),
-            (
-                "TAV_ERROR_UNSUPPORTED_PROCESSOR",
-                ErrorCode::UnsupportedProcessor as i32,
-            ),
-            (
-                "TAV_ERROR_INVALID_ROOT_CERTIFICATE",
-                ErrorCode::InvalidRootCertificate as i32,
-            ),
-            (
-                "TAV_ERROR_CERTIFICATE_CHAIN_ERROR",
-                ErrorCode::CertificateChainError as i32,
-            ),
-            (
-                "TAV_ERROR_SIGNATURE_VERIFICATION_ERROR",
-                ErrorCode::SignatureVerificationError as i32,
-            ),
-            (
-                "TAV_ERROR_TCB_VERIFICATION_ERROR",
-                ErrorCode::TcbVerificationError as i32,
-            ),
-        ];
-
-        for (name, rust_value) in expected {
-            assert_eq!(
-                c_header_error_code(header, name),
-                Some(rust_value),
-                "{name} in include/tav/tav.h must match Rust ErrorCode"
-            );
-        }
-    }
-
-    fn c_header_error_code(header: &str, name: &str) -> Option<i32> {
-        let line = header
-            .lines()
-            .find(|line| line.trim_start().starts_with(name))?;
-        let (_, value) = line.split_once('=')?;
-        value.trim().trim_end_matches(',').parse().ok()
     }
 }
 
@@ -221,9 +92,9 @@ mod tests {
 pub mod c {
     //! C ABI bindings for caller-provided-certificate SNP attestation verification.
     //!
-    //! This module exports the symbols declared in `include/tav/tav.h`.
+    //! This module exports the symbols declared in `include/tav/tee.h`.
     //!
-    //! [`tav_snp_verify_attestation`] returns a null [`TavError`] pointer on
+    //! [`tav_verify_snp_attestation`] returns a null [`TavError`] pointer on
     //! success and an owned [`TavError`] pointer on failure. On success it
     //! writes an owned [`TAVSnpAttestationReport`] handle to `out_report`.
     //! Callers release these handles with [`tav_error_free`] and
@@ -233,7 +104,7 @@ pub mod c {
     //! returned by this library. Passing null, dangling, freed, or otherwise
     //! invalid pointers to report accessors is undefined behavior. Error
     //! accessors are defensive for null pointers: [`tav_error_code`] returns
-    //! [`ErrorCode::ErrorCodeIsNull`] and [`tav_error_message`] returns a static
+    //! [`TavErrorCode::ErrorIsNull`] and [`tav_error_message`] returns a static
     //! diagnostic string. Freeing a null report or error pointer is a no-op.
     //!
     //! Byte-slice report accessors return borrowed views by writing a pointer
@@ -241,53 +112,26 @@ pub mod c {
     //! valid only until the owning report handle is freed, and must not be freed
     //! by the caller.
 
-    use std::ffi::CString;
-    use std::os::raw::c_char;
     use std::ptr;
 
+    use ffi_utils::TavError;
     use zerocopy::FromBytes;
 
-    use super::{ErrorCode, VerifyError};
     use crate::snp::verify::{self, ChainVerification};
     use crate::{certificate_from_pem, AttestationReport};
 
     const MAX_VERIFY_INPUT_LEN: usize = 1024 * 1024 * 1024;
-    const NULL_ERROR_MESSAGE: &[u8] = b"null TAVError pointer\0";
 
     pub struct TAVSnpAttestationReport {
         bytes: Vec<u8>,
     }
 
-    pub struct TavError {
-        code: ErrorCode,
-        message: CString,
-    }
-
-    impl TavError {
-        fn invalid_argument(message: impl Into<String>) -> Self {
-            VerifyError::invalid_argument(message.into()).into()
-        }
-    }
-
-    impl From<VerifyError> for TavError {
-        fn from(value: VerifyError) -> Self {
-            Self {
-                code: value.code(),
-                message: c_string(value.message()),
-            }
-        }
-    }
-
     impl TAVSnpAttestationReport {
-        fn report(&self) -> &AttestationReport {
+        pub fn report(&self) -> &AttestationReport {
             AttestationReport::ref_from_bytes(&self.bytes).expect(
                 "TAVSnpAttestationReport is only constructed from verified bytes so parsing should not fail",
             )
         }
-    }
-
-    fn c_string(message: String) -> CString {
-        CString::new(message.replace('\0', "\\0")).expect("NUL bytes were replaced")
     }
 
     macro_rules! scalar_accessor {
@@ -321,7 +165,7 @@ pub mod c {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_snp_verify_attestation(
+    pub unsafe extern "C" fn tav_verify_snp_attestation(
         report_bytes: *const u8,
         report_len: usize,
         ark_pem: *const u8,
@@ -416,8 +260,7 @@ pub mod c {
                     ark: &ark,
                 },
             )
-            .map_err(VerifyError::from)
-            .map_err(TavError::from)?;
+            .map_err(super::tav_error_from_verification_error)?;
 
             Ok(TAVSnpAttestationReport {
                 bytes: report_bytes.to_vec(),
@@ -431,7 +274,7 @@ pub mod c {
                 }
                 ptr::null_mut()
             }
-            Err(error) => Box::into_raw(Box::new(error)),
+            Err(error) => error.into_raw(),
         }
     }
 
@@ -587,45 +430,17 @@ pub mod c {
         }
     }
 
-    #[no_mangle]
-    pub unsafe extern "C" fn tav_error_code(error: *const TavError) -> ErrorCode {
-        if error.is_null() {
-            return ErrorCode::ErrorCodeIsNull;
-        }
-
-        let error = unsafe { &*error };
-        error.code
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn tav_error_message(error: *const TavError) -> *const c_char {
-        if error.is_null() {
-            return NULL_ERROR_MESSAGE.as_ptr().cast();
-        }
-
-        let error = unsafe { &*error };
-        error.message.as_ptr()
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn tav_error_free(error: *mut TavError) {
-        if !error.is_null() {
-            unsafe {
-                drop(Box::from_raw(error));
-            }
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
+        use ffi_utils::{tav_error_code, tav_error_message, TavErrorCode};
 
         #[test]
         fn verify_rejects_inputs_larger_than_one_gib() {
             let mut report = ptr::null_mut();
 
             let error = unsafe {
-                tav_snp_verify_attestation(
+                tav_verify_snp_attestation(
                     std::ptr::NonNull::<u8>::dangling().as_ptr(),
                     MAX_VERIFY_INPUT_LEN + 1,
                     std::ptr::NonNull::<u8>::dangling().as_ptr(),
@@ -639,12 +454,17 @@ pub mod c {
             };
 
             assert!(!error.is_null());
-            let error = unsafe { Box::from_raw(error) };
-            assert_eq!(error.code, ErrorCode::InvalidArgument);
             assert_eq!(
-                error.message.to_str().unwrap(),
+                unsafe { tav_error_code(error) },
+                TavErrorCode::InvalidArgument
+            );
+            assert_eq!(
+                unsafe { std::ffi::CStr::from_ptr(tav_error_message(error)) }
+                    .to_str()
+                    .unwrap(),
                 "attestation report exceeds maximum input size"
             );
+            unsafe { ffi_utils::tav_error_free(error) };
             assert!(report.is_null());
         }
 
@@ -654,14 +474,14 @@ pub mod c {
 
             assert_eq!(
                 unsafe { tav_error_code(ptr::null()) },
-                ErrorCode::ErrorCodeIsNull
+                TavErrorCode::ErrorIsNull
             );
             assert!(!message.is_null());
             assert_eq!(
                 unsafe { std::ffi::CStr::from_ptr(message) }
                     .to_str()
                     .unwrap(),
-                "null TAVError pointer"
+                "null TavError pointer"
             );
         }
     }
@@ -686,10 +506,66 @@ pub mod wasm {
     use wasm_bindgen::prelude::*;
     use zerocopy::{FromBytes, IntoBytes};
 
-    use super::VerifyError;
     use crate::crypto::{CertificateBackend, Crypto};
     use crate::snp::report::AttestationReport;
-    use crate::snp::verify::ChainVerification;
+    use crate::snp::verify::{ChainVerification, VerificationError};
+    use ffi_utils::TavErrorCode as ErrorCode;
+
+    // Backwards compatibility VerifyError type for JS consumers
+    #[wasm_bindgen]
+    #[derive(Debug)]
+    pub struct VerifyError {
+        code: ErrorCode,
+        message: String,
+    }
+
+    #[wasm_bindgen]
+    impl VerifyError {
+        #[wasm_bindgen(getter)]
+        pub fn code(&self) -> ErrorCode {
+            self.code
+        }
+
+        #[wasm_bindgen(getter)]
+        pub fn message(&self) -> String {
+            self.message.clone()
+        }
+    }
+
+    impl VerifyError {
+        fn invalid_argument(message: String) -> Self {
+            Self {
+                code: ErrorCode::InvalidArgument,
+                message,
+            }
+        }
+    }
+
+    impl std::fmt::Display for VerifyError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.message)
+        }
+    }
+
+    impl std::error::Error for VerifyError {}
+
+    impl From<VerificationError> for VerifyError {
+        fn from(error: VerificationError) -> Self {
+            let code = match &error {
+                VerificationError::UnsupportedProcessor(_) => ErrorCode::UnsupportedProcessor,
+                VerificationError::InvalidRootCertificate(_) => ErrorCode::InvalidRootCertificate,
+                VerificationError::CertificateChainError(_) => ErrorCode::CertificateChainError,
+                VerificationError::SignatureVerificationError(_) => {
+                    ErrorCode::SignatureVerificationError
+                }
+                VerificationError::TcbVerificationError(_) => ErrorCode::TcbVerificationError,
+            };
+            Self {
+                code,
+                message: error.to_string(),
+            }
+        }
+    }
 
     /// A cryptographically verified SEV-SNP attestation report.
     ///

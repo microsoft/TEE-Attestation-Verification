@@ -64,15 +64,15 @@ static Buffer decode_hex(const char *hex) {
     return buffer;
 }
 
-static void check_cose_error(TAVCoseError *error, const char *context) {
+static void check_cose_error(TavError *error, const char *context) {
     if (error == NULL) {
         return;
     }
 
-    TAVCoseErrorCode code = tav_cose_error_code(error);
-    fprintf(stderr, "%s: %s\n", context, tav_cose_error_message(error));
-    tav_cose_error_free(error);
-    exit(code == TAV_COSE_ERROR_OK ? 1 : (int)code);
+    TavErrorCode code = tav_error_code(error);
+    fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
+    tav_error_free(error);
+    exit(code == TAV_ERROR_OK ? 1 : (int)code);
 }
 
 static void print_indent(size_t indent) {
@@ -275,13 +275,13 @@ int main(int argc, char **argv) {
     Buffer payload = decode_hex(argv[1]);
 
     TAVCborValue *root = NULL;
-    TAVCoseError *error = tav_cbor_value_from_bytes(payload.data, payload.len, &root);
+    TavError *error = tav_cbor_value_from_bytes(payload.data, payload.len, &root);
     if (error != NULL) {
-        TAVCoseErrorCode code = tav_cose_error_code(error);
-        fprintf(stderr, "parse CBOR payload: %s\n", tav_cose_error_message(error));
-        tav_cose_error_free(error);
+        TavErrorCode code = tav_error_code(error);
+        fprintf(stderr, "parse CBOR payload: %s\n", tav_error_message(error));
+        tav_error_free(error);
         free_buffer(&payload);
-        return code == TAV_COSE_ERROR_OK ? 1 : (int)code;
+        return code == TAV_ERROR_OK ? 1 : (int)code;
     }
 
     printf("CBOR payload\n");

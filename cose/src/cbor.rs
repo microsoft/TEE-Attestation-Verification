@@ -8,6 +8,9 @@ use cborrs_nondet::cbornondet::*;
 /// deeply nested untrusted inputs from exhausting the Rust call stack.
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
 
+/// CBOR simple value for `null` (RFC 8949 major type 7, value 22).
+pub const CBOR_SIMPLE_NULL: u8 = 22;
+
 struct SimpleArena<T>(std::cell::RefCell<Vec<Box<[T]>>>);
 
 impl<T> SimpleArena<T> {

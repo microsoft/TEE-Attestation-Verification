@@ -74,10 +74,9 @@ jobs:
 
       - name: Check C FFI exports
         run: |
-          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
-            | grep ' tav_snp_verify_attestation'
-          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
-            | grep ' tav_error_code'
+          python3 scripts/check-c-ffi-exports.py \
+            --library target/debug/libtee_attestation_verification_lib.so \
+            --golden demos/c-ffi/test-data/exports.golden.txt
 
       - name: Run C FFI demo
         run: |
@@ -149,10 +148,9 @@ jobs:
 
       - name: Check COSE C FFI exports
         run: |
-          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
-            | grep ' tav_cbor_value_from_bytes'
-          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
-            | grep ' tav_cose_error_code'
+          python3 scripts/check-c-ffi-exports.py \
+            --library target/debug/libtee_attestation_verification_cose.so \
+            --golden demos/cose-c-ffi/test-data/exports.golden.txt
 
       - name: Run COSE C FFI demo
         run: |
@@ -171,6 +169,92 @@ jobs:
             "$uvm_hex" \
             > cose-c-ffi-demo-static-output.txt
           diff -u demos/cose-c-ffi/test-data/sample-output.golden.txt cose-c-ffi-demo-static-output.txt
+
+  caci-c-ffi:
+    name: CACI C FFI demo
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install rust
+        run: |
+          rustup update stable && rustup default stable
+
+      - name: Build CACI C FFI demo
+        run: |
+          cmake -S demos/caci-c-ffi -B demos/caci-c-ffi/build -G Ninja
+          cmake --build demos/caci-c-ffi/build
+
+      - name: Check CACI C FFI exports
+        run: |
+          python3 scripts/check-c-ffi-exports.py \
+            --library target/debug/libtee_attestation_verification_caci.so \
+            --golden demos/caci-c-ffi/test-data/exports.golden.txt
+
+      - name: Run CACI C FFI demo
+        run: |
+          ./demos/caci-c-ffi/build/tav-caci-c-ffi-demo \
+            caci/tests/fixtures/report.hex \
+            caci/tests/fixtures/host-amd-cert.base64 \
+            caci/tests/fixtures/reference-info.base64 \
+            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
+            demos/caci-c-ffi/test-data/policy.hex \
+            ContainerPlat-AMD-UVM \
+            104 \
+            > caci-c-ffi-demo-output.txt
+          diff -u demos/caci-c-ffi/test-data/sample-output.golden.txt caci-c-ffi-demo-output.txt
+
+      - name: Run CACI C FFI demo failure path
+        run: |
+          : > caci-c-ffi-empty-report.hex
+          set +e
+          ./demos/caci-c-ffi/build/tav-caci-c-ffi-demo \
+            caci-c-ffi-empty-report.hex \
+            caci/tests/fixtures/host-amd-cert.base64 \
+            caci/tests/fixtures/reference-info.base64 \
+            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
+            demos/caci-c-ffi/test-data/policy.hex \
+            ContainerPlat-AMD-UVM \
+            104 \
+            > caci-c-ffi-demo-failure-output.txt \
+            2> caci-c-ffi-demo-failure-error.txt
+          code=$?
+          set -e
+          test "$code" -eq 1
+          test ! -s caci-c-ffi-demo-failure-output.txt
+          diff -u demos/caci-c-ffi/test-data/empty-report-error.golden.txt caci-c-ffi-demo-failure-error.txt
+
+      - name: Build and run statically linked CACI C FFI demo
+        run: |
+          cmake -S demos/caci-c-ffi -B demos/caci-c-ffi/build-static -G Ninja -DTAV_LINK_STATIC=ON
+          cmake --build demos/caci-c-ffi/build-static
+          ./demos/caci-c-ffi/build-static/tav-caci-c-ffi-demo \
+            caci/tests/fixtures/report.hex \
+            caci/tests/fixtures/host-amd-cert.base64 \
+            caci/tests/fixtures/reference-info.base64 \
+            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
+            demos/caci-c-ffi/test-data/policy.hex \
+            ContainerPlat-AMD-UVM \
+            104 \
+            > caci-c-ffi-demo-static-output.txt
+          diff -u demos/caci-c-ffi/test-data/sample-output.golden.txt caci-c-ffi-demo-static-output.txt
+          : > caci-c-ffi-empty-report.hex
+          set +e
+          ./demos/caci-c-ffi/build-static/tav-caci-c-ffi-demo \
+            caci-c-ffi-empty-report.hex \
+            caci/tests/fixtures/host-amd-cert.base64 \
+            caci/tests/fixtures/reference-info.base64 \
+            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
+            demos/caci-c-ffi/test-data/policy.hex \
+            ContainerPlat-AMD-UVM \
+            104 \
+            > caci-c-ffi-demo-static-failure-output.txt \
+            2> caci-c-ffi-demo-static-failure-error.txt
+          code=$?
+          set -e
+          test "$code" -eq 1
+          test ! -s caci-c-ffi-demo-static-failure-output.txt
+          diff -u demos/caci-c-ffi/test-data/empty-report-error.golden.txt caci-c-ffi-demo-static-failure-error.txt
 
   caci-attestation-verify:
     name: E2E test of CACI attestation verification

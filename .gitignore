@@ -22,3 +22,11 @@ demos/c-ffi/cmake_install.cmake
 demos/c-ffi/build.ninja
 demos/c-ffi/.ninja_deps
 demos/c-ffi/.ninja_log
+demos/caci-c-ffi/build/
+demos/caci-c-ffi/build-static/
+demos/caci-c-ffi/CMakeFiles/
+demos/caci-c-ffi/CMakeCache.txt
+demos/caci-c-ffi/cmake_install.cmake
+demos/caci-c-ffi/build.ninja
+demos/caci-c-ffi/.ninja_deps
+demos/caci-c-ffi/.ninja_log
