@@ -58,7 +58,6 @@ jobs:
       - name: Setup WASM tooling
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.122 --locked
           cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Check ${{ matrix.backend.name }} backend
