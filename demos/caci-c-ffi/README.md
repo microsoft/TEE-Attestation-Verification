@@ -4,7 +4,7 @@ This demo verifies the checked-in Confidential ACI fixture through the staged
 native C ABI declared by `include/tav/caci.h`.
 
 The CACI library is the frontend link target for the whole flow: it exports the
-SNP verifier from `include/tav/tee.h`, the CBOR/COSE helpers from
+SNP verifier from `include/tav/tav.h`, the CBOR/COSE helpers from
 `include/tav/cose.h`, and the CACI UVM/policy functions from
 `include/tav/caci.h`.
 
