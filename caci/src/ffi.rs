@@ -184,7 +184,7 @@ pub mod c {
     use std::os::raw::c_char;
     use std::ptr;
 
-    use attestation::snp::ffi::c::TAVSnpAttestationReport;
+    use attestation::snp::ffi::c::TavSnpAttestationReport;
     use attestation::snp::report::TcbVersionRaw;
     use attestation::snp::verify::VerificationError;
     use cose::ffi::c::TavCborValue;
@@ -301,8 +301,13 @@ pub mod c {
 
     unsafe fn owned_out_ptr<T>(out: *mut *mut T, name: &str) -> Result<(), TavError> {
         unsafe { out_ptr(out, name) }?;
-        unsafe {
-            *out = ptr::null_mut();
+        // Matches tav_verify_snp_attestation: the slot must contain NULL on
+        // entry. A non-NULL slot is rejected without being overwritten, so a
+        // caller can never silently leak a live handle by reusing a variable.
+        if unsafe { !(*out).is_null() } {
+            return Err(TavError::invalid_argument(format!(
+                "{name} must point to NULL before verification"
+            )));
         }
         Ok(())
     }
@@ -316,7 +321,7 @@ pub mod c {
     }
 
     unsafe fn attestation_report<'a>(
-        report: *const TAVSnpAttestationReport,
+        report: *const TavSnpAttestationReport,
     ) -> Result<&'a attestation::snp::report::AttestationReport, TavError> {
         if report.is_null() {
             return Err(TavError::invalid_argument("report is null"));
@@ -330,7 +335,7 @@ pub mod c {
         if uvm_endorsement.is_null() {
             return Err(TavError::invalid_argument("uvm_endorsement is null"));
         }
-        // TAVCborValue is a repr(transparent) C handle over cose::CborValue.
+        // TavCborValue is a repr(transparent) C handle over cose::CborValue.
         Ok(unsafe { &*uvm_endorsement.cast::<cose::CborValue>() })
     }
 
@@ -453,7 +458,7 @@ pub mod c {
 
     #[no_mangle]
     pub unsafe extern "C" fn tav_verify_caci_attestation(
-        attestation: *const TAVSnpAttestationReport,
+        attestation: *const TavSnpAttestationReport,
         minimum_tcb_cpuids: *const u32,
         minimum_tcb_values: *const u8,
         minimum_tcb_count: usize,
@@ -514,14 +519,17 @@ pub mod c {
         }
 
         #[test]
-        fn owned_out_parameters_are_write_only() {
-            let mut uvm = ptr::NonNull::<TavCborValue>::dangling().as_ptr();
+        fn owned_out_pointer_must_be_null_on_entry() {
+            // A live (non-NULL) owned out-pointer is rejected without being
+            // dereferenced or overwritten, matching tav_verify_snp_attestation.
+            let sentinel = ptr::NonNull::<TavCborValue>::dangling().as_ptr();
+            let mut uvm = sentinel;
             let err = unsafe {
                 tav_verify_caci_uvm_endorsement(ptr::null(), 0, ptr::null(), 0, &mut uvm)
             };
 
             assert!(!err.is_null());
-            assert!(uvm.is_null());
+            assert_eq!(uvm, sentinel);
             unsafe {
                 assert_eq!(
                     ffi_utils::tav_error_code(err),
@@ -529,7 +537,10 @@ pub mod c {
                 );
                 ffi_utils::tav_error_free(err);
             }
+        }
 
+        #[test]
+        fn byte_buffer_out_parameter_is_write_only() {
             let mut bytes = TavByteBuffer {
                 data: ptr::NonNull::<u8>::dangling().as_ptr(),
                 len: usize::MAX,
@@ -575,7 +586,7 @@ pub mod c {
 
             assert_eq!(
                 unsafe { ffi_utils::tav_error_code(ptr::null()) },
-                TavErrorCode::ErrorIsNull
+                TavErrorCode::ErrorCodeIsNull
             );
             assert!(!message.is_null());
             assert_eq!(
@@ -587,11 +598,15 @@ pub mod c {
         }
 
         fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {
-            let line = header
-                .lines()
-                .find(|line| line.trim_start().starts_with(name))?;
-            let (_, value) = line.split_once('=')?;
-            value.trim().trim_end_matches(',').parse().ok()
+            header.lines().find_map(|line| {
+                let (lhs, rhs) = line.split_once('=')?;
+                // Token-exact match on the enumerator name so a code whose name
+                // is a prefix of another cannot bind to the wrong line.
+                if lhs.trim() != name {
+                    return None;
+                }
+                rhs.trim().trim_end_matches(',').parse().ok()
+            })
         }
     }
 }

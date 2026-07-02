@@ -23,7 +23,10 @@ const NULL_ERROR_MESSAGE: &[u8] = b"null TavError pointer\0";
 pub enum TavErrorCode {
     Ok = 0,
     InvalidArgument = 1,
-    ErrorIsNull = 2,
+    // Kept as `ErrorCodeIsNull` for wasm/JS backwards compatibility (the JS
+    // `ErrorCode` enum exported this member name before the C ABI existed).
+    // TODO: rename to `ErrorIsNull` for consistency in the next breaking release.
+    ErrorCodeIsNull = 2,
 
     UnsupportedProcessor = 101,
     InvalidRootCertificate = 102,
@@ -93,7 +96,7 @@ impl std::error::Error for TavError {}
 #[no_mangle]
 pub unsafe extern "C" fn tav_error_code(error: *const TavError) -> TavErrorCode {
     if error.is_null() {
-        return TavErrorCode::ErrorIsNull;
+        return TavErrorCode::ErrorCodeIsNull;
     }
 
     unsafe { (*error).code }
@@ -175,13 +178,16 @@ mod tests {
     fn c_header_error_codes_match_rust_enum() {
         let header = include_str!("../../include/tav/utils.h");
 
-        for (name, value) in [
+        let error_code_map = [
             ("TAV_ERROR_OK", TavErrorCode::Ok as i32),
             (
                 "TAV_ERROR_INVALID_ARGUMENT",
                 TavErrorCode::InvalidArgument as i32,
             ),
-            ("TAV_ERROR_ERROR_IS_NULL", TavErrorCode::ErrorIsNull as i32),
+            (
+                "TAV_ERROR_ERROR_IS_NULL",
+                TavErrorCode::ErrorCodeIsNull as i32,
+            ),
             (
                 "TAV_ERROR_UNSUPPORTED_PROCESSOR",
                 TavErrorCode::UnsupportedProcessor as i32,
@@ -231,13 +237,29 @@ mod tests {
                 TavErrorCode::CaciMeasurement as i32,
             ),
             ("TAV_ERROR_CACI_POLICY", TavErrorCode::CaciPolicy as i32),
-        ] {
+        ];
+
+        for (name, value) in error_code_map {
             assert_eq!(
                 c_header_enum_value(header, name),
                 Some(value),
                 "{name} in include/tav/utils.h must match Rust TavErrorCode"
             );
         }
+
+        // Completeness: every TAV_ERROR_ code declared in the header must be
+        // covered by the map above, so adding a header code without updating the
+        // Rust enum and this map fails the test in both directions.
+        let header_names: std::collections::BTreeSet<&str> = c_header_error_codes(header)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let mapped_names: std::collections::BTreeSet<&str> =
+            error_code_map.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            header_names, mapped_names,
+            "include/tav/utils.h TAV_ERROR_ codes must exactly match the checked set"
+        );
     }
 
     #[test]
@@ -256,11 +278,16 @@ mod tests {
     }
 
     fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {
-        let line = header
-            .lines()
-            .find(|line| line.trim_start().starts_with(name))?;
-        let (_, value) = line.split_once('=')?;
-        value.trim().trim_end_matches(',').parse().ok()
+        header.lines().find_map(|line| {
+            let (lhs, rhs) = line.split_once('=')?;
+            // Token-exact match on the enumerator name so a code whose name is a
+            // prefix of another (e.g. TAV_ERROR_CBOR vs a hypothetical
+            // TAV_ERROR_CBOR_EXTRA) cannot bind to the wrong line.
+            if lhs.trim() != name {
+                return None;
+            }
+            rhs.trim().trim_end_matches(',').parse().ok()
+        })
     }
 
     fn c_header_error_codes(header: &str) -> Vec<(&str, i32)> {

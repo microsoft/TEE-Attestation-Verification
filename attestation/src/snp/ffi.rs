@@ -96,7 +96,7 @@ pub mod c {
     //!
     //! [`tav_verify_snp_attestation`] returns a null [`TavError`] pointer on
     //! success and an owned [`TavError`] pointer on failure. On success it
-    //! writes an owned [`TAVSnpAttestationReport`] handle to `out_report`.
+    //! writes an owned [`TavSnpAttestationReport`] handle to `out_report`.
     //! Callers release these handles with [`tav_error_free`] and
     //! [`tav_snp_attestation_report_free`].
     //!
@@ -104,7 +104,7 @@ pub mod c {
     //! returned by this library. Passing null, dangling, freed, or otherwise
     //! invalid pointers to report accessors is undefined behavior. Error
     //! accessors are defensive for null pointers: [`tav_error_code`] returns
-    //! [`TavErrorCode::ErrorIsNull`] and [`tav_error_message`] returns a static
+    //! [`TavErrorCode::ErrorCodeIsNull`] and [`tav_error_message`] returns a static
     //! diagnostic string. Freeing a null report or error pointer is a no-op.
     //!
     //! Byte-slice report accessors return borrowed views by writing a pointer
@@ -122,14 +122,14 @@ pub mod c {
 
     const MAX_VERIFY_INPUT_LEN: usize = 1024 * 1024 * 1024;
 
-    pub struct TAVSnpAttestationReport {
+    pub struct TavSnpAttestationReport {
         bytes: Vec<u8>,
     }
 
-    impl TAVSnpAttestationReport {
+    impl TavSnpAttestationReport {
         pub fn report(&self) -> &AttestationReport {
             AttestationReport::ref_from_bytes(&self.bytes).expect(
-                "TAVSnpAttestationReport is only constructed from verified bytes so parsing should not fail",
+                "TavSnpAttestationReport is only constructed from verified bytes so parsing should not fail",
             )
         }
     }
@@ -137,7 +137,7 @@ pub mod c {
     macro_rules! scalar_accessor {
         ($name:ident, $return_ty:ty, |$report:ident| $value:expr) => {
             #[no_mangle]
-            pub unsafe extern "C" fn $name(report: *const TAVSnpAttestationReport) -> $return_ty {
+            pub unsafe extern "C" fn $name(report: *const TavSnpAttestationReport) -> $return_ty {
                 let report = unsafe { &*report };
                 let $report = report.report();
                 $value
@@ -149,7 +149,7 @@ pub mod c {
         ($name:ident, |$report:ident| $value:expr) => {
             #[no_mangle]
             pub unsafe extern "C" fn $name(
-                report: *const TAVSnpAttestationReport,
+                report: *const TavSnpAttestationReport,
                 data: *mut *const u8,
                 len: *mut usize,
             ) {
@@ -174,9 +174,9 @@ pub mod c {
         ask_pem_len: usize,
         vcek_pem: *const u8,
         vcek_pem_len: usize,
-        out_report: *mut *mut TAVSnpAttestationReport,
+        out_report: *mut *mut TavSnpAttestationReport,
     ) -> *mut TavError {
-        let result = (|| -> Result<TAVSnpAttestationReport, TavError> {
+        let result = (|| -> Result<TavSnpAttestationReport, TavError> {
             if out_report.is_null() {
                 return Err(TavError::invalid_argument("out_report pointer is null"));
             }
@@ -262,7 +262,7 @@ pub mod c {
             )
             .map_err(super::tav_error_from_verification_error)?;
 
-            Ok(TAVSnpAttestationReport {
+            Ok(TavSnpAttestationReport {
                 bytes: report_bytes.to_vec(),
             })
         })();
@@ -422,7 +422,7 @@ pub mod c {
         .s);
 
     #[no_mangle]
-    pub unsafe extern "C" fn tav_snp_attestation_report_free(report: *mut TAVSnpAttestationReport) {
+    pub unsafe extern "C" fn tav_snp_attestation_report_free(report: *mut TavSnpAttestationReport) {
         if !report.is_null() {
             unsafe {
                 drop(Box::from_raw(report));
@@ -474,7 +474,7 @@ pub mod c {
 
             assert_eq!(
                 unsafe { tav_error_code(ptr::null()) },
-                TavErrorCode::ErrorIsNull
+                TavErrorCode::ErrorCodeIsNull
             );
             assert!(!message.is_null());
             assert_eq!(

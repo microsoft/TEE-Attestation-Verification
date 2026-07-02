@@ -3,6 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Shared C ABI error codes.
  *
@@ -53,3 +57,7 @@ typedef struct TavByteBuffer {
 } TavByteBuffer;
 
 void tav_byte_buffer_free(TavByteBuffer *bytes);
+
+#ifdef __cplusplus
+}
+#endif

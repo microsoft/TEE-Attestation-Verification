@@ -289,7 +289,7 @@ pub mod c {
     //!
     //! This module exports the symbols declared in `include/tav/cose.h`.
     //!
-    //! `TAVCborValue` handles returned by [`tav_cbor_value_from_bytes`] are
+    //! `TavCborValue` handles returned by [`tav_cbor_value_from_bytes`] are
     //! owned and must be released with [`tav_cbor_value_free`]. Child accessors
     //! return borrowed handles into the owned root. Borrowed handles must not be
     //! freed and remain valid only while the ancestor owned handle is alive.
@@ -408,8 +408,13 @@ pub mod c {
 
     unsafe fn owned_out_ptr<T>(out: *mut *mut T, name: &str) -> Result<(), TavError> {
         unsafe { out_ptr(out, name) }?;
-        unsafe {
-            *out = ptr::null_mut();
+        // Matches tav_verify_snp_attestation: the slot must contain NULL on
+        // entry. A non-NULL slot is rejected without being overwritten, so a
+        // caller can never silently leak a live handle by reusing a variable.
+        if unsafe { !(*out).is_null() } {
+            return Err(TavError::invalid_argument(format!(
+                "{name} must point to NULL before verification"
+            )));
         }
         Ok(())
     }
@@ -1077,13 +1082,15 @@ pub mod c {
         }
 
         #[test]
-        fn owned_out_parameters_are_write_only() {
+        fn cbor_value_round_trips_through_out_parameters() {
             let cbor = [0x81, 0x01];
-            let mut root = ptr::NonNull::<TavCborValue>::dangling().as_ptr();
+            let mut root = ptr::null_mut();
             let err = unsafe { tav_cbor_value_from_bytes(cbor.as_ptr(), cbor.len(), &mut root) };
             assert!(err.is_null());
             assert!(!root.is_null());
 
+            // Byte-buffer out-parameters are write-only: a stale, non-empty
+            // buffer is reset before any fallible work.
             let mut bytes = TavByteBuffer {
                 data: ptr::NonNull::<u8>::dangling().as_ptr(),
                 len: usize::MAX,
@@ -1099,6 +1106,25 @@ pub mod c {
             }
             assert!(bytes.data.is_null());
             assert_eq!(bytes.len, 0);
+        }
+
+        #[test]
+        fn owned_out_pointer_must_be_null_on_entry() {
+            let cbor = [0x81, 0x01];
+            // A live (non-NULL) owned out-pointer is rejected without being
+            // dereferenced or overwritten, matching tav_verify_snp_attestation.
+            let sentinel = ptr::NonNull::<TavCborValue>::dangling().as_ptr();
+            let mut root = sentinel;
+            let err = unsafe { tav_cbor_value_from_bytes(cbor.as_ptr(), cbor.len(), &mut root) };
+            assert!(!err.is_null());
+            assert_eq!(root, sentinel);
+            unsafe {
+                assert_eq!(
+                    ffi_utils::tav_error_code(err),
+                    TavErrorCode::InvalidArgument
+                );
+                ffi_utils::tav_error_free(err);
+            }
         }
 
         #[test]
@@ -1239,7 +1265,7 @@ pub mod c {
         fn null_error_accessors_are_defensive() {
             assert_eq!(
                 unsafe { ffi_utils::tav_error_code(ptr::null()) },
-                TavErrorCode::ErrorIsNull
+                TavErrorCode::ErrorCodeIsNull
             );
             let message = unsafe { ffi_utils::tav_error_message(ptr::null()) };
             assert_eq!(
@@ -1251,15 +1277,15 @@ pub mod c {
         }
 
         fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {
-            let line = header
-                .lines()
-                .find(|line| line.trim_start().starts_with(name))?;
-            line.split('=')
-                .nth(1)?
-                .trim()
-                .trim_end_matches(',')
-                .parse()
-                .ok()
+            header.lines().find_map(|line| {
+                let (lhs, rhs) = line.split_once('=')?;
+                // Token-exact match on the enumerator name so a code whose name
+                // is a prefix of another cannot bind to the wrong line.
+                if lhs.trim() != name {
+                    return None;
+                }
+                rhs.trim().trim_end_matches(',').parse().ok()
+            })
         }
     }
 }

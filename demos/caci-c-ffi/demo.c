@@ -375,8 +375,8 @@ static void print_text_value(const char *label, const char *text, size_t len) {
 
 static void print_borrowed_report_field(
     const char *name,
-    void (*accessor)(const TAVSnpAttestationReport *, const uint8_t **, size_t *),
-    const TAVSnpAttestationReport *report) {
+    void (*accessor)(const TavSnpAttestationReport *, const uint8_t **, size_t *),
+    const TavSnpAttestationReport *report) {
     const uint8_t *data = NULL;
     size_t len = 0;
     accessor(report, &data, &len);
@@ -385,14 +385,14 @@ static void print_borrowed_report_field(
     print_hex_lines(data, len, 4);
 }
 
-static void print_uvm_endorsement(const TAVCborValue *uvm_endorsement) {
-    const TAVCborValue *sign1 = NULL;
-    const TAVCborValue *protected_value = NULL;
+static void print_uvm_endorsement(const TavCborValue *uvm_endorsement) {
+    const TavCborValue *sign1 = NULL;
+    const TavCborValue *protected_value = NULL;
     const uint8_t *protected_bytes = NULL;
     size_t protected_len = 0;
-    TAVCborValue *protected_header = NULL;
-    const TAVCborValue *content_type = NULL;
-    const TAVCborValue *feed = NULL;
+    TavCborValue *protected_header = NULL;
+    const TavCborValue *content_type = NULL;
+    const TavCborValue *feed = NULL;
     const char *text = NULL;
     size_t text_len = 0;
 
@@ -486,8 +486,8 @@ int main(int argc, char **argv) {
     const size_t minimum_tcb_count = 1;
 
     int exit_code = 0;
-    TAVSnpAttestationReport *attestation = NULL;
-    TAVCborValue *uvm_endorsement = NULL;
+    TavSnpAttestationReport *attestation = NULL;
+    TavCborValue *uvm_endorsement = NULL;
     TavByteBuffer report_data = {0};
 
     exit_code = consume_caci_error(

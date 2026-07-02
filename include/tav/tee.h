@@ -18,7 +18,7 @@ extern "C" {
  * Usage summary:
  * - Call tav_verify_snp_attestation with the raw attestation report and the
  *   ARK, ASK, and VCEK certificates in PEM format.
- * - On success, verification writes a TAVSnpAttestationReport* to out_report.
+ * - On success, verification writes a TavSnpAttestationReport* to out_report.
  *   Pass that report handle to the tav_snp_attestation_report_* accessors.
  * - Free the report handle with tav_snp_attestation_report_free when finished.
  *
@@ -40,7 +40,7 @@ extern "C" {
  *   the owning report handle is freed, and must not be freed by the caller.
  */
 
-typedef struct TAVSnpAttestationReport TAVSnpAttestationReport;
+typedef struct TavSnpAttestationReport TavSnpAttestationReport;
 /*
  * Verify an SNP attestation report using caller-provided ARK, ASK, and VCEK
  * certificates in PEM format.
@@ -58,69 +58,69 @@ TAV_API TavError *tav_verify_snp_attestation(
     size_t ask_pem_len,
     const uint8_t *vcek_pem,
     size_t vcek_pem_len,
-    TAVSnpAttestationReport **out_report);
+    TavSnpAttestationReport **out_report);
 
 /* Scalar report accessors. Invalid report pointers are undefined behavior. */
 TAV_API uint32_t tav_snp_attestation_report_version(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint32_t tav_snp_attestation_report_guest_svn(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint64_t tav_snp_attestation_report_policy(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_policy_abi_minor(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_policy_abi_major(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_smt(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_migrate_ma(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_debug(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_single_socket(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_cxl_allow(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_mem_aes_256_xts(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_rapl_dis(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_ciphertext_hiding_dram(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_policy_page_swap_disable(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint32_t tav_snp_attestation_report_vmpl(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint32_t tav_snp_attestation_report_signature_algo(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint64_t tav_snp_attestation_report_platform_info(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint32_t tav_snp_attestation_report_flags(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_flags_author_key_en(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API bool tav_snp_attestation_report_flags_mask_chip_key(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_flags_signing_key(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_cpuid_fam_id(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_cpuid_mod_id(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_cpuid_step(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_current_build(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_current_minor(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_current_major(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_committed_build(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_committed_minor(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 TAV_API uint8_t tav_snp_attestation_report_committed_major(
-    const TAVSnpAttestationReport *report);
+    const TavSnpAttestationReport *report);
 
 /*
  * Borrowed byte-slice report accessors. report, data, and len must be valid
@@ -129,72 +129,72 @@ TAV_API uint8_t tav_snp_attestation_report_committed_major(
  * tav_snp_attestation_report_free(report).
  */
 TAV_API void tav_snp_attestation_report_report_data(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_family_id(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_image_id(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_platform_version(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_measurement(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_host_data(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_id_key_digest(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_author_key_digest(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_report_id(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_report_id_ma(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_reported_tcb(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_chip_id(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_committed_tcb(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_launch_tcb(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_signature_r(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 TAV_API void tav_snp_attestation_report_signature_s(
-    const TAVSnpAttestationReport *report,
+    const TavSnpAttestationReport *report,
     const uint8_t **data,
     size_t *len);
 
 /* Frees a report handle returned by tav_verify_snp_attestation. NULL is a no-op. */
-TAV_API void tav_snp_attestation_report_free(TAVSnpAttestationReport *report);
+TAV_API void tav_snp_attestation_report_free(TavSnpAttestationReport *report);
 
 #ifdef __cplusplus
 }
