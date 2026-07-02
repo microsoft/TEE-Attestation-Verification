@@ -120,12 +120,12 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 [[package]]
 name = "cborrs"
 version = "0.1.0"
-source = "git+https://github.com/project-everest/everparse.git?rev=b3544a15b51e6346f449baa04eb466a185167e4d#b3544a15b51e6346f449baa04eb466a185167e4d"
+source = "git+https://github.com/project-everest/everparse.git?tag=v2026.07.02#950bc93838ac2faae51126d8acd0637cf8c8a569"
 
 [[package]]
 name = "cborrs-nondet"
 version = "0.1.0"
-source = "git+https://github.com/project-everest/everparse.git?rev=b3544a15b51e6346f449baa04eb466a185167e4d#b3544a15b51e6346f449baa04eb466a185167e4d"
+source = "git+https://github.com/project-everest/everparse.git?tag=v2026.07.02#950bc93838ac2faae51126d8acd0637cf8c8a569"
 
 [[package]]
 name = "cc"
