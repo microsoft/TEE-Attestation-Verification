@@ -64,15 +64,15 @@ static Buffer decode_hex(const char *hex) {
     return buffer;
 }
 
-static void check_cose_error(TavError *error, const char *context) {
+static void check_cose_error(TAVCoseError *error, const char *context) {
     if (error == NULL) {
         return;
     }
 
-    TavErrorCode code = tav_error_code(error);
-    fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
-    tav_error_free(error);
-    exit(code == TAV_ERROR_OK ? 1 : (int)code);
+    TAVCoseErrorCode code = tav_cose_error_code(error);
+    fprintf(stderr, "%s: %s\n", context, tav_cose_error_message(error));
+    tav_cose_error_free(error);
+    exit(code == TAV_COSE_ERROR_OK ? 1 : (int)code);
 }
 
 static void print_indent(size_t indent) {
@@ -121,9 +121,9 @@ static void print_escaped_text(const char *text, size_t len) {
     printf("\"");
 }
 
-static void print_cbor_value(const TavCborValue *value, size_t indent);
+static void print_cbor_value(const TAVCborValue *value, size_t indent);
 
-static void print_protected_header(const TavCborValue *value, size_t indent) {
+static void print_protected_header(const TAVCborValue *value, size_t indent) {
     const uint8_t *data = NULL;
     size_t len = 0;
     check_cose_error(tav_cbor_value_bytes(value, &data, &len), "read protected header bytes");
@@ -137,7 +137,7 @@ static void print_protected_header(const TavCborValue *value, size_t indent) {
         return;
     }
 
-    TavCborValue *protected_header = NULL;
+    TAVCborValue *protected_header = NULL;
     check_cose_error(
         tav_cbor_value_from_bytes(data, len, &protected_header),
         "parse protected header");
@@ -145,14 +145,14 @@ static void print_protected_header(const TavCborValue *value, size_t indent) {
     tav_cbor_value_free(protected_header);
 }
 
-static void print_array(const TavCborValue *value, size_t indent) {
+static void print_array(const TAVCborValue *value, size_t indent) {
     size_t len = 0;
     check_cose_error(tav_cbor_value_len(value, &len), "read array length");
 
     print_indent(indent);
     printf("array(len=%zu)\n", len);
     for (size_t i = 0; i < len; i++) {
-        const TavCborValue *child = NULL;
+        const TAVCborValue *child = NULL;
         check_cose_error(tav_cbor_value_array_at(value, i, &child), "read array child");
         print_indent(indent + 1);
         printf("[%zu]\n", i);
@@ -160,14 +160,14 @@ static void print_array(const TavCborValue *value, size_t indent) {
     }
 }
 
-static void print_cose_sign1(const TavCborValue *value, size_t indent) {
+static void print_cose_sign1(const TAVCborValue *value, size_t indent) {
     size_t len = 0;
     check_cose_error(tav_cbor_value_len(value, &len), "read COSE_Sign1 length");
 
     print_indent(indent);
     printf("array(len=%zu)\n", len);
     for (size_t i = 0; i < len; i++) {
-        const TavCborValue *child = NULL;
+        const TAVCborValue *child = NULL;
         check_cose_error(tav_cbor_value_array_at(value, i, &child), "read COSE_Sign1 field");
         print_indent(indent + 1);
         printf("[%zu]\n", i);
@@ -178,15 +178,15 @@ static void print_cose_sign1(const TavCborValue *value, size_t indent) {
     }
 }
 
-static void print_map(const TavCborValue *value, size_t indent) {
+static void print_map(const TAVCborValue *value, size_t indent) {
     size_t len = 0;
     check_cose_error(tav_cbor_value_len(value, &len), "read map length");
 
     print_indent(indent);
     printf("map(len=%zu)\n", len);
     for (size_t i = 0; i < len; i++) {
-        const TavCborValue *key = NULL;
-        const TavCborValue *child = NULL;
+        const TAVCborValue *key = NULL;
+        const TAVCborValue *child = NULL;
         check_cose_error(tav_cbor_value_map_entry_at(value, i, &key, &child), "read map entry");
 
         print_indent(indent + 1);
@@ -198,7 +198,7 @@ static void print_map(const TavCborValue *value, size_t indent) {
     }
 }
 
-static void print_cbor_value(const TavCborValue *value, size_t indent) {
+static void print_cbor_value(const TAVCborValue *value, size_t indent) {
     switch (tav_cbor_value_kind(value)) {
         case TAV_CBOR_KIND_INT: {
             int64_t v = 0;
@@ -251,7 +251,7 @@ static void print_cbor_value(const TavCborValue *value, size_t indent) {
             break;
         case TAV_CBOR_KIND_TAGGED: {
             uint64_t tag = 0;
-            const TavCborValue *payload = NULL;
+            const TAVCborValue *payload = NULL;
             check_cose_error(tav_cbor_value_tag(value, &tag), "read tag");
             check_cose_error(tav_cbor_value_tagged_payload(value, &payload), "read tag payload");
             print_indent(indent);
@@ -274,14 +274,14 @@ int main(int argc, char **argv) {
 
     Buffer payload = decode_hex(argv[1]);
 
-    TavCborValue *root = NULL;
-    TavError *error = tav_cbor_value_from_bytes(payload.data, payload.len, &root);
+    TAVCborValue *root = NULL;
+    TAVCoseError *error = tav_cbor_value_from_bytes(payload.data, payload.len, &root);
     if (error != NULL) {
-        TavErrorCode code = tav_error_code(error);
-        fprintf(stderr, "parse CBOR payload: %s\n", tav_error_message(error));
-        tav_error_free(error);
+        TAVCoseErrorCode code = tav_cose_error_code(error);
+        fprintf(stderr, "parse CBOR payload: %s\n", tav_cose_error_message(error));
+        tav_cose_error_free(error);
         free_buffer(&payload);
-        return code == TAV_ERROR_OK ? 1 : (int)code;
+        return code == TAV_COSE_ERROR_OK ? 1 : (int)code;
     }
 
     printf("CBOR payload\n");

@@ -1071,9 +1071,7 @@ dependencies = [
  "cborrs-nondet",
  "js-sys",
  "tee-attestation-verification-crypto",
- "tee-attestation-verification-ffi-utils",
  "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]

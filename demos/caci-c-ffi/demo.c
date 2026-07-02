@@ -342,13 +342,13 @@ static int consume_caci_error(TavError *error, const char *context) {
     return code == TAV_ERROR_OK ? 1 : (int)code;
 }
 
-static void check_cose_error(TavError *error, const char *context) {
+static void check_cose_error(TAVCoseError *error, const char *context) {
     if (error == NULL) {
         return;
     }
 
-    fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
-    tav_error_free(error);
+    fprintf(stderr, "%s: %s\n", context, tav_cose_error_message(error));
+    tav_cose_error_free(error);
     exit(1);
 }
 
@@ -385,19 +385,19 @@ static void print_borrowed_report_field(
     print_hex_lines(data, len, 4);
 }
 
-static void print_uvm_endorsement(const TavCborValue *uvm_endorsement) {
-    const TavCborValue *sign1 = NULL;
-    const TavCborValue *protected_value = NULL;
+static void print_uvm_endorsement(const TAVCborValue *uvm_endorsement) {
+    const TAVCborValue *sign1 = NULL;
+    const TAVCborValue *protected_value = NULL;
     const uint8_t *protected_bytes = NULL;
     size_t protected_len = 0;
-    TavCborValue *protected_header = NULL;
-    const TavCborValue *content_type = NULL;
-    const TavCborValue *feed = NULL;
+    TAVCborValue *protected_header = NULL;
+    const TAVCborValue *content_type = NULL;
+    const TAVCborValue *feed = NULL;
     const char *text = NULL;
     size_t text_len = 0;
 
     check_cose_error(
-        tav_validate_cose_sign1(uvm_endorsement, &sign1),
+        tav_cose_sign1_validate(uvm_endorsement, &sign1),
         "validate returned UVM COSE_Sign1");
     check_cose_error(
         tav_cbor_value_array_at(sign1, TAV_COSE_SIGN1_PROTECTED, &protected_value),
@@ -487,7 +487,7 @@ int main(int argc, char **argv) {
 
     int exit_code = 0;
     TavSnpAttestationReport *attestation = NULL;
-    TavCborValue *uvm_endorsement = NULL;
+    TAVCborValue *uvm_endorsement = NULL;
     TavByteBuffer report_data = {0};
 
     exit_code = consume_caci_error(

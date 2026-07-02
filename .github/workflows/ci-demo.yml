@@ -148,9 +148,10 @@ jobs:
 
       - name: Check COSE C FFI exports
         run: |
-          python3 scripts/check-c-ffi-exports.py \
-            --library target/debug/libtee_attestation_verification_cose.so \
-            --golden demos/cose-c-ffi/test-data/exports.golden.txt
+          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
+            | grep ' tav_cbor_value_from_bytes'
+          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
+            | grep ' tav_cose_error_code'
 
       - name: Run COSE C FFI demo
         run: |

@@ -240,12 +240,12 @@ pub mod c {
         }
     }
 
-    unsafe fn cose_error_to_caci(error: *mut TavError) -> TavError {
-        let message = unsafe { CStr::from_ptr(ffi_utils::tav_error_message(error)) }
+    unsafe fn cose_error_to_caci(error: *mut cose::ffi::c::TavCoseError) -> TavError {
+        let message = unsafe { CStr::from_ptr(cose::ffi::c::tav_cose_error_message(error)) }
             .to_string_lossy()
             .into_owned();
         unsafe {
-            ffi_utils::tav_error_free(error);
+            cose::ffi::c::tav_cose_error_free(error);
         }
         TavError::new(
             TavErrorCode::CaciCose,

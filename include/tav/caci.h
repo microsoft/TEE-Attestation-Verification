@@ -18,13 +18,13 @@ extern "C" {
  * Ownership and lifetime:
  * - Use tav_verify_snp_attestation from tav/tee.h to verify the SNP report and
  *   obtain an owned TavSnpAttestationReport.
- * - tav_verify_caci_uvm_endorsement returns an owned TavCborValue containing
+ * - tav_verify_caci_uvm_endorsement returns an owned TAVCborValue containing
  *   the verified UVM COSE/CBOR document. Inspect it with the CBOR accessors in
  *   tav/cose.h and release it with tav_cbor_value_free.
  * - tav_verify_caci_attestation writes owned bytes to a
  *   TavByteBuffer. Release them with tav_byte_buffer_free.
  * - Freeing NULL owned handles and empty byte buffers is a no-op.
- * - Owned handle out-parameters (TavCborValue **) must point to a writable slot
+ * - Owned handle out-parameters (TAVCborValue **) must point to a writable slot
  *   that contains NULL on entry. If the out-parameter is NULL, or the slot is
  *   non-NULL, the call returns TAV_ERROR_INVALID_ARGUMENT and does not overwrite
  *   the slot, so an existing handle is never leaked. On success the slot is set
@@ -55,7 +55,7 @@ TAV_CACI_API TavError *tav_verify_caci_uvm_endorsement(
     size_t uvm_endorsement_len,
     const char *trusted_didx509,
     size_t trusted_didx509_len,
-    TavCborValue **out_uvm_endorsement);
+    TAVCborValue **out_uvm_endorsement);
 
 /*
  * Verify the relying-party CACI policy over staged verified artifacts.
@@ -77,7 +77,7 @@ TAV_CACI_API TavError *tav_verify_caci_attestation(
     size_t minimum_tcb_count,
     const uint8_t *trusted_policy_digests,
     size_t trusted_policy_digest_count,
-    const TavCborValue *uvm_endorsement,
+    const TAVCborValue *uvm_endorsement,
     const char *uvm_feed,
     size_t uvm_feed_len,
     uint64_t minimum_svn,
