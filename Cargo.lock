@@ -1055,7 +1055,6 @@ dependencies = [
  "serde_json",
  "tee-attestation-verification-cose",
  "tee-attestation-verification-crypto",
- "tee-attestation-verification-ffi-utils",
  "tee-attestation-verification-lib",
  "tokio",
  "wasm-bindgen",
@@ -1098,13 +1097,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tee-attestation-verification-ffi-utils"
-version = "1.0.2"
-dependencies = [
- "wasm-bindgen",
-]
-
-[[package]]
 name = "tee-attestation-verification-lib"
 version = "1.0.2"
 dependencies = [
@@ -1115,7 +1107,6 @@ dependencies = [
  "js-sys",
  "log",
  "tee-attestation-verification-crypto",
- "tee-attestation-verification-ffi-utils",
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",

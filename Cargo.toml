@@ -1,3 +1,3 @@
 [workspace]
-members = ["caci", "attestation", "cose", "crypto", "ffi-utils"]
+members = ["caci", "attestation", "cose", "crypto"]
 resolver = "2"

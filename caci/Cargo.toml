@@ -37,7 +37,6 @@ crypto_webcrypto = [
 attestation = { package = "tee-attestation-verification-lib", version = "1.0.2", path = "../attestation", default-features = false }
 cose = { package = "tee-attestation-verification-cose", version = "1.0.2", path = "../cose", default-features = false }
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.2", path = "../crypto", default-features = false }
-ffi-utils = { package = "tee-attestation-verification-ffi-utils", version = "1.0.2", path = "../ffi-utils" }
 serde_json = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]

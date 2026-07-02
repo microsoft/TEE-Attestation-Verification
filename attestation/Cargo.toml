@@ -38,7 +38,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dependencies]
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.2", path = "../crypto", default-features = false }
-ffi-utils = { package = "tee-attestation-verification-ffi-utils", version = "1.0.2", path = "../ffi-utils" }
 zerocopy = {version = "0.8.31", features = ["derive"]}
 
 # KDS (online certificate fetching) dependencies

@@ -184,71 +184,146 @@ pub mod c {
     use std::os::raw::c_char;
     use std::ptr;
 
-    use attestation::snp::ffi::c::TavSnpAttestationReport;
+    use attestation::snp::ffi::c::TAVSnpAttestationReport;
     use attestation::snp::report::TcbVersionRaw;
     use attestation::snp::verify::VerificationError;
     use cose::ffi::c::TavCborValue;
-    use ffi_utils::{TavByteBuffer, TavError, TavErrorCode};
+    use std::ffi::CString;
 
     use crate::{snp, synchronous, AciError, SNP_HOST_DATA_LEN};
 
     const MAX_INPUT_LEN: usize = 1024 * 1024 * 1024; // 1 GiB
     const TCB_VERSION_LEN: usize = std::mem::size_of::<TcbVersionRaw>();
+    const NULL_ERROR_MESSAGE: &[u8] = b"null TavCaciError pointer\0";
 
-    impl From<AciError> for TavError {
+    /// Error codes returned by [`tav_caci_error_code`].
+    ///
+    /// The numeric values must match the `TAV_CACI_ERROR_*` enum in
+    /// `include/tav/caci.h`. Codes 101-105 mirror the wrapped SNP verification
+    /// failures; 301-306 are CACI-policy specific.
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TavCaciErrorCode {
+        Ok = 0,
+        InvalidArgument = 1,
+        ErrorCodeIsNull = 2,
+
+        UnsupportedProcessor = 101,
+        InvalidRootCertificate = 102,
+        CertificateChainError = 103,
+        SignatureVerificationError = 104,
+        TcbVerificationError = 105,
+
+        CaciCose = 301,
+        CaciCertificate = 302,
+        CaciDidX509 = 303,
+        CaciSignature = 304,
+        CaciMeasurement = 305,
+        CaciPolicy = 306,
+    }
+
+    /// Owned error handle returned by the CACI C ABI.
+    pub struct TavCaciError {
+        code: TavCaciErrorCode,
+        message: CString,
+    }
+
+    impl TavCaciError {
+        fn new(code: TavCaciErrorCode, message: impl Into<String>) -> Self {
+            Self {
+                code,
+                message: c_string(message.into()),
+            }
+        }
+
+        fn invalid_argument(message: impl Into<String>) -> Self {
+            Self::new(TavCaciErrorCode::InvalidArgument, message)
+        }
+    }
+
+    /// Owned byte buffer returned by the CACI C ABI. Release it with
+    /// [`tav_caci_byte_buffer_free`].
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct TavCaciByteBuffer {
+        data: *mut u8,
+        len: usize,
+    }
+
+    impl TavCaciByteBuffer {
+        fn empty() -> Self {
+            Self {
+                data: ptr::null_mut(),
+                len: 0,
+            }
+        }
+
+        fn from_bytes(bytes: impl Into<Vec<u8>>) -> Self {
+            let bytes = bytes.into().into_boxed_slice();
+            let len = bytes.len();
+            let data = Box::into_raw(bytes).cast::<u8>();
+            Self { data, len }
+        }
+    }
+
+    fn c_string(message: String) -> CString {
+        CString::new(message.replace('\0', "\\0")).expect("NUL bytes were replaced")
+    }
+
+    impl From<AciError> for TavCaciError {
         fn from(value: AciError) -> Self {
             let code = match &value {
                 AciError::InvalidAmdEndorsements(_) | AciError::InvalidAttestation(_) => {
-                    TavErrorCode::InvalidArgument
+                    TavCaciErrorCode::InvalidArgument
                 }
                 AciError::AttestationVerification(error) => match error {
                     VerificationError::UnsupportedProcessor(_) => {
-                        TavErrorCode::UnsupportedProcessor
+                        TavCaciErrorCode::UnsupportedProcessor
                     }
                     VerificationError::InvalidRootCertificate(_) => {
-                        TavErrorCode::InvalidRootCertificate
+                        TavCaciErrorCode::InvalidRootCertificate
                     }
                     VerificationError::CertificateChainError(_) => {
-                        TavErrorCode::CertificateChainError
+                        TavCaciErrorCode::CertificateChainError
                     }
                     VerificationError::SignatureVerificationError(_) => {
-                        TavErrorCode::SignatureVerificationError
+                        TavCaciErrorCode::SignatureVerificationError
                     }
                     VerificationError::TcbVerificationError(_) => {
-                        TavErrorCode::TcbVerificationError
+                        TavCaciErrorCode::TcbVerificationError
                     }
                 },
-                AciError::Certificate(_) => TavErrorCode::CaciCertificate,
-                AciError::DidX509(_) => TavErrorCode::CaciDidX509,
-                AciError::Cose(_) => TavErrorCode::CaciCose,
-                AciError::Signature(_) => TavErrorCode::CaciSignature,
-                AciError::Measurement(_) => TavErrorCode::CaciMeasurement,
-                AciError::Policy(_) => TavErrorCode::CaciPolicy,
+                AciError::Certificate(_) => TavCaciErrorCode::CaciCertificate,
+                AciError::DidX509(_) => TavCaciErrorCode::CaciDidX509,
+                AciError::Cose(_) => TavCaciErrorCode::CaciCose,
+                AciError::Signature(_) => TavCaciErrorCode::CaciSignature,
+                AciError::Measurement(_) => TavCaciErrorCode::CaciMeasurement,
+                AciError::Policy(_) => TavCaciErrorCode::CaciPolicy,
             };
             Self::new(code, value.to_string())
         }
     }
 
-    fn into_error(error: TavError) -> *mut TavError {
-        error.into_raw()
+    fn into_error(error: TavCaciError) -> *mut TavCaciError {
+        Box::into_raw(Box::new(error))
     }
 
-    fn into_result(result: Result<(), TavError>) -> *mut TavError {
+    fn into_result(result: Result<(), TavCaciError>) -> *mut TavCaciError {
         match result {
             Ok(()) => ptr::null_mut(),
             Err(error) => into_error(error),
         }
     }
 
-    unsafe fn cose_error_to_caci(error: *mut cose::ffi::c::TavCoseError) -> TavError {
+    unsafe fn cose_error_to_caci(error: *mut cose::ffi::c::TavCoseError) -> TavCaciError {
         let message = unsafe { CStr::from_ptr(cose::ffi::c::tav_cose_error_message(error)) }
             .to_string_lossy()
             .into_owned();
         unsafe {
             cose::ffi::c::tav_cose_error_free(error);
         }
-        TavError::new(
-            TavErrorCode::CaciCose,
+        TavCaciError::new(
+            TavCaciErrorCode::CaciCose,
             format!("failed to materialize verified UVM CBOR: {message}"),
         )
     }
@@ -258,20 +333,20 @@ pub mod c {
         len: usize,
         name: &str,
         allow_empty: bool,
-    ) -> Result<&'a [u8], TavError> {
+    ) -> Result<&'a [u8], TavCaciError> {
         if len == 0 {
             if allow_empty {
                 return Ok(&[]);
             }
-            return Err(TavError::invalid_argument(format!("{name} is empty")));
+            return Err(TavCaciError::invalid_argument(format!("{name} is empty")));
         }
         if data.is_null() {
-            return Err(TavError::invalid_argument(format!(
+            return Err(TavCaciError::invalid_argument(format!(
                 "{name} pointer is null"
             )));
         }
         if len > MAX_INPUT_LEN {
-            return Err(TavError::invalid_argument(format!(
+            return Err(TavCaciError::invalid_argument(format!(
                 "{name} exceeds maximum input size"
             )));
         }
@@ -283,57 +358,60 @@ pub mod c {
         len: usize,
         name: &str,
         allow_empty: bool,
-    ) -> Result<&'a str, TavError> {
+    ) -> Result<&'a str, TavCaciError> {
         let bytes = unsafe { input_bytes(data.cast(), len, name, allow_empty) }?;
         std::str::from_utf8(bytes).map_err(|error| {
-            TavError::invalid_argument(format!("{name} is not valid UTF-8: {error}"))
+            TavCaciError::invalid_argument(format!("{name} is not valid UTF-8: {error}"))
         })
     }
 
-    unsafe fn out_ptr<T>(out: *mut T, name: &str) -> Result<(), TavError> {
+    unsafe fn out_ptr<T>(out: *mut T, name: &str) -> Result<(), TavCaciError> {
         if out.is_null() {
-            return Err(TavError::invalid_argument(format!(
+            return Err(TavCaciError::invalid_argument(format!(
                 "{name} pointer is null"
             )));
         }
         Ok(())
     }
 
-    unsafe fn owned_out_ptr<T>(out: *mut *mut T, name: &str) -> Result<(), TavError> {
+    unsafe fn owned_out_ptr<T>(out: *mut *mut T, name: &str) -> Result<(), TavCaciError> {
         unsafe { out_ptr(out, name) }?;
         // Matches tav_verify_snp_attestation: the slot must contain NULL on
         // entry. A non-NULL slot is rejected without being overwritten, so a
         // caller can never silently leak a live handle by reusing a variable.
         if unsafe { !(*out).is_null() } {
-            return Err(TavError::invalid_argument(format!(
+            return Err(TavCaciError::invalid_argument(format!(
                 "{name} must point to NULL before verification"
             )));
         }
         Ok(())
     }
 
-    unsafe fn byte_buffer_out_ptr(out: *mut TavByteBuffer, name: &str) -> Result<(), TavError> {
+    unsafe fn byte_buffer_out_ptr(
+        out: *mut TavCaciByteBuffer,
+        name: &str,
+    ) -> Result<(), TavCaciError> {
         unsafe { out_ptr(out, name) }?;
         unsafe {
-            *out = TavByteBuffer::empty();
+            *out = TavCaciByteBuffer::empty();
         }
         Ok(())
     }
 
     unsafe fn attestation_report<'a>(
-        report: *const TavSnpAttestationReport,
-    ) -> Result<&'a attestation::snp::report::AttestationReport, TavError> {
+        report: *const TAVSnpAttestationReport,
+    ) -> Result<&'a attestation::snp::report::AttestationReport, TavCaciError> {
         if report.is_null() {
-            return Err(TavError::invalid_argument("report is null"));
+            return Err(TavCaciError::invalid_argument("report is null"));
         }
         Ok(unsafe { (*report).report() })
     }
 
     unsafe fn uvm_endorsement_handle<'a>(
         uvm_endorsement: *const TavCborValue,
-    ) -> Result<&'a cose::CborValue, TavError> {
+    ) -> Result<&'a cose::CborValue, TavCaciError> {
         if uvm_endorsement.is_null() {
-            return Err(TavError::invalid_argument("uvm_endorsement is null"));
+            return Err(TavCaciError::invalid_argument("uvm_endorsement is null"));
         }
         // TavCborValue is a repr(transparent) C handle over cose::CborValue.
         Ok(unsafe { &*uvm_endorsement.cast::<cose::CborValue>() })
@@ -343,17 +421,17 @@ pub mod c {
         cpuids: *const u32,
         values: *const u8,
         count: usize,
-    ) -> Result<Vec<(snp::Cpuid, TcbVersionRaw)>, TavError> {
+    ) -> Result<Vec<(snp::Cpuid, TcbVersionRaw)>, TavCaciError> {
         if count == 0 {
             return Ok(Vec::new());
         }
         if cpuids.is_null() {
-            return Err(TavError::invalid_argument(
+            return Err(TavCaciError::invalid_argument(
                 "minimum_tcb_cpuids pointer is null",
             ));
         }
         if count > MAX_INPUT_LEN / TCB_VERSION_LEN {
-            return Err(TavError::invalid_argument(
+            return Err(TavCaciError::invalid_argument(
                 "minimum_tcb exceeds maximum input size",
             ));
         }
@@ -380,14 +458,14 @@ pub mod c {
     unsafe fn parse_trusted_policy_digests(
         data: *const u8,
         count: usize,
-    ) -> Result<Vec<[u8; SNP_HOST_DATA_LEN]>, TavError> {
+    ) -> Result<Vec<[u8; SNP_HOST_DATA_LEN]>, TavCaciError> {
         if count == 0 {
-            return Err(TavError::invalid_argument(
+            return Err(TavCaciError::invalid_argument(
                 "at least one trusted policy digest is required",
             ));
         }
         if count > MAX_INPUT_LEN / SNP_HOST_DATA_LEN {
-            return Err(TavError::invalid_argument(
+            return Err(TavCaciError::invalid_argument(
                 "trusted_policy_digests exceeds maximum input size",
             ));
         }
@@ -405,11 +483,11 @@ pub mod c {
 
     fn write_owned_bytes(
         bytes: impl Into<Vec<u8>>,
-        out_bytes: *mut TavByteBuffer,
-    ) -> Result<(), TavError> {
+        out_bytes: *mut TavCaciByteBuffer,
+    ) -> Result<(), TavCaciError> {
         unsafe { byte_buffer_out_ptr(out_bytes, "out_report_data") }?;
         unsafe {
-            *out_bytes = TavByteBuffer::from_bytes(bytes);
+            *out_bytes = TavCaciByteBuffer::from_bytes(bytes);
         }
         Ok(())
     }
@@ -421,7 +499,7 @@ pub mod c {
         trusted_didx509: *const c_char,
         trusted_didx509_len: usize,
         out_uvm_endorsement: *mut *mut TavCborValue,
-    ) -> *mut TavError {
+    ) -> *mut TavCaciError {
         into_result((|| {
             unsafe { owned_out_ptr(out_uvm_endorsement, "out_uvm_endorsement") }?;
             let uvm_endorsement = unsafe {
@@ -441,7 +519,7 @@ pub mod c {
                 )
             }?;
             synchronous::verify_uvm_endorsement(uvm_endorsement, trusted_didx509)
-                .map_err(TavError::from)?;
+                .map_err(TavCaciError::from)?;
             let cose_error = unsafe {
                 cose::ffi::c::tav_cbor_value_from_bytes(
                     uvm_endorsement.as_ptr(),
@@ -458,7 +536,7 @@ pub mod c {
 
     #[no_mangle]
     pub unsafe extern "C" fn tav_verify_caci_attestation(
-        attestation: *const TavSnpAttestationReport,
+        attestation: *const TAVSnpAttestationReport,
         minimum_tcb_cpuids: *const u32,
         minimum_tcb_values: *const u8,
         minimum_tcb_count: usize,
@@ -468,8 +546,8 @@ pub mod c {
         uvm_feed: *const c_char,
         uvm_feed_len: usize,
         minimum_svn: u64,
-        out_report_data: *mut TavByteBuffer,
-    ) -> *mut TavError {
+        out_report_data: *mut TavCaciByteBuffer,
+    ) -> *mut TavCaciError {
         into_result((|| {
             unsafe { byte_buffer_out_ptr(out_report_data, "out_report_data") }?;
             let attestation = unsafe { attestation_report(attestation) }?;
@@ -489,9 +567,53 @@ pub mod c {
                 uvm_feed,
                 minimum_svn,
             )
-            .map_err(TavError::from)?;
+            .map_err(TavCaciError::from)?;
             write_owned_bytes(report_data, out_report_data)
         })())
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_caci_error_code(error: *const TavCaciError) -> TavCaciErrorCode {
+        if error.is_null() {
+            return TavCaciErrorCode::ErrorCodeIsNull;
+        }
+
+        unsafe { (*error).code }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_caci_error_message(error: *const TavCaciError) -> *const c_char {
+        if error.is_null() {
+            return NULL_ERROR_MESSAGE.as_ptr().cast();
+        }
+
+        unsafe { (*error).message.as_ptr() }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_caci_error_free(error: *mut TavCaciError) {
+        if !error.is_null() {
+            unsafe {
+                drop(Box::from_raw(error));
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn tav_caci_byte_buffer_free(bytes: *mut TavCaciByteBuffer) {
+        if bytes.is_null() {
+            return;
+        }
+
+        let bytes = unsafe { &mut *bytes };
+        if !bytes.data.is_null() {
+            let data = std::ptr::slice_from_raw_parts_mut(bytes.data, bytes.len);
+            unsafe {
+                drop(Box::from_raw(data));
+            }
+            bytes.data = ptr::null_mut();
+            bytes.len = 0;
+        }
     }
 
     #[cfg(test)]
@@ -509,6 +631,53 @@ pub mod c {
                     crate::SNP_REPORT_DATA_LEN as i32,
                 ),
                 ("TAV_CACI_TCB_VERSION_LEN", TCB_VERSION_LEN as i32),
+                ("TAV_CACI_ERROR_OK", TavCaciErrorCode::Ok as i32),
+                (
+                    "TAV_CACI_ERROR_INVALID_ARGUMENT",
+                    TavCaciErrorCode::InvalidArgument as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_ERROR_CODE_IS_NULL",
+                    TavCaciErrorCode::ErrorCodeIsNull as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_UNSUPPORTED_PROCESSOR",
+                    TavCaciErrorCode::UnsupportedProcessor as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_INVALID_ROOT_CERTIFICATE",
+                    TavCaciErrorCode::InvalidRootCertificate as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_CERTIFICATE_CHAIN_ERROR",
+                    TavCaciErrorCode::CertificateChainError as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_SIGNATURE_VERIFICATION_ERROR",
+                    TavCaciErrorCode::SignatureVerificationError as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_TCB_VERIFICATION_ERROR",
+                    TavCaciErrorCode::TcbVerificationError as i32,
+                ),
+                ("TAV_CACI_ERROR_COSE", TavCaciErrorCode::CaciCose as i32),
+                (
+                    "TAV_CACI_ERROR_CERTIFICATE",
+                    TavCaciErrorCode::CaciCertificate as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_DID_X509",
+                    TavCaciErrorCode::CaciDidX509 as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_SIGNATURE",
+                    TavCaciErrorCode::CaciSignature as i32,
+                ),
+                (
+                    "TAV_CACI_ERROR_MEASUREMENT",
+                    TavCaciErrorCode::CaciMeasurement as i32,
+                ),
+                ("TAV_CACI_ERROR_POLICY", TavCaciErrorCode::CaciPolicy as i32),
             ] {
                 assert_eq!(
                     c_header_enum_value(caci_header, name),
@@ -531,17 +700,14 @@ pub mod c {
             assert!(!err.is_null());
             assert_eq!(uvm, sentinel);
             unsafe {
-                assert_eq!(
-                    ffi_utils::tav_error_code(err),
-                    TavErrorCode::InvalidArgument
-                );
-                ffi_utils::tav_error_free(err);
+                assert_eq!(tav_caci_error_code(err), TavCaciErrorCode::InvalidArgument);
+                tav_caci_error_free(err);
             }
         }
 
         #[test]
         fn byte_buffer_out_parameter_is_write_only() {
-            let mut bytes = TavByteBuffer {
+            let mut bytes = TavCaciByteBuffer {
                 data: ptr::NonNull::<u8>::dangling().as_ptr(),
                 len: usize::MAX,
             };
@@ -564,36 +730,36 @@ pub mod c {
             assert!(!err.is_null());
             assert!(bytes.data.is_null());
             assert_eq!(bytes.len, 0);
-            unsafe { ffi_utils::tav_error_free(err) };
+            unsafe { tav_caci_error_free(err) };
         }
 
         #[test]
         fn byte_buffer_free_is_defensive_for_null_and_empty_buffers() {
-            unsafe { ffi_utils::tav_byte_buffer_free(ptr::null_mut()) };
+            unsafe { tav_caci_byte_buffer_free(ptr::null_mut()) };
 
-            let mut bytes = TavByteBuffer {
+            let mut bytes = TavCaciByteBuffer {
                 data: ptr::null_mut(),
                 len: 0,
             };
-            unsafe { ffi_utils::tav_byte_buffer_free(&mut bytes) };
+            unsafe { tav_caci_byte_buffer_free(&mut bytes) };
             assert!(bytes.data.is_null());
             assert_eq!(bytes.len, 0);
         }
 
         #[test]
         fn error_accessors_handle_null_errors_defensively() {
-            let message = unsafe { ffi_utils::tav_error_message(ptr::null()) };
+            let message = unsafe { tav_caci_error_message(ptr::null()) };
 
             assert_eq!(
-                unsafe { ffi_utils::tav_error_code(ptr::null()) },
-                TavErrorCode::ErrorCodeIsNull
+                unsafe { tav_caci_error_code(ptr::null()) },
+                TavCaciErrorCode::ErrorCodeIsNull
             );
             assert!(!message.is_null());
             assert_eq!(
                 unsafe { std::ffi::CStr::from_ptr(message) }
                     .to_str()
                     .unwrap(),
-                "null TavError pointer"
+                "null TavCaciError pointer"
             );
         }
 

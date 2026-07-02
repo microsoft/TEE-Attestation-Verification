@@ -331,15 +331,26 @@ static void split_pem_chain(const char *chain, OwnedString *ask, OwnedString *ar
     *ark = string_from_range(ark_begin, ark_end);
 }
 
-static int consume_caci_error(TavError *error, const char *context) {
+static int consume_snp_error(TavError *error, const char *context) {
     if (error == NULL) {
         return 0;
     }
 
-    TavErrorCode code = tav_error_code(error);
+    TAVErrorCode code = tav_error_code(error);
     fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
     tav_error_free(error);
     return code == TAV_ERROR_OK ? 1 : (int)code;
+}
+
+static int consume_caci_error(TAVCaciError *error, const char *context) {
+    if (error == NULL) {
+        return 0;
+    }
+
+    TAVCaciErrorCode code = tav_caci_error_code(error);
+    fprintf(stderr, "%s: %s\n", context, tav_caci_error_message(error));
+    tav_caci_error_free(error);
+    return code == TAV_CACI_ERROR_OK ? 1 : (int)code;
 }
 
 static void check_cose_error(TAVCoseError *error, const char *context) {
@@ -375,8 +386,8 @@ static void print_text_value(const char *label, const char *text, size_t len) {
 
 static void print_borrowed_report_field(
     const char *name,
-    void (*accessor)(const TavSnpAttestationReport *, const uint8_t **, size_t *),
-    const TavSnpAttestationReport *report) {
+    void (*accessor)(const TAVSnpAttestationReport *, const uint8_t **, size_t *),
+    const TAVSnpAttestationReport *report) {
     const uint8_t *data = NULL;
     size_t len = 0;
     accessor(report, &data, &len);
@@ -486,12 +497,12 @@ int main(int argc, char **argv) {
     const size_t minimum_tcb_count = 1;
 
     int exit_code = 0;
-    TavSnpAttestationReport *attestation = NULL;
+    TAVSnpAttestationReport *attestation = NULL;
     TAVCborValue *uvm_endorsement = NULL;
-    TavByteBuffer report_data = {0};
+    TAVCaciByteBuffer report_data = {0};
 
-    exit_code = consume_caci_error(
-        tav_verify_snp_attestation(
+    exit_code = consume_snp_error(
+        tav_snp_verify_attestation(
             report.data,
             report.len,
             (const uint8_t *)ark.data,
@@ -555,7 +566,7 @@ int main(int argc, char **argv) {
     printf("  %" PRIu64 "\n", minimum_svn);
 
 cleanup:
-    tav_byte_buffer_free(&report_data);
+    tav_caci_byte_buffer_free(&report_data);
     tav_cbor_value_free(uvm_endorsement);
     tav_snp_attestation_report_free(attestation);
     free_string(&ark);

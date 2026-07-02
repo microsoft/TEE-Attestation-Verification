@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#include "tav/tee.h"
+#include "tav/tav.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -119,7 +119,7 @@ static void print_subfield_bool(const char *name, bool value) {
     printf("%s\n", value ? "true" : "false");
 }
 
-static void print_report(const TavSnpAttestationReport *report) {
+static void print_report(const TAVSnpAttestationReport *report) {
     const uint8_t *data = NULL;
     size_t len = 0;
 
@@ -191,8 +191,8 @@ int main(int argc, char **argv) {
     Buffer ask = read_file(argv[3]);
     Buffer vcek = read_file(argv[4]);
 
-    TavSnpAttestationReport *report = NULL;
-    TavError *error = tav_verify_snp_attestation(
+    TAVSnpAttestationReport *report = NULL;
+    TavError *error = tav_snp_verify_attestation(
         attestation.data,
         attestation.len,
         ark.data,
@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
         &report);
 
     if (error != NULL) {
-        TavErrorCode code = tav_error_code(error);
+        TAVErrorCode code = tav_error_code(error);
         fprintf(stderr, "%s\n", tav_error_message(error));
         tav_error_free(error);
         free_buffer(&attestation);

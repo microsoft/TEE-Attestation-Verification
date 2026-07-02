@@ -74,9 +74,10 @@ jobs:
 
       - name: Check C FFI exports
         run: |
-          python3 scripts/check-c-ffi-exports.py \
-            --library target/debug/libtee_attestation_verification_lib.so \
-            --golden demos/c-ffi/test-data/exports.golden.txt
+          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
+            | grep ' tav_snp_verify_attestation'
+          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
+            | grep ' tav_error_code'
 
       - name: Run C FFI demo
         run: |

@@ -1,4 +1,7 @@
-tav_byte_buffer_free
+tav_caci_byte_buffer_free
+tav_caci_error_code
+tav_caci_error_free
+tav_caci_error_message
 tav_cbor_value_array_at
 tav_cbor_value_bytes
 tav_cbor_value_free
@@ -18,6 +21,13 @@ tav_cbor_value_tag
 tav_cbor_value_tagged_payload
 tav_cbor_value_text
 tav_cbor_value_to_bytes
+tav_cose_byte_buffer_free
+tav_cose_error_code
+tav_cose_error_free
+tav_cose_error_message
+tav_cose_sign1_validate
+tav_cose_sign1_verify_detached
+tav_cose_sign1_verify_embedded
 tav_error_code
 tav_error_free
 tav_error_message
@@ -68,9 +78,6 @@ tav_snp_attestation_report_signature_r
 tav_snp_attestation_report_signature_s
 tav_snp_attestation_report_version
 tav_snp_attestation_report_vmpl
-tav_validate_cose_sign1
+tav_snp_verify_attestation
 tav_verify_caci_attestation
 tav_verify_caci_uvm_endorsement
-tav_verify_cose_sign1_detached
-tav_verify_cose_sign1_embedded
-tav_verify_snp_attestation
