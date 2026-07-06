@@ -83,14 +83,11 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
-          rustup update nightly
-          rustup +nightly component add rust-src
 
       - name: Setup WASM tooling
         shell: bash
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.122 --locked
           cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build with openssl
@@ -107,15 +104,15 @@ jobs:
 
       - name: Build WASM with WebCrypto crypto
         working-directory: attestation
-        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --release --no-default-features --features "crypto_webcrypto"
 
       - name: Test WASM offline
         working-directory: attestation
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
+        run: wasm-pack test --node --release --no-default-features --features "crypto_pure_rust"
 
       - name: Test WASM offline with WebCrypto backend
         working-directory: attestation
-        run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack test --node --release --no-default-features --features "crypto_webcrypto"
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -124,7 +121,7 @@ jobs:
 
       - name: Build WASM for the web-verify-kernel demo
         working-directory: attestation
-        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --release --no-default-features --features "crypto_webcrypto"
 
       - name: Install web-verify-kernel demo test deps
         working-directory: demos/web-verify-kernel/tests
@@ -136,22 +133,9 @@ jobs:
         working-directory: demos/web-verify-kernel/tests
         run: npm test
 
-      # ACI depends on EverParse CBOR code that requires 64-bit usize.
-      # wasm64-unknown-unknown does not have a prebuilt rust-std
-      # component, so use nightly Cargo build-std with rust-src instead of
-      # rustup target add. wasm-bindgen only generates JS bindings from the
-      # already-built wasm artifact.
-      - name: Build WASM64 for the caci-attestation-verify demo
-        run: |
-          cargo +nightly build -Z build-std=std,panic_abort \
-            --manifest-path caci/Cargo.toml \
-            --target wasm64-unknown-unknown \
-            --no-default-features \
-            --features "crypto_webcrypto" \
-            --release
-          wasm-bindgen --target web \
-            --out-dir demos/caci-attestation-verify/caci_pkg \
-            target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
+      - name: Build WASM for the caci-attestation-verify demo
+        working-directory: caci
+        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg --release --no-default-features --features "crypto_webcrypto"
 
       - name: Install caci-attestation-verify demo test deps
         working-directory: demos/caci-attestation-verify/tests
@@ -179,14 +163,11 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
-          rustup update nightly
-          rustup +nightly component add rust-src
 
       - name: Setup WASM tooling
         shell: bash
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.122 --locked
           cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build tav-attestation WASM bundle with WebCrypto crypto
@@ -214,14 +195,12 @@ jobs:
 
           mkdir -p ../dist/tav-caci ../release-artifacts
 
-          cargo +nightly build -Z build-std=std,panic_abort \
-            --target wasm64-unknown-unknown \
-            --no-default-features \
-            --features "crypto_webcrypto" \
-            --release
-          wasm-bindgen --target web \
+          wasm-pack build \
+            --target web \
+            --release \
             --out-dir ../dist/tav-caci \
-            ../target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
+            --no-default-features \
+            --features "crypto_webcrypto"
 
           tar -C ../dist -czf "../release-artifacts/tav-caci-${VERSION}.tar.gz" tav-caci
 

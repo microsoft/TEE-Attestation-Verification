@@ -28,28 +28,21 @@ Open <http://localhost:8000/> in a browser.
 
 ### Option B: build from source
 
-From the repository root, build the CACI WASM package as wasm64, emitting
+From the repository root, build the CACI WASM package, emitting
 `caci_pkg/` directly inside this demo directory:
 
-ACI depends on EverParse CBOR code that requires a 64-bit `usize`. Build it as
-`wasm64-unknown-unknown` with nightly `build-std`; the target does not have a
-prebuilt `rust-std` component, so install `rust-src` and do not run
-`rustup target add wasm64-unknown-unknown`.
-
 ```sh
-rustup toolchain install nightly
-rustup +nightly component add rust-src
-cargo install wasm-bindgen-cli --version 0.2.122 --locked
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack --version 0.13.1 --locked
 
-cargo +nightly build -Z build-std=std,panic_abort \
-  --manifest-path caci/Cargo.toml \
-  --target wasm64-unknown-unknown \
-  --no-default-features \
-  --features "crypto_webcrypto" \
-  --release
-wasm-bindgen --target web \
-  --out-dir demos/caci-attestation-verify/caci_pkg \
-  target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
+(
+  cd caci
+  wasm-pack build \
+    --target web \
+    --out-dir ../demos/caci-attestation-verify/caci_pkg \
+    --no-default-features \
+    --features "crypto_webcrypto"
+)
 ```
 
 Serve this directory over HTTP:

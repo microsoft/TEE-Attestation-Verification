@@ -38,8 +38,8 @@ jobs:
       - name: Test with ${{ matrix.backend.name }} backend
         run: cargo test --manifest-path caci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
 
-  wasm64:
-    name: WASM64 WebCrypto build and test
+  wasm:
+    name: WASM WebCrypto build and test
     runs-on: ubuntu-latest
 
     steps:
@@ -47,45 +47,17 @@ jobs:
 
       - name: Install rust
         run: |
-          rustup update nightly
-          rustup +nightly component add rust-src
+          rustup update stable && rustup default stable
 
       - name: Setup WASM tooling
         run: |
-          cargo install wasm-bindgen-cli --version 0.2.122 --locked
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-pack --version 0.13.1 --locked
 
-      # ACI depends on EverParse CBOR code that requires 64-bit usize.
-      # wasm64-unknown-unknown does not have a prebuilt rust-std
-      # component, so use nightly Cargo build-std with rust-src instead of
-      # rustup target add. wasm-bindgen only generates JS bindings from the
-      # already-built wasm artifact.
-      - name: Build WASM64 with WebCrypto backend
-        run: |
-          cargo +nightly build -Z build-std=std,panic_abort \
-            --manifest-path caci/Cargo.toml \
-            --target wasm64-unknown-unknown \
-            --no-default-features \
-            --features "crypto_webcrypto" \
-            --release
+      - name: Build WASM with WebCrypto backend
+        working-directory: caci
+        run: wasm-pack build --target web --no-default-features --features "crypto_webcrypto"
 
-      - name: Generate WASM bindings
-        run: wasm-bindgen --target web --out-dir caci/pkg target/wasm64-unknown-unknown/release/tee_attestation_verification_caci.wasm
-
-      - name: Compile WASM64 tests with WebCrypto backend
-        run: |
-          cargo +nightly test -Z build-std=std,panic_abort \
-            --manifest-path caci/Cargo.toml \
-            --target wasm64-unknown-unknown \
-            --no-default-features \
-            --features "crypto_webcrypto" \
-            --no-run
-
-      - name: Setup Node 26
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "26"
-
-      - name: Test WASM64 with WebCrypto backend
-        run: |
-          test_wasm=$(find target/wasm64-unknown-unknown/debug/deps -maxdepth 1 -name 'tee_attestation_verification_caci-*.wasm' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)
-          wasm-bindgen-test-runner --nocapture "$test_wasm"
+      - name: Test WASM with WebCrypto backend
+        working-directory: caci
+        run: wasm-pack test --node --no-default-features --features "crypto_webcrypto"

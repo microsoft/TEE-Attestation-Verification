@@ -19,8 +19,9 @@ crypto_webcrypto = ["crypto/crypto_webcrypto"]
 
 [dependencies]
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.2", path = "../crypto", default-features = false }
-cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "f4cd5ffa183edd5cc824d66588012bcf8d0bdccd" } # v2026.02.25
-cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "f4cd5ffa183edd5cc824d66588012bcf8d0bdccd" } # v2026.02.25
+# project-everest/everparse tag v2026.07.02 resolves to this pinned commit.
+cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
+cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"

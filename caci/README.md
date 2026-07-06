@@ -46,7 +46,7 @@ let verified_report_data = tav::verify_caci_attestation(
 
 Release tags use the `tav-<crate-version>` format.
 
-Releases include `tav-caci-<version>.tar.gz`, a WASM64 and JS wrapper tarball
+Releases include `tav-caci-<version>.tar.gz`, a WASM and JS wrapper tarball
 for direct consumption. Download and extract the matching GitHub release asset
 for your chosen tag into a directory served by your application:
 

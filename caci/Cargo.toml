@@ -10,7 +10,7 @@ license = "MIT"
 
 [package.metadata.docs.rs]
 features = ["crypto_openssl", "crypto_webcrypto"]
-targets = ["x86_64-unknown-linux-gnu", "wasm64-unknown-unknown"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
