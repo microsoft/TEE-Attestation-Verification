@@ -625,12 +625,6 @@ pub mod c {
             let caci_header = include_str!("../../include/tav/caci.h");
 
             for (name, value) in [
-                ("TAV_CACI_HOST_DATA_LEN", SNP_HOST_DATA_LEN as i32),
-                (
-                    "TAV_CACI_REPORT_DATA_LEN",
-                    crate::SNP_REPORT_DATA_LEN as i32,
-                ),
-                ("TAV_CACI_TCB_VERSION_LEN", TCB_VERSION_LEN as i32),
                 ("TAV_CACI_ERROR_OK", TavCaciErrorCode::Ok as i32),
                 (
                     "TAV_CACI_ERROR_INVALID_ARGUMENT",

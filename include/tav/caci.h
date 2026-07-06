@@ -38,12 +38,6 @@ extern "C" {
  * tav_caci_error_free.
  */
 
-typedef enum TAVCaciSize {
-    TAV_CACI_HOST_DATA_LEN = 32,
-    TAV_CACI_REPORT_DATA_LEN = 64,
-    TAV_CACI_TCB_VERSION_LEN = 8,
-} TAVCaciSize;
-
 /*
  * Error codes returned by tav_caci_error_code. Codes 101-105 mirror the wrapped
  * SNP verification failures; 301-306 are CACI-policy specific.
@@ -100,13 +94,16 @@ TAV_CACI_API TAVCaciError *tav_verify_caci_uvm_endorsement(
  *
  * The minimum TCB policy is passed as two parallel arrays of minimum_tcb_count
  * entries: minimum_tcb_cpuids holds one uint32_t CPUID per entry, and
- * minimum_tcb_values holds minimum_tcb_count contiguous TAV_CACI_TCB_VERSION_LEN
- * byte TCB values. Both pointers may be NULL only when minimum_tcb_count is zero.
+ * minimum_tcb_values holds minimum_tcb_count contiguous 8-byte TCB values (the
+ * size of an SNP TCB_VERSION). Both pointers may be NULL only when
+ * minimum_tcb_count is zero.
  *
  * trusted_policy_digests points to trusted_policy_digest_count contiguous
- * TAV_CACI_HOST_DATA_LEN-byte SHA-256 policy digests. At least one digest is
- * required. uvm_feed is a UTF-8 byte slice and does not need to be
+ * 32-byte SHA-256 policy digests (the size of the SNP HOST_DATA field). At least
+ * one digest is required. uvm_feed is a UTF-8 byte slice and does not need to be
  * NUL-terminated.
+ *
+ * On success, out_report_data receives the 64-byte verified SNP REPORT_DATA.
  */
 TAV_CACI_API TAVCaciError *tav_verify_caci_attestation(
     const TAVSnpAttestationReport *attestation,

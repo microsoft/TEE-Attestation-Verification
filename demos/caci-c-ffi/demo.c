@@ -10,6 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Input layout sizes documented by include/tav/caci.h: each trusted policy
+// digest is a 32-byte SNP HOST_DATA value and each minimum-TCB value is an
+// 8-byte SNP TCB_VERSION.
+enum {
+    SNP_HOST_DATA_LEN = 32,
+    SNP_TCB_VERSION_LEN = 8,
+};
+
 typedef struct Buffer {
     uint8_t *data;
     size_t len;
@@ -454,7 +462,7 @@ static void print_minimum_tcb(
     for (size_t i = 0; i < count; i++) {
         printf("  cpuid: 0x%08x\n", cpuids[i]);
         printf("  tcb\n");
-        print_hex_lines(values + i * TAV_CACI_TCB_VERSION_LEN, TAV_CACI_TCB_VERSION_LEN, 4);
+        print_hex_lines(values + i * SNP_TCB_VERSION_LEN, SNP_TCB_VERSION_LEN, 4);
     }
 }
 
@@ -483,14 +491,14 @@ int main(int argc, char **argv) {
     OwnedString ark = {0};
     split_pem_chain(chain.data, &ask, &ark);
 
-    if (policy.len == 0 || policy.len % TAV_CACI_HOST_DATA_LEN != 0) {
+    if (policy.len == 0 || policy.len % SNP_HOST_DATA_LEN != 0) {
         fprintf(
             stderr,
             "policy.hex must contain one or more %u-byte policy digests\n",
-            (unsigned int)TAV_CACI_HOST_DATA_LEN);
+            (unsigned int)SNP_HOST_DATA_LEN);
         return 1;
     }
-    size_t policy_count = policy.len / TAV_CACI_HOST_DATA_LEN;
+    size_t policy_count = policy.len / SNP_HOST_DATA_LEN;
     uint64_t minimum_svn = parse_u64(argv[7], "minimum-svn");
     const uint32_t minimum_tcb_cpuids[] = {0x00A00F11};
     const uint8_t minimum_tcb_values[] = {0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xdb};
