@@ -348,9 +348,9 @@ static int consume_caci_error(TAVCaciError *error, const char *context) {
     }
 
     TAVCaciErrorCode code = tav_caci_error_code(error);
-    fprintf(stderr, "%s: %s\n", context, tav_caci_error_message(error));
+    fprintf(stderr, "%s (code %d): %s\n", context, (int)code, tav_caci_error_message(error));
     tav_caci_error_free(error);
-    return code == TAV_CACI_ERROR_OK ? 1 : (int)code;
+    return 1;
 }
 
 static void check_cose_error(TAVCoseError *error, const char *context) {
