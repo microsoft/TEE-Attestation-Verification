@@ -67,63 +67,8 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build C FFI demo
-        run: |
-          cmake -S demos/c-ffi -B demos/c-ffi/build -G Ninja
-          cmake --build demos/c-ffi/build
-
-      - name: Run C FFI demo
-        run: |
-          ./demos/c-ffi/build/tav-c-ffi-demo \
-            attestation/tests/test_data/milan_attestation_report.bin \
-            attestation/src/pinned_arks/milan_ark.pem \
-            attestation/tests/test_data/milan_ask.pem \
-            attestation/tests/test_data/milan_vcek.pem \
-            > c-ffi-demo-output.txt
-          diff -u demos/c-ffi/test-data/milan-output.golden.txt c-ffi-demo-output.txt
-
-      - name: Run C FFI demo failure path
-        run: |
-          : > c-ffi-empty-report.bin
-          set +e
-          ./demos/c-ffi/build/tav-c-ffi-demo \
-            c-ffi-empty-report.bin \
-            attestation/src/pinned_arks/milan_ark.pem \
-            attestation/tests/test_data/milan_ask.pem \
-            attestation/tests/test_data/milan_vcek.pem \
-            > c-ffi-demo-failure-output.txt \
-            2> c-ffi-demo-failure-error.txt
-          code=$?
-          set -e
-          test "$code" -eq 1
-          test ! -s c-ffi-demo-failure-output.txt
-          diff -u demos/c-ffi/test-data/empty-report-error.golden.txt c-ffi-demo-failure-error.txt
-
-      - name: Build and run statically linked C FFI demo
-        run: |
-          cmake -S demos/c-ffi -B demos/c-ffi/build-static -G Ninja -DTAV_LINK_STATIC=ON
-          cmake --build demos/c-ffi/build-static
-          ./demos/c-ffi/build-static/tav-c-ffi-demo \
-            attestation/tests/test_data/milan_attestation_report.bin \
-            attestation/src/pinned_arks/milan_ark.pem \
-            attestation/tests/test_data/milan_ask.pem \
-            attestation/tests/test_data/milan_vcek.pem \
-            > c-ffi-demo-static-output.txt
-          diff -u demos/c-ffi/test-data/milan-output.golden.txt c-ffi-demo-static-output.txt
-          : > c-ffi-empty-report.bin
-          set +e
-          ./demos/c-ffi/build-static/tav-c-ffi-demo \
-            c-ffi-empty-report.bin \
-            attestation/src/pinned_arks/milan_ark.pem \
-            attestation/tests/test_data/milan_ask.pem \
-            attestation/tests/test_data/milan_vcek.pem \
-            > c-ffi-demo-static-failure-output.txt \
-            2> c-ffi-demo-static-failure-error.txt
-          code=$?
-          set -e
-          test "$code" -eq 1
-          test ! -s c-ffi-demo-static-failure-output.txt
-          diff -u demos/c-ffi/test-data/empty-report-error.golden.txt c-ffi-demo-static-failure-error.txt
+      - name: Run C FFI demo tests
+        run: python3 demos/c-ffi/run_tests.py
 
   cose-c-ffi:
     name: COSE C FFI demo
@@ -168,75 +113,8 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build CACI C FFI demo
-        run: |
-          cmake -S demos/caci-c-ffi -B demos/caci-c-ffi/build -G Ninja
-          cmake --build demos/caci-c-ffi/build
-
-      - name: Run CACI C FFI demo
-        run: |
-          ./demos/caci-c-ffi/build/tav-caci-c-ffi-demo \
-            caci/tests/fixtures/report.hex \
-            caci/tests/fixtures/host-amd-cert.base64 \
-            caci/tests/fixtures/reference-info.base64 \
-            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
-            demos/caci-c-ffi/test-data/policy.hex \
-            ContainerPlat-AMD-UVM \
-            104 \
-            > caci-c-ffi-demo-output.txt
-          diff -u demos/caci-c-ffi/test-data/sample-output.golden.txt caci-c-ffi-demo-output.txt
-
-      - name: Run CACI C FFI demo failure path
-        run: |
-          : > caci-c-ffi-empty-report.hex
-          set +e
-          ./demos/caci-c-ffi/build/tav-caci-c-ffi-demo \
-            caci-c-ffi-empty-report.hex \
-            caci/tests/fixtures/host-amd-cert.base64 \
-            caci/tests/fixtures/reference-info.base64 \
-            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
-            demos/caci-c-ffi/test-data/policy.hex \
-            ContainerPlat-AMD-UVM \
-            104 \
-            > caci-c-ffi-demo-failure-output.txt \
-            2> caci-c-ffi-demo-failure-error.txt
-          code=$?
-          set -e
-          test "$code" -eq 1
-          test ! -s caci-c-ffi-demo-failure-output.txt
-          diff -u demos/caci-c-ffi/test-data/empty-report-error.golden.txt caci-c-ffi-demo-failure-error.txt
-
-      - name: Build and run statically linked CACI C FFI demo
-        run: |
-          cmake -S demos/caci-c-ffi -B demos/caci-c-ffi/build-static -G Ninja -DTAV_LINK_STATIC=ON
-          cmake --build demos/caci-c-ffi/build-static
-          ./demos/caci-c-ffi/build-static/tav-caci-c-ffi-demo \
-            caci/tests/fixtures/report.hex \
-            caci/tests/fixtures/host-amd-cert.base64 \
-            caci/tests/fixtures/reference-info.base64 \
-            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
-            demos/caci-c-ffi/test-data/policy.hex \
-            ContainerPlat-AMD-UVM \
-            104 \
-            > caci-c-ffi-demo-static-output.txt
-          diff -u demos/caci-c-ffi/test-data/sample-output.golden.txt caci-c-ffi-demo-static-output.txt
-          : > caci-c-ffi-empty-report.hex
-          set +e
-          ./demos/caci-c-ffi/build-static/tav-caci-c-ffi-demo \
-            caci-c-ffi-empty-report.hex \
-            caci/tests/fixtures/host-amd-cert.base64 \
-            caci/tests/fixtures/reference-info.base64 \
-            'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2' \
-            demos/caci-c-ffi/test-data/policy.hex \
-            ContainerPlat-AMD-UVM \
-            104 \
-            > caci-c-ffi-demo-static-failure-output.txt \
-            2> caci-c-ffi-demo-static-failure-error.txt
-          code=$?
-          set -e
-          test "$code" -eq 1
-          test ! -s caci-c-ffi-demo-static-failure-output.txt
-          diff -u demos/caci-c-ffi/test-data/empty-report-error.golden.txt caci-c-ffi-demo-static-failure-error.txt
+      - name: Run CACI C FFI demo tests
+        run: python3 demos/caci-c-ffi/run_tests.py
 
   caci-attestation-verify:
     name: E2E test of CACI attestation verification

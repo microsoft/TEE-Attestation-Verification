@@ -3,6 +3,10 @@ target/
 dist/
 pkg/
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # COSE C FFI demo CMake/Ninja build outputs
 demos/cose-c-ffi/build/
 demos/cose-c-ffi/build-static/

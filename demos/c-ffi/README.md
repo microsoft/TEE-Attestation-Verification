@@ -33,3 +33,14 @@ The CMake build invokes:
 ```sh
 cargo build --manifest-path attestation/Cargo.toml --no-default-features --features crypto_openssl
 ```
+
+## Tests
+
+`run_tests.py` builds the demo (shared and statically linked) and checks its
+output against the golden files in `test-data/`, covering both the success path
+and the empty-report failure path. It uses Python's `unittest` framework and
+requires `cmake` and `ninja` on `PATH`:
+
+```sh
+python3 demos/c-ffi/run_tests.py
+```

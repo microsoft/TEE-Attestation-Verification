@@ -28,3 +28,15 @@ cmake --build demos/caci-c-ffi/build
 
 Use `-DTAV_LINK_STATIC=ON` when configuring CMake to link against the Rust
 static library instead of the shared library.
+
+## Tests
+
+`run_tests.py` builds the demo (shared and statically linked) and checks its
+output against the golden files in `test-data/`, covering both the success path
+and the empty-report failure path. It uses Python's `unittest` framework and
+requires `cmake` and `ninja` on `PATH`:
+
+```sh
+python3 demos/caci-c-ffi/run_tests.py
+```
+
