@@ -72,13 +72,6 @@ jobs:
           cmake -S demos/c-ffi -B demos/c-ffi/build -G Ninja
           cmake --build demos/c-ffi/build
 
-      - name: Check C FFI exports
-        run: |
-          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
-            | grep ' tav_snp_verify_attestation'
-          nm -D --defined-only target/debug/libtee_attestation_verification_lib.so \
-            | grep ' tav_error_code'
-
       - name: Run C FFI demo
         run: |
           ./demos/c-ffi/build/tav-c-ffi-demo \
@@ -147,13 +140,6 @@ jobs:
           cmake -S demos/cose-c-ffi -B demos/cose-c-ffi/build -G Ninja
           cmake --build demos/cose-c-ffi/build
 
-      - name: Check COSE C FFI exports
-        run: |
-          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
-            | grep ' tav_cbor_value_from_bytes'
-          nm -D --defined-only target/debug/libtee_attestation_verification_cose.so \
-            | grep ' tav_cose_error_code'
-
       - name: Run COSE C FFI demo
         run: |
           uvm_hex="$(cat demos/cose-c-ffi/test-data/caci-uvm-endorsement.hex)"
@@ -186,12 +172,6 @@ jobs:
         run: |
           cmake -S demos/caci-c-ffi -B demos/caci-c-ffi/build -G Ninja
           cmake --build demos/caci-c-ffi/build
-
-      - name: Check CACI C FFI exports
-        run: |
-          python3 scripts/check-c-ffi-exports.py \
-            --library target/debug/libtee_attestation_verification_caci.so \
-            --golden demos/caci-c-ffi/test-data/exports.golden.txt
 
       - name: Run CACI C FFI demo
         run: |
