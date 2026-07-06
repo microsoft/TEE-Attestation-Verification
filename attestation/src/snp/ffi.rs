@@ -279,10 +279,6 @@ pub mod c {
     }
 
     impl TAVSnpAttestationReport {
-        /// Borrow the parsed, verified attestation report.
-        ///
-        /// Exposed for the CACI frontend crate, which stages SNP verification
-        /// and then applies the relying-party CACI policy over this report.
         pub fn report(&self) -> &AttestationReport {
             AttestationReport::ref_from_bytes(&self.bytes).expect(
                 "TAVSnpAttestationReport is only constructed from verified bytes so parsing should not fail",
