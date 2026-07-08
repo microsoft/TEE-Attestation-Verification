@@ -65,7 +65,7 @@ jobs:
         run: wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features "crypto_pure_rust"
 
       - name: Run FFI WASM API consumer tests
-        run: node --test ffi/tests/wasm-consumer/
+        run: node --test ffi/tests/wasm-consumer/*.test.cjs
 
   ffi-c-api:
     name: FFI C API consumer tests (${{ matrix.backend.name }}, ${{ matrix.link }})

@@ -14,5 +14,5 @@ From the repository root:
 cd ffi
 wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features crypto_pure_rust
 cd ..
-node --test ffi/tests/wasm-consumer/
+node --test ffi/tests/wasm-consumer/*.test.cjs
 ```
