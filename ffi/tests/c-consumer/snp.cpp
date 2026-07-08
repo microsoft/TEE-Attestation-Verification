@@ -45,14 +45,7 @@ std::string hex_field(const TavSnpAttestationReport *report, BytesAccessor acces
     accessor(report, &data, &len);
     REQUIRE(data != nullptr);
 
-    static const char digits[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(len * 2);
-    for (size_t i = 0; i < len; i++) {
-        out.push_back(digits[data[i] >> 4]);
-        out.push_back(digits[data[i] & 0x0f]);
-    }
-    return out;
+    return hex_encode(data, len);
 }
 
 } // namespace

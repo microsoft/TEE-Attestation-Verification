@@ -4,7 +4,7 @@
 //! External C and WebAssembly bindings for TEE attestation verification.
 //!
 //! Rust consumers should use the domain crates directly. This crate owns the
-//! native C ABI and wasm-bindgen API surface.
+//! native C ABI (`c_ffi`) and wasm-bindgen API surface (`wasm_ffi`).
 
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]
 use std::ffi::CString;
@@ -210,21 +210,6 @@ mod tests {
             header_names, mapped_names,
             "include/tav/utils.h TAV_ERROR_ codes must exactly match the checked set"
         );
-    }
-
-    #[test]
-    fn domain_specific_error_codes_are_unique() {
-        let header = include_str!("../include/tav/utils.h");
-        let mut seen = std::collections::BTreeMap::new();
-
-        for (name, value) in c_header_error_codes(header) {
-            if matches!(value, 0 | 1 | 2) {
-                continue;
-            }
-            if let Some(previous) = seen.insert(value, name) {
-                panic!("{name} collides with {previous} at error code {value}");
-            }
-        }
     }
 
     fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {

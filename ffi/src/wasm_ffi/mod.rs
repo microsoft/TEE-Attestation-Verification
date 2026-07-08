@@ -5,6 +5,11 @@
 //! > `&str`) are copied at the boundary and always safe; live JS arrays and
 //! > borrowed wasm handles are read only then, so callers must not mutate those
 //! > arrays or free those handles until the promise resolves.
+//!
+//! See `ffi/tests/wasm-consumer` for the Node-based consumer test suite that
+//! imports the generated package exactly as an external JS consumer would,
+//! and `demos/web-verify-kernel` / `demos/caci-attestation-verify` for
+//! runnable browser demos.
 
 #[cfg(target_family = "wasm")]
 pub(crate) mod caci;

@@ -6,11 +6,9 @@
 #include "support.h"
 
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,106 +30,6 @@ constexpr uint32_t kMinimumTcbCpuid = 0x00A00F11;
 constexpr std::array<uint8_t, 8> kMinimumTcbValue = {
     0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xdb};
 
-// Fixture decoders throw on malformed input rather than registering a doctest
-// assertion per byte (the PEM/JSON fixtures are large enough that per-byte
-// REQUIREs would dwarf the real assertion count). An uncaught exception is
-// still reported by doctest as a failing test.
-[[noreturn]] void fixture_error(const std::string &message) {
-    throw std::runtime_error(message);
-}
-
-int hex_nibble(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    return -1;
-}
-
-std::vector<uint8_t> hex_decode(const std::vector<uint8_t> &text) {
-    std::vector<uint8_t> out;
-    int high = -1;
-    for (uint8_t raw : text) {
-        char ch = static_cast<char>(raw);
-        if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') continue;
-        int nibble = hex_nibble(ch);
-        if (nibble < 0) fixture_error("non-hex character in fixture");
-        if (high < 0) {
-            high = nibble;
-        } else {
-            out.push_back(static_cast<uint8_t>((high << 4) | nibble));
-            high = -1;
-        }
-    }
-    if (high >= 0) fixture_error("odd number of hex digits in fixture");
-    return out;
-}
-
-int base64_value(char ch) {
-    if (ch >= 'A' && ch <= 'Z') return ch - 'A';
-    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
-    if (ch >= '0' && ch <= '9') return ch - '0' + 52;
-    if (ch == '+') return 62;
-    if (ch == '/') return 63;
-    return -1;
-}
-
-std::vector<uint8_t> base64_decode(const std::vector<uint8_t> &text) {
-    std::vector<uint8_t> out;
-    unsigned int accumulator = 0;
-    int bits = -8;
-    for (uint8_t raw : text) {
-        char ch = static_cast<char>(raw);
-        if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') continue;
-        if (ch == '=') break;
-        int value = base64_value(ch);
-        if (value < 0) fixture_error("non-base64 character in fixture");
-        accumulator = (accumulator << 6) | static_cast<unsigned int>(value);
-        bits += 6;
-        if (bits >= 0) {
-            out.push_back(static_cast<uint8_t>((accumulator >> bits) & 0xff));
-            bits -= 8;
-        }
-    }
-    return out;
-}
-
-// Minimal JSON string-field extractor sufficient for the host AMD certificate
-// bundle (values contain only \n, \r, \t, \", \\ and \/ escapes).
-std::string json_string_field(const std::string &json, const std::string &key) {
-    std::string pattern = "\"" + key + "\"";
-    size_t pos = json.find(pattern);
-    if (pos == std::string::npos) fixture_error("JSON missing key: " + key);
-    pos += pattern.size();
-    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) pos++;
-    if (pos >= json.size() || json[pos] != ':') fixture_error("JSON key missing ':'");
-    pos++;
-    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) pos++;
-    if (pos >= json.size() || json[pos] != '"') fixture_error("JSON value is not a string");
-    pos++;
-
-    std::string out;
-    while (pos < json.size()) {
-        char ch = json[pos++];
-        if (ch == '"') return out;
-        if (ch != '\\') {
-            out.push_back(ch);
-            continue;
-        }
-        if (pos >= json.size()) fixture_error("unterminated JSON escape");
-        char escaped = json[pos++];
-        switch (escaped) {
-            case 'n': out.push_back('\n'); break;
-            case 'r': out.push_back('\r'); break;
-            case 't': out.push_back('\t'); break;
-            case '"':
-            case '\\':
-            case '/': out.push_back(escaped); break;
-            default: fixture_error("unsupported JSON escape");
-        }
-    }
-    fixture_error("unterminated JSON string");
-}
-
 // Split a two-certificate PEM chain (ASK then ARK) into its two PEM blocks.
 std::pair<std::string, std::string> split_pem_chain(const std::string &chain) {
     static const std::string begin = "-----BEGIN CERTIFICATE-----";
@@ -151,10 +49,6 @@ std::pair<std::string, std::string> split_pem_chain(const std::string &chain) {
 
     return {chain.substr(ask_begin, ask_end - ask_begin),
             chain.substr(ark_begin, ark_end - ark_begin)};
-}
-
-std::string to_string(const std::vector<uint8_t> &bytes) {
-    return std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size());
 }
 
 struct CaciInputs {
