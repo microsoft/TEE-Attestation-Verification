@@ -62,7 +62,7 @@ jobs:
 
       - name: Build FFI WASM package for Node consumers
         working-directory: ffi
-        run: wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features "crypto_pure_rust"
+        run: wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features "crypto_webcrypto"
 
       - name: Run FFI WASM API consumer tests
         run: node --test ffi/tests/wasm-consumer/*.test.cjs
