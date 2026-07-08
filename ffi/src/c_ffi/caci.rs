@@ -6,8 +6,8 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use super::utils::{
-    input_bytes, input_text, owned_out_ptr, tav_error_free, tav_error_message,
-    TavByteBuffer, MAX_INPUT_LEN,
+    input_bytes, input_text, owned_out_ptr, tav_error_free, tav_error_message, TavByteBuffer,
+    MAX_INPUT_LEN,
 };
 use crate::c_ffi::cose::{tav_cbor_value_from_bytes, TavCborValue};
 use crate::c_ffi::snp::TavSnpAttestationReport;

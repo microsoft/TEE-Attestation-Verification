@@ -9,9 +9,7 @@
 
 use std::os::raw::c_char;
 
-use super::utils::{
-    input_bytes, input_text, out_ptr, owned_out_ptr, TavByteBuffer,
-};
+use super::utils::{input_bytes, input_text, out_ptr, owned_out_ptr, TavByteBuffer};
 use crate::{into_result, TavError, TavErrorCode};
 use std::ptr;
 

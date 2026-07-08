@@ -134,10 +134,7 @@ mod tests {
                 "TAV_ERROR_INVALID_ARGUMENT",
                 TavErrorCode::InvalidArgument as i32,
             ),
-            (
-                "TAV_ERROR_IS_NULL",
-                TavErrorCode::ErrorIsNull as i32,
-            ),
+            ("TAV_ERROR_IS_NULL", TavErrorCode::ErrorIsNull as i32),
             (
                 "TAV_ERROR_SNP_UNSUPPORTED_PROCESSOR",
                 TavErrorCode::UnsupportedProcessor as i32,
@@ -167,7 +164,10 @@ mod tests {
                 "TAV_ERROR_COSE_UNSUPPORTED_ALGORITHM",
                 TavErrorCode::CoseUnsupportedAlgorithm as i32,
             ),
-            ("TAV_ERROR_COSE_KEY_IMPORT", TavErrorCode::CoseKeyImport as i32),
+            (
+                "TAV_ERROR_COSE_KEY_IMPORT",
+                TavErrorCode::CoseKeyImport as i32,
+            ),
             (
                 "TAV_ERROR_COSE_VERIFICATION",
                 TavErrorCode::CoseVerification as i32,
