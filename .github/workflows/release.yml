@@ -113,22 +113,22 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build tav-ffi WASM bundle with WebCrypto crypto
+      - name: Build tav-wasm bundle with WebCrypto crypto
         shell: bash
         working-directory: ffi
         run: |
           set -euo pipefail
 
-          mkdir -p ../dist/tav-ffi ../release-artifacts
+          mkdir -p ../dist/tav-wasm ../release-artifacts
 
           wasm-pack build \
             --target web \
             --release \
-            --out-dir ../dist/tav-ffi \
+            --out-dir ../dist/tav-wasm \
             --no-default-features \
             --features "crypto_webcrypto"
 
-          tar -C ../dist -czf "../release-artifacts/tav-ffi-${VERSION}.tar.gz" tav-ffi
+          tar -C ../dist -czf "../release-artifacts/tav-wasm-${VERSION}.tar.gz" tav-wasm
 
       - name: Generate release artifact checksums
         shell: bash
@@ -137,7 +137,7 @@ jobs:
 
           (
             cd release-artifacts
-            sha256sum tav-ffi-${VERSION}.tar.gz > SHA256SUMS
+            sha256sum tav-wasm-${VERSION}.tar.gz > SHA256SUMS
           )
 
       - name: Upload WASM release artifacts

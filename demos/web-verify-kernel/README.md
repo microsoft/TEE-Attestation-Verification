@@ -13,13 +13,13 @@ Use either a release bundle or a local build.
 
 ### Option A: use a release bundle
 
-Download `tav-ffi-<version>.tar.gz` from the matching GitHub release,
+Download `tav-wasm-<version>.tar.gz` from the matching GitHub release,
 then extract it into the demo's expected `pkg/` directory:
 
 ```sh
 cd demos/web-verify-kernel
 mkdir -p pkg
-tar -xzf /path/to/tav-ffi-<version>.tar.gz --strip-components=1 -C pkg
+tar -xzf /path/to/tav-wasm-<version>.tar.gz --strip-components=1 -C pkg
 python3 -m http.server 8000
 ```
 

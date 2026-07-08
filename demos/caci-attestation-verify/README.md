@@ -14,13 +14,13 @@ Use either a release bundle or a local build.
 
 ### Option A: use a release bundle
 
-Download `tav-ffi-<version>.tar.gz` from the matching GitHub release, then
+Download `tav-wasm-<version>.tar.gz` from the matching GitHub release, then
 extract it into the demo's expected `caci_pkg/` directory:
 
 ```sh
 cd demos/caci-attestation-verify
 mkdir -p caci_pkg
-tar -xzf /path/to/tav-ffi-<version>.tar.gz --strip-components=1 -C caci_pkg
+tar -xzf /path/to/tav-wasm-<version>.tar.gz --strip-components=1 -C caci_pkg
 python3 -m http.server 8000
 ```
 
