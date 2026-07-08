@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - "tav-*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing tag to release, for example tav-0.1.0
-        required: true
-        type: string
 
 permissions:
   actions: read
@@ -34,29 +28,21 @@ jobs:
 
       - name: Validate tag and version
         id: prepare
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            candidate_tag="${GITHUB_REF_NAME}"
-          else
-            candidate_tag="${INPUT_TAG}"
-          fi
+          candidate_tag="${GITHUB_REF_NAME}"
 
           if [[ ! "${candidate_tag}" =~ ^tav-.+$ ]]; then
             echo "Release tags must use the tav-<version> format, got: ${candidate_tag}" >&2
             exit 1
           fi
 
-          git fetch --force --tags origin "refs/tags/${candidate_tag}:refs/tags/${candidate_tag}"
-
           commit_sha=$(git rev-parse "refs/tags/${candidate_tag}^{commit}")
           normalized_version="${candidate_tag#tav-}"
 
-          for manifest in attestation/Cargo.toml caci/Cargo.toml; do
+          for manifest in attestation/Cargo.toml caci/Cargo.toml cose/Cargo.toml crypto/Cargo.toml ffi/Cargo.toml; do
             manifest_version=$(git show "${commit_sha}:${manifest}" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["version"])')
 
             if [[ "${manifest_version}" != "${normalized_version}" ]]; then
@@ -69,83 +55,40 @@ jobs:
           echo "version=${normalized_version}" >> "${GITHUB_OUTPUT}"
           echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
 
-  validate_release:
-    name: Validate release
-    runs-on: ubuntu-latest
+  ci:
+    name: Workspace CI
     needs: prepare_release
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ needs.prepare_release.outputs.commit_sha }}
+    uses: ./.github/workflows/ci.yml
 
-      - name: Install rust
-        shell: bash
-        run: |
-          rustup update stable
-          rustup default stable
+  ci-attestation:
+    name: Attestation CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-attestation.yml
 
-      - name: Setup WASM tooling
-        shell: bash
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install wasm-pack --version 0.13.1 --locked
+  ci-caci:
+    name: CACI attestation verification CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-caci.yml
 
-      - name: Build with openssl
-        run: cargo build -p tee-attestation-verification-lib --no-default-features --features "crypto_openssl"
+  ci-cose:
+    name: COSE CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-cose.yml
 
-      - name: Test offline with openssl
-        run: cargo test -p tee-attestation-verification-lib --no-default-features --features "crypto_openssl" -- --nocapture
+  ci-crypto:
+    name: Crypto CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-crypto.yml
 
-      - name: Build with pure_rust crypto
-        run: cargo build -p tee-attestation-verification-lib --no-default-features --features "crypto_pure_rust"
+  ci-demo:
+    name: Demo CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-demo.yml
 
-      - name: Test offline with pure_rust crypto
-        run: cargo test -p tee-attestation-verification-lib --no-default-features --features "crypto_pure_rust" -- --nocapture
-
-      - name: Build WASM with WebCrypto crypto
-        working-directory: attestation
-        run: wasm-pack build --target web --release --no-default-features --features "crypto_webcrypto"
-
-      - name: Test WASM offline
-        working-directory: attestation
-        run: wasm-pack test --node --release --no-default-features --features "crypto_pure_rust"
-
-      - name: Test WASM offline with WebCrypto backend
-        working-directory: attestation
-        run: wasm-pack test --node --release --no-default-features --features "crypto_webcrypto"
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "26"
-
-      - name: Build WASM for the web-verify-kernel demo
-        working-directory: attestation
-        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --release --no-default-features --features "crypto_webcrypto"
-
-      - name: Install web-verify-kernel demo test deps
-        working-directory: demos/web-verify-kernel/tests
-        run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
-
-      - name: Run web-verify-kernel demo e2e test
-        working-directory: demos/web-verify-kernel/tests
-        run: npm test
-
-      - name: Build WASM for the caci-attestation-verify demo
-        working-directory: caci
-        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg --release --no-default-features --features "crypto_webcrypto"
-
-      - name: Install caci-attestation-verify demo test deps
-        working-directory: demos/caci-attestation-verify/tests
-        run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
-
-      - name: Run caci-attestation-verify demo e2e test
-        working-directory: demos/caci-attestation-verify/tests
-        run: npm test
+  ci-ffi:
+    name: FFI CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-ffi.yml
 
   package_wasm:
     name: Package WASM artifacts
@@ -170,39 +113,22 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build tav-attestation WASM bundle with WebCrypto crypto
+      - name: Build tav-ffi WASM bundle with WebCrypto crypto
         shell: bash
-        working-directory: attestation
+        working-directory: ffi
         run: |
           set -euo pipefail
 
-          mkdir -p ../dist/tav-attestation ../release-artifacts
+          mkdir -p ../dist/tav-ffi ../release-artifacts
 
           wasm-pack build \
             --target web \
             --release \
-            --out-dir ../dist/tav-attestation \
+            --out-dir ../dist/tav-ffi \
             --no-default-features \
             --features "crypto_webcrypto"
 
-          tar -C ../dist -czf "../release-artifacts/tav-attestation-${VERSION}.tar.gz" tav-attestation
-
-      - name: Build tav-caci WASM bundle with WebCrypto crypto
-        shell: bash
-        working-directory: caci
-        run: |
-          set -euo pipefail
-
-          mkdir -p ../dist/tav-caci ../release-artifacts
-
-          wasm-pack build \
-            --target web \
-            --release \
-            --out-dir ../dist/tav-caci \
-            --no-default-features \
-            --features "crypto_webcrypto"
-
-          tar -C ../dist -czf "../release-artifacts/tav-caci-${VERSION}.tar.gz" tav-caci
+          tar -C ../dist -czf "../release-artifacts/tav-ffi-${VERSION}.tar.gz" tav-ffi
 
       - name: Generate release artifact checksums
         shell: bash
@@ -211,7 +137,7 @@ jobs:
 
           (
             cd release-artifacts
-            sha256sum tav-attestation-${VERSION}.tar.gz tav-caci-${VERSION}.tar.gz > SHA256SUMS
+            sha256sum tav-ffi-${VERSION}.tar.gz > SHA256SUMS
           )
 
       - name: Upload WASM release artifacts
@@ -225,7 +151,13 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare_release
-      - validate_release
+      - ci
+      - ci-attestation
+      - ci-caci
+      - ci-cose
+      - ci-crypto
+      - ci-demo
+      - ci-ffi
       - package_wasm
     permissions:
       contents: write

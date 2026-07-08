@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Input layout sizes documented by include/tav/caci.h: each trusted policy
+// Input layout sizes documented by ffi/include/tav/caci.h: each trusted policy
 // digest is a 32-byte SNP HOST_DATA value and each minimum-TCB value is an
 // 8-byte SNP TCB_VERSION.
 enum {
@@ -344,30 +344,30 @@ static int consume_snp_error(TavError *error, const char *context) {
         return 0;
     }
 
-    TAVErrorCode code = tav_error_code(error);
+    TavErrorCode code = tav_error_code(error);
     fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
     tav_error_free(error);
     return code == TAV_ERROR_OK ? 1 : (int)code;
 }
 
-static int consume_caci_error(TAVCaciError *error, const char *context) {
+static int consume_caci_error(TavError *error, const char *context) {
     if (error == NULL) {
         return 0;
     }
 
-    TAVCaciErrorCode code = tav_caci_error_code(error);
-    fprintf(stderr, "%s (code %d): %s\n", context, (int)code, tav_caci_error_message(error));
-    tav_caci_error_free(error);
+    TavErrorCode code = tav_error_code(error);
+    fprintf(stderr, "%s (code %d): %s\n", context, (int)code, tav_error_message(error));
+    tav_error_free(error);
     return 1;
 }
 
-static void check_cose_error(TAVCoseError *error, const char *context) {
+static void check_cose_error(TavError *error, const char *context) {
     if (error == NULL) {
         return;
     }
 
-    fprintf(stderr, "%s: %s\n", context, tav_cose_error_message(error));
-    tav_cose_error_free(error);
+    fprintf(stderr, "%s: %s\n", context, tav_error_message(error));
+    tav_error_free(error);
     exit(1);
 }
 
@@ -394,8 +394,8 @@ static void print_text_value(const char *label, const char *text, size_t len) {
 
 static void print_borrowed_report_field(
     const char *name,
-    void (*accessor)(const TAVSnpAttestationReport *, const uint8_t **, size_t *),
-    const TAVSnpAttestationReport *report) {
+    void (*accessor)(const TavSnpAttestationReport *, const uint8_t **, size_t *),
+    const TavSnpAttestationReport *report) {
     const uint8_t *data = NULL;
     size_t len = 0;
     accessor(report, &data, &len);
@@ -404,19 +404,19 @@ static void print_borrowed_report_field(
     print_hex_lines(data, len, 4);
 }
 
-static void print_uvm_endorsement(const TAVCborValue *uvm_endorsement) {
-    const TAVCborValue *sign1 = NULL;
-    const TAVCborValue *protected_value = NULL;
+static void print_uvm_endorsement(const TavCborValue *uvm_endorsement) {
+    const TavCborValue *sign1 = NULL;
+    const TavCborValue *protected_value = NULL;
     const uint8_t *protected_bytes = NULL;
     size_t protected_len = 0;
-    TAVCborValue *protected_header = NULL;
-    const TAVCborValue *content_type = NULL;
-    const TAVCborValue *feed = NULL;
+    TavCborValue *protected_header = NULL;
+    const TavCborValue *content_type = NULL;
+    const TavCborValue *feed = NULL;
     const char *text = NULL;
     size_t text_len = 0;
 
     check_cose_error(
-        tav_cose_sign1_validate(uvm_endorsement, &sign1),
+        tav_validate_cose_sign1(uvm_endorsement, &sign1),
         "validate returned UVM COSE_Sign1");
     check_cose_error(
         tav_cbor_value_array_at(sign1, TAV_COSE_SIGN1_PROTECTED, &protected_value),
@@ -505,12 +505,12 @@ int main(int argc, char **argv) {
     const size_t minimum_tcb_count = 1;
 
     int exit_code = 0;
-    TAVSnpAttestationReport *attestation = NULL;
-    TAVCborValue *uvm_endorsement = NULL;
-    TAVCaciByteBuffer report_data = {0};
+    TavSnpAttestationReport *attestation = NULL;
+    TavCborValue *uvm_endorsement = NULL;
+    TavByteBuffer *report_data = NULL;
 
     exit_code = consume_snp_error(
-        tav_snp_verify_attestation(
+        tav_verify_snp_attestation(
             report.data,
             report.len,
             (const uint8_t *)ark.data,
@@ -557,7 +557,7 @@ int main(int argc, char **argv) {
 
     printf("Confidential CACI attestation verified.\n");
     printf("verified_report_data\n");
-    print_hex_lines(report_data.data, report_data.len, 2);
+    print_hex_lines(tav_byte_buffer_data(report_data), tav_byte_buffer_len(report_data), 2);
     printf("verified_snp_attestation\n");
     print_borrowed_report_field("host_data", tav_snp_attestation_report_host_data, attestation);
     print_borrowed_report_field("report_data", tav_snp_attestation_report_report_data, attestation);
@@ -574,7 +574,7 @@ int main(int argc, char **argv) {
     printf("  %" PRIu64 "\n", minimum_svn);
 
 cleanup:
-    tav_caci_byte_buffer_free(&report_data);
+    tav_byte_buffer_free(report_data);
     tav_cbor_value_free(uvm_endorsement);
     tav_snp_attestation_report_free(attestation);
     free_string(&ark);

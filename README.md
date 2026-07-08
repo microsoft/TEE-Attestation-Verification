@@ -14,7 +14,8 @@ and returning authenticated report claims to callers.
 | `crypto/` | `tee-attestation-verification-crypto` | Backend abstraction for certificate handling, certificate-chain verification, and signature verification. |
 | `cose/` | `tee-attestation-verification-cose` | COSE signing and verification helpers. |
 | `caci/` | `tee-attestation-verification-caci` | CACI UVM endorsement verification against SEV-SNP attestations and DID x509 roots of trust. |
-| `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, KDS support, C ABI, and WASM bindings. |
+| `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, and KDS support. |
+| `ffi/` | `tee-attestation-verification-ffi` | Native C ABI and WebAssembly bindings for the Rust domain crates. |
 | `demos/web-verify-kernel/` | n/a | Browser demo verifying an SNP attestation using the WASM bindings. |
 | `demos/caci-attestation-verify/` | n/a | Browser demo verifying an SNP CACI attestation using the WASM bindings. |
 
@@ -34,7 +35,7 @@ At least one target-compatible backend must be enabled:
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 
-These features are forwarded by `tee-attestation-verification-lib` to the crypto sub-crate.
+These features are forwarded by the domain crates and the `tee-attestation-verification-ffi` crate to the crypto sub-crate.
 
 ## Quick start
 

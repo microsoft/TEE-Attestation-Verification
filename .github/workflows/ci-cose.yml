@@ -3,9 +3,10 @@ name: "COSE CI"
 on:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-cose-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -28,14 +29,6 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build WASM with pure-Rust backend
-        working-directory: cose
-        run: wasm-pack build --target web --no-default-features --features "crypto_pure_rust"
-
-      - name: Test WASM with pure-Rust backend
-        working-directory: cose
-        run: wasm-pack test --node --no-default-features --features "crypto_pure_rust"
-
   native:
     name: Native build and test
     runs-on: ubuntu-latest
@@ -51,6 +44,3 @@ jobs:
 
       - name: Test native with pure-Rust backend
         run: cargo test --manifest-path cose/Cargo.toml --no-default-features --features "crypto_pure_rust" -- --nocapture
-
-      - name: Build C FFI library
-        run: cargo build --manifest-path cose/Cargo.toml --no-default-features --features "crypto_openssl"

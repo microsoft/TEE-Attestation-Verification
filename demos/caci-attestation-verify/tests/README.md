@@ -5,14 +5,14 @@ run the Confidential CACI fixture through the staged CACI WASM bindings.
 
 ## How to run
 
-From the repository root, build the CACI WASM package:
+From the repository root, build the FFI WASM package:
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack --version 0.13.1 --locked
 
 (
-  cd caci
+  cd ffi
   wasm-pack build \
     --target web \
     --out-dir ../demos/caci-attestation-verify/caci_pkg \

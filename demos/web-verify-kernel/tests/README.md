@@ -15,11 +15,11 @@ From the repository root, build the WASM package directly into the demo
 directory (so the page's `./pkg/...` import resolves):
 
 ```sh
-cd attestation
+cd ffi
 wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
 ```
 
-Rerun this whenever you change Rust sources under `attestation/src/` or `crypto/src/`.
+Rerun this whenever you change Rust sources under `ffi/src/`, `attestation/src/`, or `crypto/src/`.
 
 ### 2. Install JS dependencies
 
@@ -108,7 +108,7 @@ npm run update-golden
 ```
 
 Do this after any intentional change to `demo.js` rendering or to the WASM
-accessors exposed from `src/snp/ffi.rs`. Inspect the diff before committing
+accessors exposed from `ffi/src/wasm_ffi/snp.rs`. Inspect the diff before committing
 to confirm the change matches your intent.
 
 ## Trademarks

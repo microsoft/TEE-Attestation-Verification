@@ -73,53 +73,6 @@ let mut verifier = SevVerifier::new().await?;
 verifier.verify_attestation(&attestation_report).await?;
 ```
 
-## WASM
-
-Release tags use the `tav-<crate-version>` format.
-
-Releases include `tav-attestation-<version>.tar.gz`, a WASM and JS wrapper
-tarball for direct consumption. The tarball contains the generated `wasm-pack`
-`pkg/` output for the WebCrypto backend.
-
-### Consuming a release tarball
-
-Download and extract the matching GitHub release asset for your chosen
-`tav-<crate-version>` tag into a directory served by your application:
-
-```sh
-mkdir -p public/vendor/tav-attestation
-tar -xzf tav-attestation-<version>.tar.gz --strip-components=1 -C public/vendor/tav-attestation
-```
-
-Keep the generated `.js` and `.wasm` files together. By default, the JS wrapper
-loads `tee_attestation_verification_lib_bg.wasm` next to itself using
-`import.meta.url`.
-
-Import the generated JS wrapper from your application code:
-
-```js
-import init, {
-  split_certificate_bundle,
-  verify_attestation_async,
-} from "/vendor/tav-attestation/tee_attestation_verification_lib.js";
-
-await init();
-```
-
-### Building from source
-
-Build the library for `wasm32` with the WebCrypto backend:
-
-```bash
-wasm-pack build --target web --no-default-features --features "crypto_webcrypto,kds"
-```
-
-For a plain Cargo build targeting `wasm32-unknown-unknown`:
-
-```bash
-cargo build --target wasm32-unknown-unknown --no-default-features --features "crypto_webcrypto,kds"
-```
-
 ## SEV-SNP Verification Process
 
 - **Certificate Validation**: Verifies the certificate chain from the ARK through the ASK to the VCEK, and the ARK against a root-of-trust

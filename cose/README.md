@@ -89,20 +89,6 @@ tav::cose_verify1(
 
 For WebCrypto or other async backends, use `asynchronous::cose_verify1`.
 
-## WASM
-
-The COSE crate depends on EverParse CBOR Rust code (`cborrs`). That generated
-code supports `wasm32-unknown-unknown` builds:
-
-```bash
-rustup target add wasm32-unknown-unknown
-cargo install wasm-pack --version 0.13.1 --locked
-
-cd cose
-wasm-pack build --target web --no-default-features --features crypto_pure_rust
-wasm-pack test --node --no-default-features --features crypto_pure_rust
-```
-
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.

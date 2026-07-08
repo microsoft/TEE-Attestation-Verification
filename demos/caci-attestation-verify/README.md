@@ -1,7 +1,7 @@
 # caci-attestation-verify — Confidential CACI WASM verification demo
 
 A standalone HTML/JS page that exercises the top-level
-`tee-attestation-verification-caci` WASM bindings. It verifies an SNP
+`tee-attestation-verification-ffi` WASM bindings. It verifies an SNP
 attestation report, UVM endorsement, and Confidential CACI relying-party policy,
 then renders the verified `REPORT_DATA`.
 
@@ -14,13 +14,13 @@ Use either a release bundle or a local build.
 
 ### Option A: use a release bundle
 
-Download `tav-caci-<version>.tar.gz` from the matching GitHub release, then
+Download `tav-ffi-<version>.tar.gz` from the matching GitHub release, then
 extract it into the demo's expected `caci_pkg/` directory:
 
 ```sh
 cd demos/caci-attestation-verify
 mkdir -p caci_pkg
-tar -xzf /path/to/tav-caci-<version>.tar.gz --strip-components=1 -C caci_pkg
+tar -xzf /path/to/tav-ffi-<version>.tar.gz --strip-components=1 -C caci_pkg
 python3 -m http.server 8000
 ```
 
@@ -28,7 +28,7 @@ Open <http://localhost:8000/> in a browser.
 
 ### Option B: build from source
 
-From the repository root, build the CACI WASM package, emitting
+From the repository root, build the FFI WASM package, emitting
 `caci_pkg/` directly inside this demo directory:
 
 ```sh
@@ -36,7 +36,7 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-pack --version 0.13.1 --locked
 
 (
-  cd caci
+  cd ffi
   wasm-pack build \
     --target web \
     --out-dir ../demos/caci-attestation-verify/caci_pkg \

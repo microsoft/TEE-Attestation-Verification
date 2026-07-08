@@ -4,7 +4,7 @@
 import init, {
   split_certificate_bundle,
   verify_attestation_async,
-} from "./pkg/tee_attestation_verification_lib.js";
+} from "./pkg/tee_attestation_verification_ffi.js";
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");

@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 #include "tav/cose.h"
-#include "tav/tav.h"
+#include "tav/snp.h"
+#include "tav/utils.h"
 
 #define TAV_CACI_API
 
@@ -16,78 +17,39 @@ extern "C" {
  * C ABI for staged Confidential ACI attestation verification.
  *
  * Ownership and lifetime:
- * - Use tav_snp_verify_attestation from tav/tav.h to verify the SNP report and
- *   obtain an owned TAVSnpAttestationReport.
- * - tav_verify_caci_uvm_endorsement returns an owned TAVCborValue containing
+ * - Use tav_verify_snp_attestation from tav/snp.h to verify the SNP report and
+ *   obtain an owned TavSnpAttestationReport.
+ * - tav_verify_caci_uvm_endorsement returns an owned TavCborValue containing
  *   the verified UVM COSE/CBOR document. Inspect it with the CBOR accessors in
  *   tav/cose.h and release it with tav_cbor_value_free.
- * - tav_verify_caci_attestation writes owned bytes to a TAVCaciByteBuffer.
- *   Release them with tav_caci_byte_buffer_free.
- * - Freeing NULL owned handles and empty byte buffers is a no-op.
- * - Owned handle out-parameters (TAVCborValue **) must point to a writable slot
- *   that contains NULL on entry. If the out-parameter is NULL, or the slot is
- *   non-NULL, the call returns TAV_CACI_ERROR_INVALID_ARGUMENT and does not
- *   overwrite the slot, so an existing handle is never leaked. On success the
- *   slot is set to an owned handle. Byte-buffer out-parameters
- *   (TAVCaciByteBuffer *) are write-only: the buffer is reset to { NULL, 0 }
- *   before any fallible work.
+ * - tav_verify_caci_attestation writes an owned TavByteBuffer* through
+ *   out_report_data. Read it with tav_byte_buffer_data/tav_byte_buffer_len and
+ *   release it with tav_byte_buffer_free.
+ * - Freeing NULL owned handles and NULL byte buffers is a no-op.
+ * - Owned handle out-parameters (TavCborValue **) and byte-buffer
+ *   out-parameters (TavByteBuffer **) are write-only: they are reset to NULL
+ *   before any fallible work and set to an owned value only on
+ *   success.
  *
- * All public functions return NULL on success or an owned TAVCaciError on
+ * All public functions return NULL on success or an owned TavError on
  * failure unless documented otherwise. Inspect errors with
- * tav_caci_error_code/tav_caci_error_message, then free them with
- * tav_caci_error_free.
+ * tav_error_code/tav_error_message, then free them with
+ * tav_error_free.
  */
-
-/*
- * Error codes returned by tav_caci_error_code. Codes 101-105 mirror the wrapped
- * SNP verification failures; 301-306 are CACI-policy specific.
- */
-typedef enum TAVCaciErrorCode {
-    TAV_CACI_ERROR_OK = 0,
-    TAV_CACI_ERROR_INVALID_ARGUMENT = 1,
-    TAV_CACI_ERROR_ERROR_CODE_IS_NULL = 2,
-
-    TAV_CACI_ERROR_UNSUPPORTED_PROCESSOR = 101,
-    TAV_CACI_ERROR_INVALID_ROOT_CERTIFICATE = 102,
-    TAV_CACI_ERROR_CERTIFICATE_CHAIN_ERROR = 103,
-    TAV_CACI_ERROR_SIGNATURE_VERIFICATION_ERROR = 104,
-    TAV_CACI_ERROR_TCB_VERIFICATION_ERROR = 105,
-
-    TAV_CACI_ERROR_COSE = 301,
-    TAV_CACI_ERROR_CERTIFICATE = 302,
-    TAV_CACI_ERROR_DID_X509 = 303,
-    TAV_CACI_ERROR_SIGNATURE = 304,
-    TAV_CACI_ERROR_MEASUREMENT = 305,
-    TAV_CACI_ERROR_POLICY = 306,
-} TAVCaciErrorCode;
-
-typedef struct TAVCaciError TAVCaciError;
-
-/*
- * Owned byte buffer returned by tav_verify_caci_attestation. data points to a
- * library-owned allocation of len bytes. Release it with
- * tav_caci_byte_buffer_free, which frees the allocation and resets the buffer
- * to { data = NULL, len = 0 }. Freeing a NULL or empty buffer is a no-op.
- */
-typedef struct TAVCaciByteBuffer {
-    uint8_t *data;
-    size_t len;
-} TAVCaciByteBuffer;
 
 /*
  * Verify an ACI/UVM endorsement COSE blob against a caller-pinned did:x509 root.
  *
  * trusted_didx509 is a UTF-8 byte slice and does not need to be NUL-terminated.
- * out_uvm_endorsement must point to a writable handle slot that contains NULL on
- * entry; a NULL out-parameter or non-NULL slot returns
- * TAV_CACI_ERROR_INVALID_ARGUMENT without overwriting an existing handle.
+ * out_uvm_endorsement must point to a writable handle slot. It is reset to NULL
+ * before any fallible work and set to an owned handle only on success.
  */
-TAV_CACI_API TAVCaciError *tav_verify_caci_uvm_endorsement(
+TAV_CACI_API TavError *tav_verify_caci_uvm_endorsement(
     const uint8_t *uvm_endorsement,
     size_t uvm_endorsement_len,
     const char *trusted_didx509,
     size_t trusted_didx509_len,
-    TAVCborValue **out_uvm_endorsement);
+    TavCborValue **out_uvm_endorsement);
 
 /*
  * Verify the relying-party CACI policy over staged verified artifacts.
@@ -103,27 +65,21 @@ TAV_CACI_API TAVCaciError *tav_verify_caci_uvm_endorsement(
  * one digest is required. uvm_feed is a UTF-8 byte slice and does not need to be
  * NUL-terminated.
  *
- * On success, out_report_data receives the 64-byte verified SNP REPORT_DATA.
+ * On success, out_report_data receives an owned TavByteBuffer holding the
+ * 64-byte verified SNP REPORT_DATA.
  */
-TAV_CACI_API TAVCaciError *tav_verify_caci_attestation(
-    const TAVSnpAttestationReport *attestation,
+TAV_CACI_API TavError *tav_verify_caci_attestation(
+    const TavSnpAttestationReport *attestation,
     const uint32_t *minimum_tcb_cpuids,
     const uint8_t *minimum_tcb_values,
     size_t minimum_tcb_count,
     const uint8_t *trusted_policy_digests,
     size_t trusted_policy_digest_count,
-    const TAVCborValue *uvm_endorsement,
+    const TavCborValue *uvm_endorsement,
     const char *uvm_feed,
     size_t uvm_feed_len,
     uint64_t minimum_svn,
-    TAVCaciByteBuffer *out_report_data);
-
-/* Error accessors. NULL error pointers return defensive diagnostics. */
-TAV_CACI_API TAVCaciErrorCode tav_caci_error_code(const TAVCaciError *error);
-TAV_CACI_API const char *tav_caci_error_message(const TAVCaciError *error);
-TAV_CACI_API void tav_caci_error_free(TAVCaciError *error);
-
-TAV_CACI_API void tav_caci_byte_buffer_free(TAVCaciByteBuffer *bytes);
+    TavByteBuffer **out_report_data);
 
 #ifdef __cplusplus
 }

@@ -1,8 +1,8 @@
 # web-verify-kernel — minimal WASM verification demo
 
-A standalone HTML/JS page that exercises the WASM bindings from `ffi.rs`
-(`wasm::verify_attestation_async` and `wasm::split_certificate_bundle`) and
-renders the verified SEV-SNP attestation report.
+A standalone HTML/JS page that exercises the WASM bindings from
+`tee-attestation-verification-ffi` and renders the verified SEV-SNP attestation
+report.
 
 All processing happens client-side; the page makes no network calls other
 than loading its own WASM module.
@@ -13,13 +13,13 @@ Use either a release bundle or a local build.
 
 ### Option A: use a release bundle
 
-Download `tav-attestation-<version>.tar.gz` from the matching GitHub release,
+Download `tav-ffi-<version>.tar.gz` from the matching GitHub release,
 then extract it into the demo's expected `pkg/` directory:
 
 ```sh
 cd demos/web-verify-kernel
 mkdir -p pkg
-tar -xzf /path/to/tav-attestation-<version>.tar.gz --strip-components=1 -C pkg
+tar -xzf /path/to/tav-ffi-<version>.tar.gz --strip-components=1 -C pkg
 python3 -m http.server 8000
 ```
 
@@ -32,7 +32,7 @@ Open <http://localhost:8000/> in a browser.
    what `index.html` imports via `./pkg/...`):
 
    ```sh
-   cd attestation
+   cd ffi
    wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
    ```
 
@@ -66,7 +66,7 @@ Test fixtures shipped alongside the demo in `./test-data/`:
   `turin_ark.pem`.
 
 These are mirrors of upstream files in `tests/test_data/` and
-`src/pinned_arks/`.
+`attestation/src/pinned_arks/`.
 
 ## Scope of verification
 

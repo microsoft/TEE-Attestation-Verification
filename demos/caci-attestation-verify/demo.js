@@ -6,7 +6,7 @@ import init, {
   verify_snp_attestation_with_cert_chain_async,
   verify_caci_attestation,
   verify_uvm_endorsement_async,
-} from "./caci_pkg/tee_attestation_verification_caci.js";
+} from "./caci_pkg/tee_attestation_verification_ffi.js";
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");

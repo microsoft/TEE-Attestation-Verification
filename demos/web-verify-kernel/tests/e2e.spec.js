@@ -145,7 +145,9 @@ test("mismatched ARK (Turin against Milan chain) surfaces a verification error a
   await expect(page.locator("#status")).toHaveClass("err", { timeout: 30_000 });
 
   // A Turin ARK against a Milan VCEK→ASK chain surfaces as
-  // ErrorCode::InvalidRootCertificate (102). See ErrorCode in src/snp/ffi.rs.
+  // ErrorCode::InvalidRootCertificate (102). `ErrorCode` is the JS-facing
+  // name (see `#[wasm_bindgen(js_name = "ErrorCode")]`) for `TavErrorCode`
+  // in ffi/src/lib.rs — the same enum used by the C ABI.
   const statusText = await page.locator("#status").textContent();
   expect(statusText).toMatch(/^Verification failed \(code 102\): /);
 

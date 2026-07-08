@@ -15,7 +15,6 @@
 //!
 
 mod didx509;
-pub mod ffi;
 mod parse;
 
 use attestation::snp::report::{AttestationReport, TcbVersionForGeneration, TcbVersionRaw};

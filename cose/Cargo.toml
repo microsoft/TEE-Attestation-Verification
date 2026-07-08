@@ -8,9 +8,6 @@ description = "COSE verification helpers for TEE attestation verification"
 authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
-[lib]
-crate-type = ["cdylib", "staticlib", "rlib"]
-
 [features]
 default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]
@@ -22,7 +19,3 @@ crypto = { package = "tee-attestation-verification-crypto", version = "1.0.2", p
 # project-everest/everparse tag v2026.07.02 resolves to this pinned commit.
 cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
 cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
-
-[target.'cfg(target_family = "wasm")'.dependencies]
-js-sys = "0.3"
-wasm-bindgen = "0.2"

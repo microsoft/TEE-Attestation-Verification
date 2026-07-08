@@ -1,7 +1,7 @@
 # C FFI demo
 
-This Linux-only demo builds the main Rust crate and links a C program against
-the public header in `include/tav/tav.h`. It links dynamically by default, or
+This Linux-only demo builds the `ffi` crate and links a C program against
+the public header in `ffi/include/tav/snp.h`. It links dynamically by default, or
 statically when configured with `-DTAV_LINK_STATIC=ON`.
 
 Run these commands from this directory:
@@ -31,7 +31,7 @@ cmake --build build-static
 The CMake build invokes:
 
 ```sh
-cargo build --manifest-path attestation/Cargo.toml --no-default-features --features crypto_openssl
+cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_openssl
 ```
 
 ## Tests

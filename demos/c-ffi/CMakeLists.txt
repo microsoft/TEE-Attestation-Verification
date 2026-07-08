@@ -18,11 +18,11 @@ set(TAV_CARGO_TARGET_DIR "${TAV_REPO_ROOT}/target")
 if(TAV_LINK_STATIC)
     set(TAV_RUST_LIBRARY_KIND STATIC)
     set(TAV_RUST_LIBRARY_NAME
-        "${CMAKE_STATIC_LIBRARY_PREFIX}tee_attestation_verification_lib${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        "${CMAKE_STATIC_LIBRARY_PREFIX}tee_attestation_verification_ffi${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
 else()
     set(TAV_RUST_LIBRARY_KIND SHARED)
-    set(TAV_RUST_LIBRARY_NAME "libtee_attestation_verification_lib.so")
+    set(TAV_RUST_LIBRARY_NAME "libtee_attestation_verification_ffi.so")
     set(TAV_RUST_LIBRARY "${TAV_CARGO_TARGET_DIR}/debug/${TAV_RUST_LIBRARY_NAME}")
 endif()
 set(TAV_DEMO_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${TAV_RUST_LIBRARY_NAME}")
@@ -30,7 +30,7 @@ set(TAV_DEMO_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${TAV_RUST_LIBRARY_NAME}")
 add_custom_target(tav_c_abi ALL
     COMMAND
         cargo build
-        --manifest-path "${TAV_REPO_ROOT}/attestation/Cargo.toml"
+        --manifest-path "${TAV_REPO_ROOT}/ffi/Cargo.toml"
         --no-default-features
         --features crypto_openssl
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -38,7 +38,7 @@ add_custom_target(tav_c_abi ALL
         "${TAV_DEMO_LIBRARY}"
     WORKING_DIRECTORY "${TAV_REPO_ROOT}"
     BYPRODUCTS "${TAV_DEMO_LIBRARY}"
-    COMMENT "Building tee-attestation-verification-lib C ABI"
+    COMMENT "Building tee-attestation-verification-ffi C ABI"
     VERBATIM)
 
 add_library(tav ${TAV_RUST_LIBRARY_KIND} IMPORTED GLOBAL)
@@ -54,7 +54,7 @@ if(TAV_LINK_STATIC)
 endif()
 
 add_executable(tav-c-ffi-demo demo.c)
-target_include_directories(tav-c-ffi-demo PRIVATE "${TAV_REPO_ROOT}/include")
+target_include_directories(tav-c-ffi-demo PRIVATE "${TAV_REPO_ROOT}/ffi/include")
 target_compile_definitions(tav-c-ffi-demo PRIVATE TAV_REPO_ROOT="${TAV_REPO_ROOT}")
 target_link_libraries(tav-c-ffi-demo PRIVATE tav)
 target_compile_options(tav-c-ffi-demo PRIVATE -Wall -Wextra -Werror)

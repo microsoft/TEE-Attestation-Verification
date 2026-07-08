@@ -1039,14 +1039,11 @@ dependencies = [
 name = "tee-attestation-verification-caci"
 version = "1.0.2"
 dependencies = [
- "js-sys",
  "serde_json",
  "tee-attestation-verification-cose",
  "tee-attestation-verification-crypto",
  "tee-attestation-verification-lib",
  "tokio",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "wasm-bindgen-test",
 ]
 
@@ -1056,9 +1053,7 @@ version = "1.0.2"
 dependencies = [
  "cborrs",
  "cborrs-nondet",
- "js-sys",
  "tee-attestation-verification-crypto",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1085,13 +1080,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tee-attestation-verification-ffi"
+version = "1.0.2"
+dependencies = [
+ "js-sys",
+ "serde_json",
+ "tee-attestation-verification-caci",
+ "tee-attestation-verification-cose",
+ "tee-attestation-verification-crypto",
+ "tee-attestation-verification-lib",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "zerocopy",
+]
+
+[[package]]
 name = "tee-attestation-verification-lib"
 version = "1.0.2"
 dependencies = [
  "console_error_panic_hook",
  "curl",
  "env_logger",
- "getrandom",
  "js-sys",
  "log",
  "tee-attestation-verification-crypto",

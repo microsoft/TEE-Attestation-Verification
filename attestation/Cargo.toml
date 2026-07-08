@@ -13,7 +13,6 @@ features = ["crypto_openssl", "crypto_webcrypto", "kds"]
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [lib]
-crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [features]
@@ -21,7 +20,15 @@ default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]
 crypto_pure_rust = ["crypto/crypto_pure_rust"]
 crypto_webcrypto = ["crypto/crypto_webcrypto"]
-kds = ["dep:curl", "dep:tokio"]
+kds = [
+    "dep:console_error_panic_hook",
+    "dep:curl",
+    "dep:js-sys",
+    "dep:tokio",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:wasm-logger",
+]
 
 
 [[bin]]
@@ -50,9 +57,8 @@ curl = { version = "0.4", optional = true }
 
 # WASM deps
 [target.'cfg(target_family = "wasm")'.dependencies]
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-getrandom = { version = "0.2", features = ["js"] }
-console_error_panic_hook = "0.1"
-wasm-logger = "0.2"
+console_error_panic_hook = { version = "0.1", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+wasm-logger = { version = "0.2", optional = true }

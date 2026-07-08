@@ -51,9 +51,6 @@
 //! # }
 //! ```
 //!
-//! Use [`snp::ffi`] for FFI and WASM-oriented consumers; the `snp::ffi::wasm`
-//! submodule contains the caller-provided-certificate WASM API when building
-//! for `wasm32`.
 
 pub(crate) use crypto;
 pub mod pinned_arks;

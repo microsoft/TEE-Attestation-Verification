@@ -3,9 +3,10 @@ name: "Crypto CI"
 on:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-crypto-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
