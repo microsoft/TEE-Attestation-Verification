@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! C ABI bindings for staged Confidential ACI attestation verification.
 //!
 //! This module exports the symbols declared in `ffi/include/tav/caci.h`.

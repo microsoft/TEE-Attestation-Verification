@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! `wasm_bindgen` bindings exposing TEE attestation verification to JavaScript.
 //!
 //! > **Note:** an exported `async fn` runs its body at first poll (a microtask

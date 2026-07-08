@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! `wasm_bindgen` bindings exposing verified SNP attestation reports to JS.
 //!
 //! SnpAttestationReport is opaque and can only be obtained through successful

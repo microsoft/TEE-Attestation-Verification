@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! C ABI bindings for CBOR navigation and COSE_Sign1 verification.
 //!
 //! This module exports the symbols declared in `ffi/include/tav/cose.h`.

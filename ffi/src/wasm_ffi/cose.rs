@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use js_sys::{Array, Promise};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;

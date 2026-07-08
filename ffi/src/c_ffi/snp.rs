@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! C ABI bindings for caller-provided-certificate SNP attestation verification.
 //!
 //! This module exports the symbols declared in `ffi/include/tav/snp.h`.

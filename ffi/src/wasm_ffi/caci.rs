@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use crate::wasm_ffi::cose::CborValue as WasmCborValue;
 use js_sys::{Array, Uint8Array};
 use std::collections::BTreeMap;
