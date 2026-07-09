@@ -23,6 +23,7 @@ Read the crate-specific docs for API details:
 
 - [`attestation/README.md`](attestation/README.md)
 - [`caci/README.md`](caci/README.md)
+- [`ffi/README.md`](ffi/README.md)
 
 ## Crypto backend selection
 
