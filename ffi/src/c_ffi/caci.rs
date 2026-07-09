@@ -88,9 +88,9 @@ unsafe fn minimum_tcb_entries(
             "minimum_tcb exceeds maximum input size",
         ));
     }
-    let values_len = count.checked_mul(TCB_VERSION_LEN).ok_or_else(|| {
-        TavError::invalid_argument("minimum_tcb_values length overflow")
-    })?;
+    let values_len = count
+        .checked_mul(TCB_VERSION_LEN)
+        .ok_or_else(|| TavError::invalid_argument("minimum_tcb_values length overflow"))?;
     let values = unsafe { input_bytes(values, values_len, "minimum_tcb_values", false) }?;
     let cpuids = unsafe { std::slice::from_raw_parts(cpuids, count) };
 
