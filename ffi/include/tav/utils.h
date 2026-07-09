@@ -13,8 +13,8 @@ extern "C" {
 /*
  * Shared C ABI error codes.
  *
- * These values are mirrored by c_ffi::utils::TavErrorCode. Keep all public C
- * ABI error accessors returning this single type.
+ * These values are mirrored by the Rust `TavErrorCode` enum in `ffi/src/lib.rs`.
+ * Keep all public C ABI error accessors returning this single type.
  */
 typedef enum TavErrorCode {
     /* Common codes, returned from any domain. */
