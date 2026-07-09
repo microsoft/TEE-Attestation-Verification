@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.3]
+
+[1.0.3]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.3
+
+### Added
+
+- C FFI added. (#74)
+
+### Changed
+
+- Formalised packaging of wasm to single tav-wasm-<tag>.tar.gz (#74)
+
 ## [1.0.2]
 
 [1.0.2]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.2
