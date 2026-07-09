@@ -16,7 +16,6 @@ use crate::c_ffi::cose::{tav_cbor_value_from_bytes, TavCborValue};
 use crate::c_ffi::snp::TavSnpAttestationReport;
 use crate::{into_result, TavError, TavErrorCode};
 use attestation::snp::report::TcbVersionRaw;
-use attestation::snp::verify::VerificationError;
 
 use caci::{snp, synchronous, AciError, SNP_HOST_DATA_LEN};
 
@@ -27,17 +26,7 @@ impl From<AciError> for TavError {
             AciError::InvalidAmdEndorsements(_) | AciError::InvalidAttestation(_) => {
                 TavErrorCode::InvalidArgument
             }
-            AciError::AttestationVerification(error) => match error {
-                VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
-                VerificationError::InvalidRootCertificate(_) => {
-                    TavErrorCode::InvalidRootCertificate
-                }
-                VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
-                VerificationError::SignatureVerificationError(_) => {
-                    TavErrorCode::SignatureVerificationError
-                }
-                VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
-            },
+            AciError::AttestationVerification(error) => TavErrorCode::from(error),
             AciError::Certificate(_) => TavErrorCode::CaciCertificate,
             AciError::DidX509(_) => TavErrorCode::CaciDidX509,
             AciError::Cose(_) => TavErrorCode::CaciCose,

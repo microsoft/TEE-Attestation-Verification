@@ -35,15 +35,7 @@ pub struct TavSnpAttestationReport {
 }
 
 fn tav_error_from_verification_error(error: VerificationError) -> TavError {
-    let code = match &error {
-        VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
-        VerificationError::InvalidRootCertificate(_) => TavErrorCode::InvalidRootCertificate,
-        VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
-        VerificationError::SignatureVerificationError(_) => {
-            TavErrorCode::SignatureVerificationError
-        }
-        VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
-    };
+    let code = TavErrorCode::from(&error);
     TavError::new(code, error.to_string())
 }
 

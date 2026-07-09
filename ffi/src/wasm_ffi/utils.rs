@@ -81,15 +81,7 @@ impl std::error::Error for VerifyError {}
 
 impl From<VerificationError> for VerifyError {
     fn from(e: VerificationError) -> Self {
-        let code = match &e {
-            VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
-            VerificationError::InvalidRootCertificate(_) => TavErrorCode::InvalidRootCertificate,
-            VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
-            VerificationError::SignatureVerificationError(_) => {
-                TavErrorCode::SignatureVerificationError
-            }
-            VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
-        };
+        let code = TavErrorCode::from(&e);
         Self::new(code, e.to_string())
     }
 }

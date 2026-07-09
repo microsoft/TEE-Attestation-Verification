@@ -11,6 +11,8 @@
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]
 use std::ffi::CString;
 
+use attestation::snp::verify::VerificationError;
+
 #[cfg(target_family = "wasm")]
 use wasm_bindgen::prelude::*;
 
@@ -59,6 +61,20 @@ pub enum TavErrorCode {
     CaciSignature = 304,
     CaciMeasurement = 305,
     CaciPolicy = 306,
+}
+
+impl From<&VerificationError> for TavErrorCode {
+    fn from(error: &VerificationError) -> Self {
+        match error {
+            VerificationError::UnsupportedProcessor(_) => TavErrorCode::UnsupportedProcessor,
+            VerificationError::InvalidRootCertificate(_) => TavErrorCode::InvalidRootCertificate,
+            VerificationError::CertificateChainError(_) => TavErrorCode::CertificateChainError,
+            VerificationError::SignatureVerificationError(_) => {
+                TavErrorCode::SignatureVerificationError
+            }
+            VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
+        }
+    }
 }
 
 /// Shared error handle returned by public C ABI functions.
@@ -287,6 +303,36 @@ mod tests {
                 ))
             })
             .collect()
+    }
+
+    #[test]
+    fn verification_errors_map_to_stable_error_codes() {
+        let error_code_map = [
+            (
+                VerificationError::UnsupportedProcessor("unsupported".into()),
+                TavErrorCode::UnsupportedProcessor,
+            ),
+            (
+                VerificationError::InvalidRootCertificate("invalid root".into()),
+                TavErrorCode::InvalidRootCertificate,
+            ),
+            (
+                VerificationError::CertificateChainError("chain failed".into()),
+                TavErrorCode::CertificateChainError,
+            ),
+            (
+                VerificationError::SignatureVerificationError("bad signature".into()),
+                TavErrorCode::SignatureVerificationError,
+            ),
+            (
+                VerificationError::TcbVerificationError("bad tcb".into()),
+                TavErrorCode::TcbVerificationError,
+            ),
+        ];
+
+        for (error, code) in error_code_map {
+            assert_eq!(TavErrorCode::from(&error), code);
+        }
     }
 
     #[test]
