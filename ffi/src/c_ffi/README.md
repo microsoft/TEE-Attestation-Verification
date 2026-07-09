@@ -9,6 +9,10 @@ failure. Inspect failures with `tav_error_code`/`tav_error_message`, then free
 them with `tav_error_free`. Owned handle out-parameters are reset to `NULL`
 before any fallible work and set only on success.
 
+If an entry point's implementation panics (e.g. on a bug triggered by
+malformed input), the panic is caught at the FFI boundary and reported as a
+`TAV_ERROR_PANIC` error instead of aborting the host process.
+
 ## Building and linking
 
 ```sh

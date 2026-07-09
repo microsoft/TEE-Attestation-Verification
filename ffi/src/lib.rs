@@ -34,6 +34,8 @@ pub enum TavErrorCode {
     InvalidArgument = 1,
     // Returned by `tav_error_code` when passed a null `TavError`.
     ErrorIsNull = 2,
+    // Returned when the rust code panics
+    Panic = 3,
 
     // SNP (1xx). Intentionally left unprefixed to preserve the wasm/JS
     // `ErrorCode` member names (each variant maps 1:1 to a JS enum member).
@@ -109,12 +111,54 @@ impl std::fmt::Display for TavError {
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]
 impl std::error::Error for TavError {}
 
+// The native C ABI (`into_result`, below) relies on `std::panic::catch_unwind`
+// to guard entry points against panics instead of aborting the host process;
+// that guard is a silent no-op under `panic = "abort"`. Fail the build loudly
+// instead, so a misconfigured profile (e.g. `panic = "abort"` set for smaller
+// binaries) can't silently disable the safety net. wasm32-unknown-unknown is
+// exempt: its panic strategy is always `abort` regardless of profile
+// settings, and `catch_unwind` isn't used on that target either way.
+#[cfg(all(not(target_family = "wasm"), panic = "abort"))]
+compile_error!(
+    "tee-attestation-verification-ffi requires panic = \"unwind\" for its native C ABI, \
+     which relies on std::panic::catch_unwind at FFI entry points (see `into_result`)"
+);
+
+/// Runs `f`, converting its `Result` into the C ABI's null-on-success error
+/// convention.
+///
+/// This is the single place that guards entry points against panics: `f` runs
+/// under [`std::panic::catch_unwind`], so a panic anywhere in the call graph
+/// (e.g. a bug triggered by malformed attacker-controlled input) is caught
+/// and reported as a [`TavErrorCode::Panic`] [`TavError`] instead of
+/// unwinding into an `extern "C"` frame, which would otherwise abort the
+/// host process. Every fallible entry point should route its result through
+/// this function rather than converting a `Result` directly.
+///
+/// This guard is native-only: on `wasm32-unknown-unknown` the panic strategy
+/// is always `abort` regardless of profile settings, so `catch_unwind` cannot
+/// catch anything there; a panicking wasm export instead traps, which the JS
+/// caller observes as a thrown `RuntimeError`.
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]
-pub fn into_result(result: Result<(), TavError>) -> *mut TavError {
+pub fn into_result(f: impl FnOnce() -> Result<(), TavError>) -> *mut TavError {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|payload| {
+            Err(TavError::new(TavErrorCode::Panic, panic_message(&*payload)))
+        });
     match result {
         Ok(()) => std::ptr::null_mut(),
         Err(error) => error.into_raw(),
     }
+}
+
+#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("operation panicked with a non-string payload");
+    format!("internal error: {message}")
 }
 
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]
@@ -137,6 +181,7 @@ mod tests {
                 TavErrorCode::InvalidArgument as i32,
             ),
             ("TAV_ERROR_IS_NULL", TavErrorCode::ErrorIsNull as i32),
+            ("TAV_ERROR_PANIC", TavErrorCode::Panic as i32),
             (
                 "TAV_ERROR_SNP_UNSUPPORTED_PROCESSOR",
                 TavErrorCode::UnsupportedProcessor as i32,
@@ -242,5 +287,19 @@ mod tests {
                 ))
             })
             .collect()
+    }
+
+    #[test]
+    fn into_result_catches_panics_instead_of_propagating() {
+        let error = into_result(|| panic!("boom"));
+        assert!(!error.is_null());
+        let error = unsafe { Box::from_raw(error) };
+        assert_eq!(error.code(), TavErrorCode::Panic);
+        assert!(error.message().contains("boom"));
+    }
+
+    #[test]
+    fn into_result_passes_through_ok() {
+        assert!(into_result(|| Ok(())).is_null());
     }
 }

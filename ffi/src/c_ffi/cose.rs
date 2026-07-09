@@ -153,7 +153,7 @@ pub unsafe extern "C" fn tav_cbor_value_from_bytes(
     len: usize,
     out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let bytes = unsafe { input_bytes(bytes, len, "CBOR bytes", false) }?;
         let value = NativeCborValue::from_bytes(bytes)
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn tav_cbor_value_from_bytes(
             *out_value = Box::into_raw(Box::new(TavCborValue::from_native(value)));
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn tav_cbor_value_to_bytes(
     value: *const TavCborValue,
     out_bytes: *mut *mut TavByteBuffer,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { owned_out_ptr(out_bytes, "out_bytes") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let bytes = value
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn tav_cbor_value_to_bytes(
             *out_bytes = Box::into_raw(TavByteBuffer::from_bytes(bytes));
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn tav_cbor_value_int(
     value: *const TavCborValue,
     out: *mut i64,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let int = match value {
@@ -209,7 +209,7 @@ pub unsafe extern "C" fn tav_cbor_value_int(
             *out = int;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -217,7 +217,7 @@ pub unsafe extern "C" fn tav_cbor_value_simple(
     value: *const TavCborValue,
     out: *mut u8,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let simple = match value {
@@ -233,7 +233,7 @@ pub unsafe extern "C" fn tav_cbor_value_simple(
             *out = simple;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn tav_cbor_value_bytes(
     data: *mut *const u8,
     len: *mut usize,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe {
             borrowed_out_ptr(data, "data")?;
             scalar_out_ptr(len, "len")?;
@@ -254,7 +254,7 @@ pub unsafe extern "C" fn tav_cbor_value_bytes(
             *len = bytes.len();
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -263,7 +263,7 @@ pub unsafe extern "C" fn tav_cbor_value_text(
     text: *mut *const c_char,
     len: *mut usize,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe {
             borrowed_out_ptr(text, "text")?;
             scalar_out_ptr(len, "len")?;
@@ -283,7 +283,7 @@ pub unsafe extern "C" fn tav_cbor_value_text(
             *len = value.len();
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn tav_cbor_value_tag(
     value: *const TavCborValue,
     out: *mut u64,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let tag = match value {
@@ -307,7 +307,7 @@ pub unsafe extern "C" fn tav_cbor_value_tag(
             *out = tag;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn tav_cbor_value_tagged_payload(
     value: *const TavCborValue,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let payload = match value {
@@ -331,7 +331,7 @@ pub unsafe extern "C" fn tav_cbor_value_tagged_payload(
             *out_value = TavCborValue::borrowed(payload);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -339,7 +339,7 @@ pub unsafe extern "C" fn tav_cbor_value_len(
     value: *const TavCborValue,
     out: *mut usize,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let value_len = value
@@ -349,7 +349,7 @@ pub unsafe extern "C" fn tav_cbor_value_len(
             *out = value_len;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn tav_cbor_value_array_at(
     index: usize,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let child = value
@@ -368,7 +368,7 @@ pub unsafe extern "C" fn tav_cbor_value_array_at(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -377,7 +377,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_int(
     key: i64,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let child = value
@@ -387,7 +387,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_int(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -397,7 +397,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_text(
     key_len: usize,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let key = unsafe { input_text(key, key_len, "key", true) }?;
         let value = unsafe { cbor_value(value, "value") }?;
@@ -408,7 +408,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_text(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -417,7 +417,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at(
     key: *const TavCborValue,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let key = unsafe { cbor_value(key, "key") }?;
@@ -428,7 +428,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_at(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -437,7 +437,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_int_key(
     key: i64,
     out: *mut bool,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let has_key = value
@@ -447,7 +447,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_int_key(
             *out = has_key;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -457,7 +457,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_text_key(
     key_len: usize,
     out: *mut bool,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let key = unsafe { input_text(key, key_len, "key", true) }?;
         let value = unsafe { cbor_value(value, "value") }?;
@@ -468,7 +468,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_text_key(
             *out = has_key;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -477,7 +477,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_key(
     key: *const TavCborValue,
     out: *mut bool,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { scalar_out_ptr(out, "out") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let key = unsafe { cbor_value(key, "key") }?;
@@ -488,7 +488,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_key(
             *out = has_key;
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -498,7 +498,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
     out_key: *mut *const TavCborValue,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_key, "out_key") }?;
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
@@ -508,7 +508,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -517,7 +517,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_key_at(
     index: usize,
     out_key: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_key, "out_key") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let (key, _) = map_entry_at(value, index)?;
@@ -525,7 +525,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_key_at(
             *out_key = TavCborValue::borrowed(key);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -534,7 +534,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_value_at(
     index: usize,
     out_value: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_value, "out_value") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let (_, child) = map_entry_at(value, index)?;
@@ -542,7 +542,7 @@ pub unsafe extern "C" fn tav_cbor_value_map_value_at(
             *out_value = TavCborValue::borrowed(child);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -550,7 +550,7 @@ pub unsafe extern "C" fn tav_validate_cose_sign1(
     value: *const TavCborValue,
     out_sign1: *mut *const TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { borrowed_out_ptr(out_sign1, "out_sign1") }?;
         let value = unsafe { cbor_value(value, "value") }?;
         let sign1 =
@@ -559,7 +559,7 @@ pub unsafe extern "C" fn tav_validate_cose_sign1(
             *out_sign1 = TavCborValue::borrowed(sign1);
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -578,13 +578,13 @@ pub unsafe extern "C" fn tav_verify_cose_sign1_embedded(
     spki_der_len: usize,
     cose_alg: i32,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         let value = unsafe { cbor_value(sign1, "sign1") }?;
         let sign1 =
             cose_sign1(value).map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))?;
         let payload = borrowed_bytes(sign1_field(sign1, 2, "payload")?, "payload")?;
         verify_sign1(sign1, payload, spki_der, spki_der_len, cose_alg)
-    })())
+    })
 }
 
 #[no_mangle]
@@ -596,14 +596,14 @@ pub unsafe extern "C" fn tav_verify_cose_sign1_detached(
     spki_der_len: usize,
     cose_alg: i32,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         let value = unsafe { cbor_value(sign1, "sign1") }?;
         let sign1 =
             cose_sign1(value).map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))?;
         require_detached_payload(sign1)?;
         let payload = unsafe { input_bytes(payload, payload_len, "payload", true) }?;
         verify_sign1(sign1, payload, spki_der, spki_der_len, cose_alg)
-    })())
+    })
 }
 
 fn verify_sign1(

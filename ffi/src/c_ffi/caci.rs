@@ -164,7 +164,7 @@ pub unsafe extern "C" fn tav_verify_caci_uvm_endorsement(
     trusted_didx509_len: usize,
     out_uvm_endorsement: *mut *mut TavCborValue,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { owned_out_ptr(out_uvm_endorsement, "out_uvm_endorsement") }?;
         let uvm_endorsement = unsafe {
             input_bytes(
@@ -195,7 +195,7 @@ pub unsafe extern "C" fn tav_verify_caci_uvm_endorsement(
             return Err(unsafe { cose_error_to_caci(cose_error) });
         }
         Ok(())
-    })())
+    })
 }
 
 #[no_mangle]
@@ -212,7 +212,7 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
     minimum_svn: u64,
     out_report_data: *mut *mut TavByteBuffer,
 ) -> *mut TavError {
-    into_result((|| {
+    into_result(|| {
         unsafe { owned_out_ptr(out_report_data, "out_report_data") }?;
         let attestation = unsafe { attestation_report(attestation) }?;
         let minimum_tcb = unsafe {
@@ -233,5 +233,5 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
         )
         .map_err(TavError::from)?;
         write_owned_bytes(report_data, out_report_data)
-    })())
+    })
 }

@@ -23,12 +23,10 @@
 //! valid only until the owning report handle is freed, and must not be freed
 //! by the caller.
 
-use std::ptr;
-
 use zerocopy::FromBytes;
 
 use super::utils::{input_bytes, owned_out_ptr};
-use crate::{TavError, TavErrorCode};
+use crate::{into_result, TavError, TavErrorCode};
 use attestation::snp::verify::{self, ChainVerification, VerificationError};
 use attestation::{certificate_from_pem, AttestationReport};
 
@@ -99,7 +97,7 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
     vcek_pem_len: usize,
     out_report: *mut *mut TavSnpAttestationReport,
 ) -> *mut TavError {
-    let result = (|| -> Result<TavSnpAttestationReport, TavError> {
+    into_result(|| {
         unsafe { owned_out_ptr(out_report, "out_report") }?;
 
         let report_bytes =
@@ -137,20 +135,14 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
         )
         .map_err(tav_error_from_verification_error)?;
 
-        Ok(TavSnpAttestationReport {
+        let report = TavSnpAttestationReport {
             bytes: report_bytes.to_vec(),
-        })
-    })();
-
-    match result {
-        Ok(report) => {
-            unsafe {
-                *out_report = Box::into_raw(Box::new(report));
-            }
-            ptr::null_mut()
+        };
+        unsafe {
+            *out_report = Box::into_raw(Box::new(report));
         }
-        Err(error) => error.into_raw(),
-    }
+        Ok(())
+    })
 }
 
 scalar_accessor!(tav_snp_attestation_report_version, u32, |report| report
