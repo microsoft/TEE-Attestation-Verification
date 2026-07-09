@@ -2,14 +2,14 @@
 // Licensed under the MIT License.
 
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(sync_crypto)");
-    println!("cargo:rustc-check-cfg=cfg(async_crypto)");
+    println!("cargo::rustc-check-cfg=cfg(sync_crypto)");
+    println!("cargo::rustc-check-cfg=cfg(async_crypto)");
 
     if crypto_capability("SYNC_CRYPTO") {
-        println!("cargo:rustc-cfg=sync_crypto");
+        println!("cargo::rustc-cfg=sync_crypto");
     }
     if crypto_capability("ASYNC_CRYPTO") {
-        println!("cargo:rustc-cfg=async_crypto");
+        println!("cargo::rustc-cfg=async_crypto");
     }
 }
 

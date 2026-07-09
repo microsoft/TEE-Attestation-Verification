@@ -2,6 +2,7 @@
 name = "tee-attestation-verification-lib"
 version = "1.0.2"
 edition = "2021"
+rust-version = "1.77"
 repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["confidentiality", "sev-snp", "tpm"]
 description = "WASM-compatible library for SEV-SNP verification and related types"

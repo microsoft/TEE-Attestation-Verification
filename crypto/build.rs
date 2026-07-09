@@ -2,10 +2,10 @@
 // Licensed under the MIT License.
 
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(sync_crypto)");
-    println!("cargo:rustc-check-cfg=cfg(async_crypto)");
+    println!("cargo::rustc-check-cfg=cfg(sync_crypto)");
+    println!("cargo::rustc-check-cfg=cfg(async_crypto)");
     println!(
-        "cargo:rustc-check-cfg=cfg(crypto_backend, values(\"crypto_openssl\", \"crypto_pure_rust\", \"crypto_webcrypto\"))"
+        "cargo::rustc-check-cfg=cfg(crypto_backend, values(\"crypto_openssl\", \"crypto_pure_rust\", \"crypto_webcrypto\"))"
     );
 
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
@@ -49,13 +49,13 @@ fn main() {
     let (sync_crypto, async_crypto) = backend_map.get(crypto_backend).unwrap();
 
     if *sync_crypto {
-        println!("cargo:rustc-cfg=sync_crypto");
+        println!("cargo::rustc-cfg=sync_crypto");
     }
     if *async_crypto {
-        println!("cargo:rustc-cfg=async_crypto");
+        println!("cargo::rustc-cfg=async_crypto");
     }
 
     println!("cargo::metadata=sync_crypto={sync_crypto}");
     println!("cargo::metadata=async_crypto={async_crypto}");
-    println!("cargo:rustc-cfg=crypto_backend=\"{crypto_backend}\"");
+    println!("cargo::rustc-cfg=crypto_backend=\"{crypto_backend}\"");
 }
