@@ -73,23 +73,14 @@ pub async fn verify_attestation_async(
 ///
 /// Parses the bundle with the active crypto backend and returns certificates
 /// in the same order they appeared in the input.
+///
+/// @deprecated Use `split_pem_bundle` instead. Kept as an alias for backward
+/// compatibility with the pre-unification `attestation` wasm package.
 #[wasm_bindgen]
+#[deprecated(note = "use split_pem_bundle instead")]
+#[allow(deprecated)] // wasm_bindgen's generated export shim calls this fn.
 pub fn split_certificate_bundle(pem_bundle: &str) -> Result<Array, String> {
-    if pem_bundle.trim().is_empty() {
-        return Err("Certificate bundle PEM is empty".into());
-    }
-
-    let certificates = Crypto::from_pem_chain(pem_bundle.as_bytes())
-        .map_err(|e| format!("Failed to parse certificate bundle PEM: {e}"))?;
-
-    let split = Array::new();
-    for certificate in certificates {
-        let pem = Crypto::to_pem(&certificate)
-            .map_err(|e| format!("Failed to encode certificate PEM: {e}"))?;
-        split.push(&JsValue::from_str(&pem));
-    }
-
-    Ok(split)
+    crate::wasm_ffi::utils::split_pem_bundle(pem_bundle)
 }
 
 fn parse_report(bytes: &[u8]) -> Result<&AttestationReport, VerifyError> {

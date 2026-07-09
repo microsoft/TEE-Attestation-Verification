@@ -7,6 +7,33 @@ use attestation::snp::verify::VerificationError;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_family = "wasm")]
+use crypto::{CertificateBackend, Crypto};
+#[cfg(target_family = "wasm")]
+use js_sys::Array;
+
+/// Split a PEM certificate bundle into individual PEM certificates using the
+/// active crypto backend, in the same order they appeared in the input.
+#[cfg(target_family = "wasm")]
+#[wasm_bindgen]
+pub fn split_pem_bundle(pem_bundle: &str) -> Result<Array, String> {
+    if pem_bundle.trim().is_empty() {
+        return Err("Certificate bundle PEM is empty".into());
+    }
+
+    let certificates = Crypto::from_pem_chain(pem_bundle.as_bytes())
+        .map_err(|e| format!("Failed to parse certificate bundle PEM: {e}"))?;
+
+    let split = Array::new();
+    for certificate in certificates {
+        let pem = Crypto::to_pem(&certificate)
+            .map_err(|e| format!("Failed to encode certificate PEM: {e}"))?;
+        split.push(&JsValue::from_str(&pem));
+    }
+
+    Ok(split)
+}
+
 /// An error returned by the SNP verify function.
 #[cfg_attr(target_family = "wasm", wasm_bindgen)]
 #[derive(Debug)]

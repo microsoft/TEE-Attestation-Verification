@@ -52,8 +52,11 @@ attestation.measurement; // Uint8Array; see snp.rs for the full accessor list
 ```
 
 `verify_attestation_async` verifies the AMD certificate chain and report
-signature and returns an opaque `SnpAttestationReport`. See
-`demos/web-verify-kernel` for a runnable browser demo.
+signature and returns an opaque `SnpAttestationReport`. If you only have a
+concatenated PEM chain (e.g. ASK+ARK from a single download), split it first
+with `split_pem_bundle(pemChain)`. 
+
+See `demos/web-verify-kernel` for a runnable browser demo.
 
 ## CACI verification
 

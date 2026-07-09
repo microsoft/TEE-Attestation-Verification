@@ -4,8 +4,8 @@
 //! External C and WebAssembly bindings for TEE attestation verification.
 //!
 //! Rust consumers should use the domain crates directly. This crate owns the
-//! native C ABI (`c_ffi`) and wasm-bindgen API surface (`wasm_ffi`). 
-//! 
+//! native C ABI (`c_ffi`) and wasm-bindgen API surface (`wasm_ffi`).
+//!
 //! See `README.md` for consumer-facing docs.
 
 #[cfg(all(not(target_family = "wasm"), sync_crypto))]

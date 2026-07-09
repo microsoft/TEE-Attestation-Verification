@@ -9,30 +9,6 @@ use wasm_bindgen::{prelude::*, JsCast};
 use crate::wasm_ffi::snp::SnpAttestationReport;
 use attestation::snp::{report::TcbVersionRaw, Cpuid};
 use caci::{asynchronous, AciError, SNP_HOST_DATA_LEN};
-use crypto::{CertificateBackend, Crypto};
-
-/// Split a PEM certificate bundle into individual PEM certificates.
-///
-/// Parses the bundle with the active crypto backend and returns certificates
-/// in the same order they appeared in the input.
-#[wasm_bindgen]
-pub fn split_pem_bundle(pem_bundle: &str) -> Result<Array, String> {
-    if pem_bundle.trim().is_empty() {
-        return Err("Certificate bundle PEM is empty".into());
-    }
-
-    let certificates = Crypto::from_pem_chain(pem_bundle.as_bytes())
-        .map_err(|e| format!("Failed to parse certificate bundle PEM: {e}"))?;
-
-    let split = Array::new();
-    for certificate in certificates {
-        let pem = Crypto::to_pem(&certificate)
-            .map_err(|e| format!("Failed to encode certificate PEM: {e}"))?;
-        split.push(&JsValue::from_str(&pem));
-    }
-
-    Ok(split)
-}
 
 /// Verify an SEV-SNP attestation report with caller-provided endorsements.
 ///
