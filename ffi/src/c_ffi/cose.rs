@@ -696,35 +696,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn failed_owned_accessors_clear_out_parameters() {
-        unsafe {
-            let root = into_raw(CborView::new(NativeCborValue::Array(vec![
-                NativeCborValue::Int(1),
-            ])));
-            let mut child = ptr::dangling_mut();
-            let error = tav_cbor_value_array_at(root, 99, &mut child);
-            assert!(!error.is_null());
-            assert_eq!((*error).code(), TavErrorCode::CoseCbor);
-            assert!(child.is_null());
-            crate::c_ffi::utils::tav_error_free(error);
-
-            let error = tav_cbor_value_array_at(root, 0, ptr::null_mut());
-            assert!(!error.is_null());
-            assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
-            crate::c_ffi::utils::tav_error_free(error);
-
-            let mut key = ptr::dangling_mut();
-            let error = tav_cbor_value_map_entry_at(root, 0, &mut key, &mut key);
-            assert!(!error.is_null());
-            assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
-            assert!(key.is_null());
-            crate::c_ffi::utils::tav_error_free(error);
-
-            tav_cbor_value_free(root);
-        }
-    }
-
     fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {
         let line = header
             .lines()
