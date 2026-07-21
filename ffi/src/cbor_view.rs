@@ -33,7 +33,6 @@ impl CborView {
         unsafe { &*self.node }
     }
 
-    #[cfg(any(target_family = "wasm", test))]
     pub(crate) fn try_child<E>(
         &self,
         project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<&'a NativeCborValue, E>,
@@ -45,7 +44,6 @@ impl CborView {
         })
     }
 
-    #[cfg(target_family = "wasm")]
     pub(crate) fn try_children<E>(
         &self,
         project: impl for<'a> FnOnce(
@@ -63,24 +61,6 @@ impl CborView {
                 node: second as *const NativeCborValue,
             },
         ))
-    }
-
-    /// Clone this document view while selecting an already-borrowed node.
-    ///
-    /// # Safety
-    ///
-    /// `node` must point into the immutable document owned by this view.
-    #[cfg(any(not(target_family = "wasm"), test))]
-    pub(crate) unsafe fn clone_at(&self, node: *const NativeCborValue) -> Self {
-        Self {
-            document: Arc::clone(&self.document),
-            node,
-        }
-    }
-
-    #[cfg(any(not(target_family = "wasm"), test))]
-    pub(crate) fn node_ptr(&self) -> *const NativeCborValue {
-        self.node
     }
 
     #[cfg(test)]

@@ -5,16 +5,11 @@
 //!
 //! This module exports the symbols declared in `ffi/include/tav/cose.h`.
 //!
-//! `TavCborValue` handles returned by [`tav_cbor_value_from_bytes`] are
-//! owned and must be released with [`tav_cbor_value_free`]. Existing child
-//! accessors return borrowed handles into the owned root.
-//! [`tav_cbor_value_to_owned`] converts any live handle to an independently
-//! owned handle backed by the same immutable CBOR document.
+//! Every `TavCborValue` handle returned by this module is owned and must be
+//! released with [`tav_cbor_value_free`]. Projected handles share the same
+//! immutable CBOR document through [`CborView`] without cloning its subtrees.
 
-use std::marker::PhantomData;
 use std::os::raw::c_char;
-use std::rc::Rc;
-use std::sync::Mutex;
 
 use super::utils::{input_bytes, input_text, out_ptr, owned_out_ptr, TavByteBuffer};
 use crate::cbor_view::CborView;
@@ -37,33 +32,9 @@ pub enum TavCborKind {
     Tagged = 7,
 }
 
-enum HandleState {
-    Owned(CborView),
-    Borrowed {
-        parent: *const TavCborValue,
-        node: *const NativeCborValue,
-    },
-}
-
-/// An opaque C handle with owned-or-borrowed `Cow`-style storage.
-///
-/// Every handle is allocated in a `Box`. An owned handle keeps the immutable
-/// CBOR document alive through `CborView`; a borrowed handle points to its
-/// parent handle and to a node in that same document. Borrowed children are
-/// stored in their direct parent's `children` arena, so both the child and
-/// parent `Box` addresses remain stable until the owned ancestor is freed.
-/// Traversing the parent chain therefore reaches a live owning `CborView` for
-/// every handle used within the released C lifetime contract.
-///
-/// The document is never exposed mutably, so node pointers cannot be
-/// invalidated while the owning `Arc` lives. `children` is declared before
-/// `state`, so descendants are recursively dropped before an owned view releases
-/// that `Arc`. `_not_send_sync` prevents Rust auto-traits from promising
-/// cross-thread use for these raw-pointer handles.
+/// An opaque, independently owned view into an immutable CBOR document.
 pub struct TavCborValue {
-    children: Mutex<Vec<Box<TavCborValue>>>,
-    state: HandleState,
-    _not_send_sync: PhantomData<Rc<()>>,
+    view: CborView,
 }
 
 impl TavCborValue {
@@ -72,84 +43,29 @@ impl TavCborValue {
     }
 
     pub(super) fn as_native(&self) -> &NativeCborValue {
-        match &self.state {
-            HandleState::Owned(view) => view.as_native(),
-            HandleState::Borrowed { node, .. } => {
-                // SAFETY: borrowed nodes come only from immutable projections
-                // of the parent node. The child is owned by that parent's arena,
-                // and the released C contract keeps the ancestor chain alive
-                // whenever this handle is used.
-                unsafe { &**node }
-            }
-        }
+        self.view.as_native()
     }
 
     fn owned_raw(view: CborView) -> *mut Self {
-        Box::into_raw(Box::new(Self {
-            children: Mutex::new(Vec::new()),
-            state: HandleState::Owned(view),
-            _not_send_sync: PhantomData,
-        }))
+        Box::into_raw(Box::new(Self { view }))
     }
 
-    fn borrowed<E>(
+    fn project<E>(
         &self,
         project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<&'a NativeCborValue, E>,
-    ) -> Result<*const Self, E> {
-        project(self.as_native()).map(|node| self.store_borrowed(node))
+    ) -> Result<*mut Self, E> {
+        self.view.try_child(project).map(Self::owned_raw)
     }
 
-    fn store_borrowed(&self, node: &NativeCborValue) -> *const Self {
-        let child = Box::new(Self {
-            children: Mutex::new(Vec::new()),
-            state: HandleState::Borrowed { parent: self, node },
-            _not_send_sync: PhantomData,
-        });
-        let child_ptr = child.as_ref() as *const Self;
-        self.children.lock().unwrap().push(child);
-        child_ptr
-    }
-
-    fn to_owned(&self) -> *mut Self {
-        // SAFETY: `node_ptr` is either the owning view's selected node or an
-        // immutable projection from a live parent in the same document.
-        let view = unsafe { self.owning_view().clone_at(self.node_ptr()) };
-        Self::owned_raw(view)
-    }
-
-    fn is_owned(&self) -> bool {
-        matches!(self.state, HandleState::Owned(_))
-    }
-
-    fn node_ptr(&self) -> *const NativeCborValue {
-        match &self.state {
-            HandleState::Owned(view) => view.node_ptr(),
-            HandleState::Borrowed { node, .. } => *node,
-        }
-    }
-
-    fn owning_view(&self) -> &CborView {
-        let mut handle = self;
-        loop {
-            match &handle.state {
-                HandleState::Owned(view) => return view,
-                HandleState::Borrowed { parent, .. } => {
-                    // SAFETY: each borrowed handle is stored in its parent's
-                    // arena, and callers must keep the owned ancestor alive.
-                    handle = unsafe { &**parent };
-                }
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn document_ptr(&self) -> *const NativeCborValue {
-        self.owning_view().document_ptr()
-    }
-
-    #[cfg(test)]
-    fn document_strong_count(&self) -> usize {
-        self.owning_view().document_strong_count()
+    fn project_pair<E>(
+        &self,
+        project: impl for<'a> FnOnce(
+            &'a NativeCborValue,
+        ) -> Result<(&'a NativeCborValue, &'a NativeCborValue), E>,
+    ) -> Result<(*mut Self, *mut Self), E> {
+        self.view
+            .try_children(project)
+            .map(|(first, second)| (Self::owned_raw(first), Self::owned_raw(second)))
     }
 }
 
@@ -269,21 +185,6 @@ pub unsafe extern "C" fn tav_cbor_value_from_bytes(
             .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))?;
         unsafe {
             *out_value = TavCborValue::from_native(value);
-        }
-        Ok(())
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn tav_cbor_value_to_owned(
-    value: *const TavCborValue,
-    out_owned: *mut *mut TavCborValue,
-) -> *mut TavError {
-    into_result(|| {
-        unsafe { owned_out_ptr(out_owned, "out_owned") }?;
-        let handle = unsafe { cbor_handle(value, "value") }?;
-        unsafe {
-            *out_owned = handle.to_owned();
         }
         Ok(())
     })
@@ -437,12 +338,12 @@ pub unsafe extern "C" fn tav_cbor_value_tag(
 #[no_mangle]
 pub unsafe extern "C" fn tav_cbor_value_tagged_payload(
     value: *const TavCborValue,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let payload = handle.borrowed(|value| match value {
+        let payload = handle.project(|value| match value {
             NativeCborValue::Tagged { payload, .. } => Ok(payload.as_ref()),
             _ => Err(TavError::new(
                 TavErrorCode::CoseUnexpectedType,
@@ -478,12 +379,12 @@ pub unsafe extern "C" fn tav_cbor_value_len(
 pub unsafe extern "C" fn tav_cbor_value_array_at(
     value: *const TavCborValue,
     index: usize,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.borrowed(|value| {
+        let child = handle.project(|value| {
             value
                 .array_at(index)
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
@@ -499,12 +400,12 @@ pub unsafe extern "C" fn tav_cbor_value_array_at(
 pub unsafe extern "C" fn tav_cbor_value_map_at_int(
     value: *const TavCborValue,
     key: i64,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.borrowed(|value| {
+        let child = handle.project(|value| {
             value
                 .map_at_int(key)
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
@@ -521,13 +422,13 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_text(
     value: *const TavCborValue,
     key: *const c_char,
     key_len: usize,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let key = unsafe { input_text(key, key_len, "key", true) }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.borrowed(|value| {
+        let child = handle.project(|value| {
             value
                 .map_at_str(key)
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
@@ -543,13 +444,13 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_text(
 pub unsafe extern "C" fn tav_cbor_value_map_at(
     value: *const TavCborValue,
     key: *const TavCborValue,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
         let key = unsafe { cbor_value(key, "key") }?;
-        let child = handle.borrowed(|value| {
+        let child = handle.project(|value| {
             value
                 .map_at(key)
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
@@ -625,16 +526,19 @@ pub unsafe extern "C" fn tav_cbor_value_map_has_key(
 pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
     value: *const TavCborValue,
     index: usize,
-    out_key: *mut *const TavCborValue,
-    out_value: *mut *const TavCborValue,
+    out_key: *mut *mut TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_key, "out_key") }?;
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_key, "out_key") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
+        if out_key == out_value {
+            return Err(TavError::invalid_argument(
+                "out_key and out_value must be different",
+            ));
+        }
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let (key, child) = map_entry_at(handle.as_native(), index)?;
-        let key = handle.store_borrowed(key);
-        let child = handle.store_borrowed(child);
+        let (key, child) = handle.project_pair(|value| map_entry_at(value, index))?;
         unsafe {
             *out_key = key;
             *out_value = child;
@@ -647,12 +551,12 @@ pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
 pub unsafe extern "C" fn tav_cbor_value_map_key_at(
     value: *const TavCborValue,
     index: usize,
-    out_key: *mut *const TavCborValue,
+    out_key: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_key, "out_key") }?;
+        unsafe { owned_out_ptr(out_key, "out_key") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let key = handle.borrowed(|value| map_entry_at(value, index).map(|(key, _)| key))?;
+        let key = handle.project(|value| map_entry_at(value, index).map(|(key, _)| key))?;
         unsafe {
             *out_key = key;
         }
@@ -664,12 +568,12 @@ pub unsafe extern "C" fn tav_cbor_value_map_key_at(
 pub unsafe extern "C" fn tav_cbor_value_map_value_at(
     value: *const TavCborValue,
     index: usize,
-    out_value: *mut *const TavCborValue,
+    out_value: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_value, "out_value") }?;
+        unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.borrowed(|value| map_entry_at(value, index).map(|(_, child)| child))?;
+        let child = handle.project(|value| map_entry_at(value, index).map(|(_, child)| child))?;
         unsafe {
             *out_value = child;
         }
@@ -680,12 +584,12 @@ pub unsafe extern "C" fn tav_cbor_value_map_value_at(
 #[no_mangle]
 pub unsafe extern "C" fn tav_validate_cose_sign1(
     value: *const TavCborValue,
-    out_sign1: *mut *const TavCborValue,
+    out_sign1: *mut *mut TavCborValue,
 ) -> *mut TavError {
     into_result(|| {
-        unsafe { borrowed_out_ptr(out_sign1, "out_sign1") }?;
+        unsafe { owned_out_ptr(out_sign1, "out_sign1") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let sign1 = handle.borrowed(|value| {
+        let sign1 = handle.project(|value| {
             cose_sign1(value).map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
@@ -697,7 +601,7 @@ pub unsafe extern "C" fn tav_validate_cose_sign1(
 
 #[no_mangle]
 pub unsafe extern "C" fn tav_cbor_value_free(value: *mut TavCborValue) {
-    if !value.is_null() && unsafe { (*value).is_owned() } {
+    if !value.is_null() {
         unsafe {
             drop(Box::from_raw(value));
         }
@@ -815,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn borrowed_navigation_does_not_retain_the_document() {
+    fn projected_handles_share_document_and_survive_parent_free() {
         unsafe {
             let root = TavCborValue::from_native(NativeCborValue::Array(vec![
                 NativeCborValue::Array(vec![NativeCborValue::Int(42)]),
@@ -833,26 +737,33 @@ mod tests {
                     ])),
                 },
             ]));
-            assert_eq!((*root).document_strong_count(), 1);
+            let document = (*root).view.document_ptr();
+            assert_eq!((*root).view.document_strong_count(), 1);
 
-            let mut array = ptr::null();
+            let mut array = ptr::null_mut();
             assert!(tav_cbor_value_array_at(root, 0, &mut array).is_null());
-            let mut nested = ptr::null();
+            let mut nested = ptr::null_mut();
             assert!(tav_cbor_value_array_at(array, 0, &mut nested).is_null());
-            assert_eq!((*root).document_strong_count(), 1);
+            assert_eq!((*root).view.document_strong_count(), 3);
+            assert_eq!((*nested).view.document_ptr(), document);
 
-            let mut map = ptr::null();
+            let mut map = ptr::null_mut();
             assert!(tav_cbor_value_array_at(root, 1, &mut map).is_null());
-            let mut key = ptr::null();
-            let mut value = ptr::null();
+            let mut key = ptr::null_mut();
+            let mut value = ptr::null_mut();
             assert!(tav_cbor_value_map_entry_at(map, 0, &mut key, &mut value).is_null());
-            assert_eq!((*root).document_strong_count(), 1);
+            assert_eq!((*root).view.document_strong_count(), 6);
 
-            let mut tagged = ptr::null();
+            let mut tagged = ptr::null_mut();
             assert!(tav_cbor_value_array_at(root, 2, &mut tagged).is_null());
-            let mut sign1 = ptr::null();
+            let mut sign1 = ptr::null_mut();
             assert!(tav_validate_cose_sign1(tagged, &mut sign1).is_null());
-            assert_eq!((*root).document_strong_count(), 1);
+            assert_eq!((*root).view.document_strong_count(), 8);
+
+            tav_cbor_value_free(root);
+            tav_cbor_value_free(array);
+            tav_cbor_value_free(map);
+            tav_cbor_value_free(tagged);
 
             let mut int = 0;
             assert!(tav_cbor_value_int(nested, &mut int).is_null());
@@ -868,144 +779,38 @@ mod tests {
             );
             assert_eq!(tav_cbor_value_kind(sign1), TavCborKind::Array);
 
-            tav_cbor_value_free(root);
-        }
-    }
-
-    #[test]
-    fn to_owned_clones_one_arc_and_retains_every_handle_state() {
-        unsafe {
-            let root = TavCborValue::from_native(NativeCborValue::Array(vec![
-                NativeCborValue::Array(vec![NativeCborValue::Int(42)]),
-                NativeCborValue::Map(vec![(
-                    NativeCborValue::Int(7),
-                    NativeCborValue::TextString("pair".into()),
-                )]),
-                NativeCborValue::Tagged {
-                    tag: cose::COSE_SIGN1_TAG,
-                    payload: Box::new(NativeCborValue::Array(vec![
-                        NativeCborValue::ByteString(vec![]),
-                        NativeCborValue::Map(vec![]),
-                        NativeCborValue::Simple(22),
-                        NativeCborValue::ByteString(vec![]),
-                    ])),
-                },
-            ]));
-            let document = (*root).document_ptr();
-            assert_eq!((*root).document_strong_count(), 1);
-
-            let mut borrowed_array = ptr::null();
-            assert!(tav_cbor_value_array_at(root, 0, &mut borrowed_array).is_null());
-            let mut borrowed_nested = ptr::null();
-            assert!(tav_cbor_value_array_at(borrowed_array, 0, &mut borrowed_nested).is_null());
-            let mut owned_nested = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(borrowed_nested, &mut owned_nested).is_null());
-            assert_eq!((*root).document_strong_count(), 2);
-            assert_eq!((*owned_nested).document_ptr(), document);
-            assert_eq!((*owned_nested).node_ptr(), (*borrowed_nested).node_ptr());
-
-            let mut map = ptr::null();
-            assert!(tav_cbor_value_array_at(root, 1, &mut map).is_null());
-            let mut pair_key = ptr::null();
-            let mut pair_value = ptr::null();
-            assert!(tav_cbor_value_map_entry_at(map, 0, &mut pair_key, &mut pair_value).is_null());
-            let mut owned_pair = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(pair_value, &mut owned_pair).is_null());
-            assert_eq!((*root).document_strong_count(), 3);
-            assert_eq!((*owned_pair).document_ptr(), document);
-            assert_eq!((*owned_pair).node_ptr(), (*pair_value).node_ptr());
-
-            let mut tagged = ptr::null();
-            assert!(tav_cbor_value_array_at(root, 2, &mut tagged).is_null());
-            let mut borrowed_sign1 = ptr::null();
-            assert!(tav_validate_cose_sign1(tagged, &mut borrowed_sign1).is_null());
-            let mut owned_sign1 = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(borrowed_sign1, &mut owned_sign1).is_null());
-            assert_eq!((*root).document_strong_count(), 4);
-            assert_eq!((*owned_sign1).document_ptr(), document);
-            assert_eq!((*owned_sign1).node_ptr(), (*borrowed_sign1).node_ptr());
-
-            let mut owned_root = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(root, &mut owned_root).is_null());
-            assert_eq!((*root).document_strong_count(), 5);
-            assert_eq!((*owned_root).document_ptr(), document);
-            assert_eq!((*owned_root).node_ptr(), (*root).node_ptr());
-
-            let mut owned_again = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(owned_nested, &mut owned_again).is_null());
-            assert_eq!((*root).document_strong_count(), 6);
-            assert_eq!((*owned_again).document_ptr(), document);
-            assert_eq!((*owned_again).node_ptr(), (*owned_nested).node_ptr());
-
-            tav_cbor_value_free(root);
-
-            let mut value = 0;
-            assert!(tav_cbor_value_int(owned_nested, &mut value).is_null());
-            assert_eq!(value, 42);
-            tav_cbor_value_free(owned_nested);
-
-            assert!(tav_cbor_value_int(owned_again, &mut value).is_null());
-            assert_eq!(value, 42);
-
-            let mut text = ptr::null();
-            let mut text_len = 0;
-            assert!(tav_cbor_value_text(owned_pair, &mut text, &mut text_len).is_null());
-            assert_eq!(
-                std::slice::from_raw_parts(text.cast::<u8>(), text_len),
-                b"pair"
-            );
-            assert_eq!(tav_cbor_value_kind(owned_sign1), TavCborKind::Array);
-
-            let mut root_len = 0;
-            assert!(tav_cbor_value_len(owned_root, &mut root_len).is_null());
-            assert_eq!(root_len, 3);
-
-            tav_cbor_value_free(owned_pair);
-            tav_cbor_value_free(owned_sign1);
-            tav_cbor_value_free(owned_again);
-            tav_cbor_value_free(owned_root);
+            tav_cbor_value_free(nested);
+            tav_cbor_value_free(key);
+            tav_cbor_value_free(value);
+            tav_cbor_value_free(sign1);
             tav_cbor_value_free(ptr::null_mut());
         }
     }
 
     #[test]
-    fn to_owned_retains_validated_borrowed_cose_sign1() {
+    fn failed_owned_accessors_clear_out_parameters() {
         unsafe {
-            let bytes = [0xd2, 0x84, 0x40, 0xa0, 0xf6, 0x40];
-            let mut root = ptr::null_mut();
-            assert!(tav_cbor_value_from_bytes(bytes.as_ptr(), bytes.len(), &mut root).is_null());
-
-            let mut borrowed_sign1 = ptr::null();
-            assert!(tav_validate_cose_sign1(root, &mut borrowed_sign1).is_null());
-            let mut owned_sign1 = ptr::null_mut();
-            assert!(tav_cbor_value_to_owned(borrowed_sign1, &mut owned_sign1).is_null());
-            tav_cbor_value_free(root);
-
-            assert_eq!(tav_cbor_value_kind(owned_sign1), TavCborKind::Array);
-            let mut len = 0;
-            assert!(tav_cbor_value_len(owned_sign1, &mut len).is_null());
-            assert_eq!(len, 4);
-            tav_cbor_value_free(owned_sign1);
-        }
-    }
-
-    #[test]
-    fn to_owned_validates_and_clears_out_parameter() {
-        unsafe {
-            let mut owned = ptr::dangling_mut();
-            let error = tav_cbor_value_to_owned(ptr::null(), &mut owned);
+            let root =
+                TavCborValue::from_native(NativeCborValue::Array(vec![NativeCborValue::Int(1)]));
+            let mut child = ptr::dangling_mut();
+            let error = tav_cbor_value_array_at(root, 99, &mut child);
             assert!(!error.is_null());
-            assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
-            assert!(owned.is_null());
+            assert_eq!((*error).code(), TavErrorCode::CoseCbor);
+            assert!(child.is_null());
             crate::c_ffi::utils::tav_error_free(error);
 
-            let bytes = [0x01];
-            let mut root = ptr::null_mut();
-            assert!(tav_cbor_value_from_bytes(bytes.as_ptr(), bytes.len(), &mut root).is_null());
-            let error = tav_cbor_value_to_owned(root, ptr::null_mut());
+            let error = tav_cbor_value_array_at(root, 0, ptr::null_mut());
             assert!(!error.is_null());
             assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
             crate::c_ffi::utils::tav_error_free(error);
+
+            let mut key = ptr::dangling_mut();
+            let error = tav_cbor_value_map_entry_at(root, 0, &mut key, &mut key);
+            assert!(!error.is_null());
+            assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
+            assert!(key.is_null());
+            crate::c_ffi::utils::tav_error_free(error);
+
             tav_cbor_value_free(root);
         }
     }
