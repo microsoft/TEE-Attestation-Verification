@@ -95,11 +95,11 @@ impl CborValue {
 
     pub fn tagged_payload(&self) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| match value {
-                NativeCborValue::Tagged { payload, .. } => Ok(payload.as_ref()),
+            .project(|value| match value {
+                NativeCborValue::Tagged { payload, .. } => Ok([payload.as_ref()]),
                 other => Err(format!("Expected Tagged, got {:?}", other)),
             })
-            .map(CborValue::from_view)
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn len(&self) -> Result<u32, String> {
@@ -111,32 +111,32 @@ impl CborValue {
 
     pub fn array_at(&self, index: u32) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| value.array_at(index as usize))
-            .map(CborValue::from_view)
+            .project(|value| value.array_at(index as usize).map(|child| [child]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_at_int(&self, key: i64) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| value.map_at_int(key))
-            .map(CborValue::from_view)
+            .project(|value| value.map_at_int(key).map(|child| [child]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_at_text(&self, key: &str) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| value.map_at_str(key))
-            .map(CborValue::from_view)
+            .project(|value| value.map_at_str(key).map(|child| [child]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_at(&self, key: &CborValue) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| value.map_at(key.as_native()))
-            .map(CborValue::from_view)
+            .project(|value| value.map_at(key.as_native()).map(|child| [child]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_entry_at(&self, index: u32) -> Result<Array, String> {
         self.inner
-            .try_children(|value| map_entry_at(value, index))
-            .map(|(key, value)| {
+            .project(|value| map_entry_at(value, index).map(|(key, value)| [key, value]))
+            .map(|[key, value]| {
                 let entry = Array::new();
                 entry.push(&CborValue::from_view(key).into());
                 entry.push(&CborValue::from_view(value).into());
@@ -146,14 +146,14 @@ impl CborValue {
 
     pub fn map_key_at(&self, index: u32) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| map_entry_at(value, index).map(|(key, _)| key))
-            .map(CborValue::from_view)
+            .project(|value| map_entry_at(value, index).map(|(key, _)| [key]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_value_at(&self, index: u32) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| map_entry_at(value, index).map(|(_, value)| value))
-            .map(CborValue::from_view)
+            .project(|value| map_entry_at(value, index).map(|(_, value)| [value]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn map_has_int(&self, key: i64) -> Result<bool, String> {
@@ -170,8 +170,8 @@ impl CborValue {
 
     pub fn as_cose_sign1(&self) -> Result<CoseSign1, String> {
         self.inner
-            .try_child(cose::cose_sign1)
-            .map(CoseSign1::from_view)
+            .project(|value| cose::cose_sign1(value).map(|sign1| [sign1]))
+            .map(|[view]| CoseSign1::from_view(view))
     }
 }
 
@@ -200,8 +200,8 @@ impl CoseSign1 {
 
     pub fn unprotected(&self) -> Result<CborValue, String> {
         self.inner
-            .try_child(|value| value.array_at(1))
-            .map(CborValue::from_view)
+            .project(|value| value.array_at(1).map(|child| [child]))
+            .map(|[view]| CborValue::from_view(view))
     }
 
     pub fn payload(&self) -> Result<Vec<u8>, String> {

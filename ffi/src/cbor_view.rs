@@ -25,7 +25,7 @@ impl CborView {
     }
 
     pub(crate) fn as_native(&self) -> &NativeCborValue {
-        // SAFETY: `node` is initialized from `document` or by `try_child` from
+        // SAFETY: `node` is initialized from `document` or by `project` from
         // a reference whose lifetime is tied to the current node. CBOR values
         // reachable through an immutable `NativeCborValue` cannot move because
         // this type never exposes mutable access. `document` keeps the complete
@@ -33,34 +33,15 @@ impl CborView {
         unsafe { &*self.node }
     }
 
-    pub(crate) fn try_child<E>(
+    pub(crate) fn project<const N: usize, E>(
         &self,
-        project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<&'a NativeCborValue, E>,
-    ) -> Result<Self, E> {
-        let node = project(self.as_native())? as *const NativeCborValue;
-        Ok(Self {
+        project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<[&'a NativeCborValue; N], E>,
+    ) -> Result<[Self; N], E> {
+        let nodes = project(self.as_native())?;
+        Ok(nodes.map(|node| Self {
             document: Arc::clone(&self.document),
             node,
-        })
-    }
-
-    pub(crate) fn try_children<E>(
-        &self,
-        project: impl for<'a> FnOnce(
-            &'a NativeCborValue,
-        ) -> Result<(&'a NativeCborValue, &'a NativeCborValue), E>,
-    ) -> Result<(Self, Self), E> {
-        let (first, second) = project(self.as_native())?;
-        Ok((
-            Self {
-                document: Arc::clone(&self.document),
-                node: first as *const NativeCborValue,
-            },
-            Self {
-                document: Arc::clone(&self.document),
-                node: second as *const NativeCborValue,
-            },
-        ))
+        }))
     }
 
     #[cfg(test)]
@@ -85,10 +66,11 @@ mod tests {
             NativeCborValue::Array(vec![NativeCborValue::Int(42)]),
         ]));
         let root_node = root.as_native() as *const NativeCborValue;
-        let child = root
-            .try_child(|value| value.array_at(1))
-            .unwrap()
-            .try_child(|value| value.array_at(0))
+        let [child] = root
+            .project(|value| value.array_at(1).map(|child| [child]))
+            .unwrap();
+        let [child] = child
+            .project(|value| value.array_at(0).map(|child| [child]))
             .unwrap();
         let child_node = child.as_native() as *const NativeCborValue;
 

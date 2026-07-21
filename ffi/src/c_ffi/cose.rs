@@ -54,7 +54,9 @@ impl TavCborValue {
         &self,
         project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<&'a NativeCborValue, E>,
     ) -> Result<*mut Self, E> {
-        self.view.try_child(project).map(Self::owned_raw)
+        self.view
+            .project(|value| project(value).map(|node| [node]))
+            .map(|[view]| Self::owned_raw(view))
     }
 
     fn project_pair<E>(
@@ -64,8 +66,8 @@ impl TavCborValue {
         ) -> Result<(&'a NativeCborValue, &'a NativeCborValue), E>,
     ) -> Result<(*mut Self, *mut Self), E> {
         self.view
-            .try_children(project)
-            .map(|(first, second)| (Self::owned_raw(first), Self::owned_raw(second)))
+            .project(|value| project(value).map(|(first, second)| [first, second]))
+            .map(|[first, second]| (Self::owned_raw(first), Self::owned_raw(second)))
     }
 }
 
