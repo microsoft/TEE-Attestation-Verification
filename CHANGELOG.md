@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.4]
+
+[1.0.4]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.4
+
+### Added
+
+- Add opt-in owned CBOR child and validated COSE_Sign1 accessors to the C ABI.
+  These handles may outlive their parent and share its immutable data without
+  cloning or reparsing. The released borrowed accessors retain their existing
+  names, signatures, and ownership semantics.
+
 ## [1.0.3]
 
 [1.0.3]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.3

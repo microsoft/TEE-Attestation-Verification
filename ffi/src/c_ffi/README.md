@@ -24,6 +24,36 @@ That produces `libtee_attestation_verification_ffi.{a,so}` under
 it and include `ffi/include/tav/`. See `ffi/tests/c-consumer/CMakeLists.txt`
 for a worked CMake setup, including static linking.
 
+## CBOR handle ownership
+
+`tav_cbor_value_from_bytes` returns an owned root. The original CBOR child
+accessors (`tav_cbor_value_array_at`, the map and tag accessors, and
+`tav_validate_cose_sign1`) continue to return borrowed `const TavCborValue *`
+handles. Their released signatures and ownership contract are unchanged:
+callers must not free them, and they become invalid when their owning ancestor
+is freed.
+
+Consumers that need independent lifetimes can opt into the corresponding
+`_owned` accessors. Each writes a mutable `TavCborValue *` handle that shares
+the immutable parsed document through reference counting; it does not clone a
+subtree or serialize and reparse it. Free every returned handle with the
+null-safe `tav_cbor_value_free`. Parents may be freed in any order:
+
+```c
+TavCborValue *root = NULL;
+TavCborValue *child = NULL;
+tav_cbor_value_from_bytes(cbor, cbor_len, &root);
+tav_cbor_value_array_at_owned(root, 0, &child);
+
+tav_cbor_value_free(root); /* child remains valid */
+TavCborKind kind = tav_cbor_value_kind(child);
+tav_cbor_value_free(child);
+```
+
+Byte and text pointers are still borrowed from the handle passed to their
+accessor. When that handle is an owned child, those pointers remain valid until
+the child is freed.
+
 ## SNP verification
 
 ```c
