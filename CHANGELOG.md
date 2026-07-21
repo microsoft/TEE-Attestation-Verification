@@ -11,9 +11,10 @@
   its ancestors and shares their immutable data without cloning or reparsing.
   The released borrowed accessors retain their existing names, signatures, and
   ownership semantics.
-- Add borrowed synchronous and asynchronous CACI policy-verification entry
-  points for bindings that already manage the verified UVM endorsement
-  lifetime.
+### Changed
+
+- Change the existing synchronous and asynchronous CACI policy-verification
+  functions to borrow the verified UVM endorsement rather than take ownership.
 
 ## [1.0.3]
 

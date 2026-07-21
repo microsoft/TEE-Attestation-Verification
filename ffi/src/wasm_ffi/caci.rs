@@ -87,7 +87,7 @@ pub async fn verify_caci_attestation(
     if trusted_caci_execution_policies.is_empty() {
         return Err("at least one trusted CACI execution policy digest is required".to_string());
     }
-    asynchronous::verify_caci_attestation_borrowed(
+    asynchronous::verify_caci_attestation(
         *attestation.report(),
         minimum_tcb,
         trusted_caci_execution_policies,

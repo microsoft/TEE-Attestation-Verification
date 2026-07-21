@@ -213,7 +213,7 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
         }?;
         let uvm_endorsement = unsafe { uvm_endorsement_handle(uvm_endorsement) }?;
         let uvm_feed = unsafe { input_text(uvm_feed, uvm_feed_len, "uvm_feed", false) }?;
-        let report_data = synchronous::verify_caci_attestation_borrowed(
+        let report_data = synchronous::verify_caci_attestation(
             *attestation,
             minimum_tcb,
             trusted_policy_digests,
