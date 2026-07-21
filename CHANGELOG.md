@@ -6,10 +6,11 @@
 
 ### Added
 
-- Add opt-in owned CBOR child and validated COSE_Sign1 accessors to the C ABI.
-  These handles may outlive their parent and share its immutable data without
-  cloning or reparsing. The released borrowed accessors retain their existing
-  names, signatures, and ownership semantics.
+- Add `tav_cbor_value_to_owned` to the C ABI. It converts any live owned or
+  borrowed CBOR value into a new independently owned handle that may outlive
+  its ancestors and shares their immutable data without cloning or reparsing.
+  The released borrowed accessors retain their existing names, signatures, and
+  ownership semantics.
 
 ## [1.0.3]
 

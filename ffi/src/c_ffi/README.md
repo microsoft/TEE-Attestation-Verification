@@ -33,26 +33,30 @@ handles. Their released signatures and ownership contract are unchanged:
 callers must not free them, and they become invalid when their owning ancestor
 is freed.
 
-Consumers that need independent lifetimes can opt into the corresponding
-`_owned` accessors. Each writes a mutable `TavCborValue *` handle that shares
-the immutable parsed document through reference counting; it does not clone a
-subtree or serialize and reparse it. Free every returned handle with the
-null-safe `tav_cbor_value_free`. Parents may be freed in any order:
+Consumers that need an independent lifetime can pass any live root or borrowed
+view to `tav_cbor_value_to_owned`. It returns a mutable `TavCborValue *` handle
+for the same value and shares the immutable parsed document through reference
+counting; it does not clone a subtree or serialize and reparse it. The input
+must remain valid through the call. Free every returned handle with the
+null-safe `tav_cbor_value_free`; the new handle remains valid after every
+ancestor handle is freed:
 
 ```c
 TavCborValue *root = NULL;
-TavCborValue *child = NULL;
+const TavCborValue *borrowed_child = NULL;
+TavCborValue *owned_child = NULL;
 tav_cbor_value_from_bytes(cbor, cbor_len, &root);
-tav_cbor_value_array_at_owned(root, 0, &child);
+tav_cbor_value_array_at(root, 0, &borrowed_child);
+tav_cbor_value_to_owned(borrowed_child, &owned_child);
 
-tav_cbor_value_free(root); /* child remains valid */
-TavCborKind kind = tav_cbor_value_kind(child);
-tav_cbor_value_free(child);
+tav_cbor_value_free(root); /* owned_child remains valid */
+TavCborKind kind = tav_cbor_value_kind(owned_child);
+tav_cbor_value_free(owned_child);
 ```
 
 Byte and text pointers are still borrowed from the handle passed to their
-accessor. When that handle is an owned child, those pointers remain valid until
-the child is freed.
+accessor. When that handle is independently owned, those pointers remain valid
+until the handle is freed.
 
 ## SNP verification
 

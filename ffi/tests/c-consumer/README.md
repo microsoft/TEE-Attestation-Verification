@@ -7,9 +7,10 @@ shipped C ABI (symbols, signatures, return codes, and ownership contract) that
 the in-crate Rust unit tests cannot observe, since those never cross the real
 ABI boundary.
 
-The CBOR/COSE coverage exercises both the released borrowed child APIs and all
-opt-in owned child APIs, including freeing roots before owned descendants and
-checking failure out-parameters.
+The CBOR/COSE coverage exercises the released borrowed child APIs and the
+additive `tav_cbor_value_to_owned` primitive, including direct and nested
+borrowed views, validated COSE_Sign1 views, already-owned handles, root-first
+freeing, and failure out-parameters.
 
 The suite uses [doctest](https://github.com/doctest/doctest), vendored as a
 single header under `vendor/doctest.h` (MIT licensed).
