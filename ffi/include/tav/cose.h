@@ -24,6 +24,9 @@ extern "C" {
  * - CBOR child accessors, including array/map/tag accessors, return borrowed
  *   handles. Borrowed handles must not be freed and remain valid only while the
  *   ancestor owned TavCborValue remains alive.
+ * - Accessors ending in _owned return owned child handles that keep the
+ *   immutable CBOR document alive independently. Release each returned handle
+ *   with tav_cbor_value_free; its parent may be freed first.
  * - Byte/text accessors return borrowed views. The returned data remains valid
  *   only while the owning or ancestor TavCborValue remains alive.
  * - tav_cbor_value_to_bytes writes an owned TavByteBuffer* through out_bytes.
@@ -122,6 +125,10 @@ TAV_COSE_API TavError *tav_cbor_value_tagged_payload(
     const TavCborValue *value,
     const TavCborValue **out_value);
 
+TAV_COSE_API TavError *tav_cbor_value_tagged_payload_owned(
+    const TavCborValue *value,
+    TavCborValue **out_value);
+
 TAV_COSE_API TavError *tav_cbor_value_len(
     const TavCborValue *value,
     size_t *out);
@@ -131,10 +138,20 @@ TAV_COSE_API TavError *tav_cbor_value_array_at(
     size_t index,
     const TavCborValue **out_value);
 
+TAV_COSE_API TavError *tav_cbor_value_array_at_owned(
+    const TavCborValue *value,
+    size_t index,
+    TavCborValue **out_value);
+
 TAV_COSE_API TavError *tav_cbor_value_map_at_int(
     const TavCborValue *value,
     int64_t key,
     const TavCborValue **out_value);
+
+TAV_COSE_API TavError *tav_cbor_value_map_at_int_owned(
+    const TavCborValue *value,
+    int64_t key,
+    TavCborValue **out_value);
 
 TAV_COSE_API TavError *tav_cbor_value_map_at_text(
     const TavCborValue *value,
@@ -142,10 +159,21 @@ TAV_COSE_API TavError *tav_cbor_value_map_at_text(
     size_t key_len,
     const TavCborValue **out_value);
 
+TAV_COSE_API TavError *tav_cbor_value_map_at_text_owned(
+    const TavCborValue *value,
+    const char *key,
+    size_t key_len,
+    TavCborValue **out_value);
+
 TAV_COSE_API TavError *tav_cbor_value_map_at(
     const TavCborValue *value,
     const TavCborValue *key,
     const TavCborValue **out_value);
+
+TAV_COSE_API TavError *tav_cbor_value_map_at_owned(
+    const TavCborValue *value,
+    const TavCborValue *key,
+    TavCborValue **out_value);
 
 TAV_COSE_API TavError *tav_cbor_value_map_has_int_key(
     const TavCborValue *value,
@@ -169,19 +197,39 @@ TAV_COSE_API TavError *tav_cbor_value_map_entry_at(
     const TavCborValue **out_key,
     const TavCborValue **out_value);
 
+TAV_COSE_API TavError *tav_cbor_value_map_entry_at_owned(
+    const TavCborValue *value,
+    size_t index,
+    TavCborValue **out_key,
+    TavCborValue **out_value);
+
 TAV_COSE_API TavError *tav_cbor_value_map_key_at(
     const TavCborValue *value,
     size_t index,
     const TavCborValue **out_key);
+
+TAV_COSE_API TavError *tav_cbor_value_map_key_at_owned(
+    const TavCborValue *value,
+    size_t index,
+    TavCborValue **out_key);
 
 TAV_COSE_API TavError *tav_cbor_value_map_value_at(
     const TavCborValue *value,
     size_t index,
     const TavCborValue **out_value);
 
+TAV_COSE_API TavError *tav_cbor_value_map_value_at_owned(
+    const TavCborValue *value,
+    size_t index,
+    TavCborValue **out_value);
+
 TAV_COSE_API TavError *tav_validate_cose_sign1(
     const TavCborValue *value,
     const TavCborValue **out_sign1);
+
+TAV_COSE_API TavError *tav_validate_cose_sign1_owned(
+    const TavCborValue *value,
+    TavCborValue **out_sign1);
 
 TAV_COSE_API void tav_cbor_value_free(TavCborValue *value);
 

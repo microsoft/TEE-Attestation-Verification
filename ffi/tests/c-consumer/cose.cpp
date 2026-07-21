@@ -81,6 +81,103 @@ TEST_CASE("cbor: array children are borrowed views of the owned root") {
     CHECK(data[1] == 0xbb);
 }
 
+TEST_CASE("cbor: owned children outlive roots and one another") {
+    // [[42]]
+    const uint8_t cbor[] = {0x81, 0x81, 0x18, 0x2a};
+    CborRoot root;
+    REQUIRE(tav_cbor_value_from_bytes(cbor, sizeof(cbor), &root.value) == nullptr);
+
+    TavCborValue *array = nullptr;
+    REQUIRE(tav_cbor_value_array_at_owned(root.value, 0, &array) == nullptr);
+    tav_cbor_value_free(root.value);
+    root.value = nullptr;
+
+    TavCborValue *item = nullptr;
+    REQUIRE(tav_cbor_value_array_at_owned(array, 0, &item) == nullptr);
+    tav_cbor_value_free(array);
+
+    int64_t value = 0;
+    REQUIRE(tav_cbor_value_int(item, &value) == nullptr);
+    CHECK(value == 42);
+    tav_cbor_value_free(item);
+    tav_cbor_value_free(nullptr);
+}
+
+TEST_CASE("cbor: every owned map and tag accessor returns independent handles") {
+    // tag(42, {1: "one", "key": 42})
+    const uint8_t cbor[] = {0xd8, 0x2a, 0xa2, 0x01, 0x63, 'o', 'n',
+                            'e',  0x63, 'k',  'e',  'y', 0x18, 0x2a};
+    CborRoot root;
+    REQUIRE(tav_cbor_value_from_bytes(cbor, sizeof(cbor), &root.value) == nullptr);
+
+    TavCborValue *map = nullptr;
+    REQUIRE(tav_cbor_value_tagged_payload_owned(root.value, &map) == nullptr);
+
+    TavCborValue *value = nullptr;
+    REQUIRE(tav_cbor_value_map_at_int_owned(map, 1, &value) == nullptr);
+    const char *text = nullptr;
+    size_t text_len = 0;
+    REQUIRE(tav_cbor_value_text(value, &text, &text_len) == nullptr);
+    CHECK(std::string(text, text_len) == "one");
+    tav_cbor_value_free(value);
+
+    const char key_text[] = "key";
+    REQUIRE(tav_cbor_value_map_at_text_owned(map, key_text, 3, &value) == nullptr);
+    int64_t integer = 0;
+    REQUIRE(tav_cbor_value_int(value, &integer) == nullptr);
+    CHECK(integer == 42);
+    tav_cbor_value_free(value);
+
+    TavCborValue *key = nullptr;
+    REQUIRE(tav_cbor_value_map_key_at_owned(map, 0, &key) == nullptr);
+    REQUIRE(tav_cbor_value_map_at_owned(map, key, &value) == nullptr);
+    REQUIRE(tav_cbor_value_text(value, &text, &text_len) == nullptr);
+    CHECK(std::string(text, text_len) == "one");
+    tav_cbor_value_free(key);
+    tav_cbor_value_free(value);
+
+    REQUIRE(tav_cbor_value_map_value_at_owned(map, 1, &value) == nullptr);
+    REQUIRE(tav_cbor_value_int(value, &integer) == nullptr);
+    CHECK(integer == 42);
+    tav_cbor_value_free(value);
+
+    key = nullptr;
+    value = nullptr;
+    REQUIRE(tav_cbor_value_map_entry_at_owned(map, 1, &key, &value) == nullptr);
+    REQUIRE(tav_cbor_value_text(key, &text, &text_len) == nullptr);
+    CHECK(std::string(text, text_len) == "key");
+    REQUIRE(tav_cbor_value_int(value, &integer) == nullptr);
+    CHECK(integer == 42);
+
+    tav_cbor_value_free(root.value);
+    root.value = nullptr;
+    tav_cbor_value_free(map);
+    REQUIRE(tav_cbor_value_text(key, &text, &text_len) == nullptr);
+    CHECK(std::string(text, text_len) == "key");
+    REQUIRE(tav_cbor_value_int(value, &integer) == nullptr);
+    CHECK(integer == 42);
+    tav_cbor_value_free(key);
+    tav_cbor_value_free(value);
+}
+
+TEST_CASE("cbor: failed owned accessors clear their out-parameters") {
+    const uint8_t cbor[] = {0x81, 0x01};
+    CborRoot root;
+    REQUIRE(tav_cbor_value_from_bytes(cbor, sizeof(cbor), &root.value) == nullptr);
+
+    TavCborValue *child = reinterpret_cast<TavCborValue *>(0x1);
+    TavError *error = tav_cbor_value_array_at_owned(root.value, 99, &child);
+    CHECK(tav_error_code(error) == TAV_ERROR_COSE_CBOR);
+    CHECK(child == nullptr);
+    tav_error_free(error);
+
+    child = reinterpret_cast<TavCborValue *>(0x1);
+    error = tav_cbor_value_array_at_owned(nullptr, 0, &child);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(child == nullptr);
+    tav_error_free(error);
+}
+
 TEST_CASE("cbor: failed accessors clear their out-parameters") {
     const uint8_t cbor[] = {0x82, 0x01, 0x42, 0xaa, 0xbb};
     CborRoot root;
@@ -319,6 +416,23 @@ TEST_CASE("cose: embedded COSE_Sign1 verification succeeds") {
         sign1, kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
     CHECK(error == nullptr);
     tav_error_free(error);
+}
+
+TEST_CASE("cose: an owned validated COSE_Sign1 outlives its root") {
+    std::vector<uint8_t> env = build_sign1(/*embedded_payload=*/true);
+    CborRoot root;
+    REQUIRE(tav_cbor_value_from_bytes(env.data(), env.size(), &root.value) == nullptr);
+
+    TavCborValue *sign1 = nullptr;
+    REQUIRE(tav_validate_cose_sign1_owned(root.value, &sign1) == nullptr);
+    tav_cbor_value_free(root.value);
+    root.value = nullptr;
+
+    TavError *error = tav_verify_cose_sign1_embedded(
+        sign1, kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
+    CHECK(error == nullptr);
+    tav_error_free(error);
+    tav_cbor_value_free(sign1);
 }
 
 TEST_CASE("cose: embedded verification rejects a tampered signature") {
