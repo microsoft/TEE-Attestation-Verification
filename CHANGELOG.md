@@ -4,15 +4,10 @@
 
 [1.0.4]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.4
 
-### Changed
+### Fixed
 
-- Change every C ABI CBOR navigation and COSE validation result to an
-  independently owned handle that must be freed. Handles share the immutable
-  parsed document without cloning or reparsing and may outlive their parents.
-- Share immutable CBOR document views across the C and WASM bindings so child
-  navigation does not clone subtrees.
-- Change the existing synchronous and asynchronous CACI policy-verification
-  functions to borrow the verified UVM endorsement rather than take ownership.
+- C FFI `TavCborValue` accessors now return owned rather than borrowed values. (#81)
+- WASM `TavCborValue` accessors no longer copy the raw CBOR object. (#81)
 
 ## [1.0.3]
 
