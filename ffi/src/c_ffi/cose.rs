@@ -33,42 +33,10 @@ pub enum TavCborKind {
 }
 
 /// An opaque, independently owned view into an immutable CBOR document.
-pub struct TavCborValue {
-    view: CborView,
-}
+pub type TavCborValue = CborView;
 
-impl TavCborValue {
-    fn from_native(value: NativeCborValue) -> *mut Self {
-        Self::owned_raw(CborView::new(value))
-    }
-
-    pub(super) fn as_native(&self) -> &NativeCborValue {
-        self.view.as_native()
-    }
-
-    fn owned_raw(view: CborView) -> *mut Self {
-        Box::into_raw(Box::new(Self { view }))
-    }
-
-    fn project<E>(
-        &self,
-        project: impl for<'a> FnOnce(&'a NativeCborValue) -> Result<&'a NativeCborValue, E>,
-    ) -> Result<*mut Self, E> {
-        self.view
-            .project(|value| project(value).map(|node| [node]))
-            .map(|[view]| Self::owned_raw(view))
-    }
-
-    fn project_pair<E>(
-        &self,
-        project: impl for<'a> FnOnce(
-            &'a NativeCborValue,
-        ) -> Result<(&'a NativeCborValue, &'a NativeCborValue), E>,
-    ) -> Result<(*mut Self, *mut Self), E> {
-        self.view
-            .project(|value| project(value).map(|(first, second)| [first, second]))
-            .map(|[first, second]| (Self::owned_raw(first), Self::owned_raw(second)))
-    }
+fn into_raw(view: CborView) -> *mut TavCborValue {
+    Box::into_raw(Box::new(view))
 }
 
 unsafe fn scalar_out_ptr<T: Default>(out: *mut T, name: &str) -> Result<(), TavError> {
@@ -186,7 +154,7 @@ pub unsafe extern "C" fn tav_cbor_value_from_bytes(
         let value = NativeCborValue::from_bytes(bytes)
             .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))?;
         unsafe {
-            *out_value = TavCborValue::from_native(value);
+            *out_value = into_raw(CborView::new(value));
         }
         Ok(())
     })
@@ -345,15 +313,15 @@ pub unsafe extern "C" fn tav_cbor_value_tagged_payload(
     into_result(|| {
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let payload = handle.project(|value| match value {
-            NativeCborValue::Tagged { payload, .. } => Ok(payload.as_ref()),
+        let [payload] = handle.project(|value| match value {
+            NativeCborValue::Tagged { payload, .. } => Ok([payload.as_ref()]),
             _ => Err(TavError::new(
                 TavErrorCode::CoseUnexpectedType,
                 "value must be tagged",
             )),
         })?;
         unsafe {
-            *out_value = payload;
+            *out_value = into_raw(payload);
         }
         Ok(())
     })
@@ -386,13 +354,14 @@ pub unsafe extern "C" fn tav_cbor_value_array_at(
     into_result(|| {
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.project(|value| {
+        let [child] = handle.project(|value| {
             value
                 .array_at(index)
+                .map(|child| [child])
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
-            *out_value = child;
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -407,13 +376,14 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_int(
     into_result(|| {
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.project(|value| {
+        let [child] = handle.project(|value| {
             value
                 .map_at_int(key)
+                .map(|child| [child])
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
-            *out_value = child;
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -430,13 +400,14 @@ pub unsafe extern "C" fn tav_cbor_value_map_at_text(
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let key = unsafe { input_text(key, key_len, "key", true) }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.project(|value| {
+        let [child] = handle.project(|value| {
             value
                 .map_at_str(key)
+                .map(|child| [child])
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
-            *out_value = child;
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -452,13 +423,14 @@ pub unsafe extern "C" fn tav_cbor_value_map_at(
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
         let key = unsafe { cbor_value(key, "key") }?;
-        let child = handle.project(|value| {
+        let [child] = handle.project(|value| {
             value
                 .map_at(key)
+                .map(|child| [child])
                 .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
-            *out_value = child;
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -540,10 +512,11 @@ pub unsafe extern "C" fn tav_cbor_value_map_entry_at(
             ));
         }
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let (key, child) = handle.project_pair(|value| map_entry_at(value, index))?;
+        let [key, child] =
+            handle.project(|value| map_entry_at(value, index).map(|(key, child)| [key, child]))?;
         unsafe {
-            *out_key = key;
-            *out_value = child;
+            *out_key = into_raw(key);
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -558,9 +531,9 @@ pub unsafe extern "C" fn tav_cbor_value_map_key_at(
     into_result(|| {
         unsafe { owned_out_ptr(out_key, "out_key") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let key = handle.project(|value| map_entry_at(value, index).map(|(key, _)| key))?;
+        let [key] = handle.project(|value| map_entry_at(value, index).map(|(key, _)| [key]))?;
         unsafe {
-            *out_key = key;
+            *out_key = into_raw(key);
         }
         Ok(())
     })
@@ -575,9 +548,10 @@ pub unsafe extern "C" fn tav_cbor_value_map_value_at(
     into_result(|| {
         unsafe { owned_out_ptr(out_value, "out_value") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let child = handle.project(|value| map_entry_at(value, index).map(|(_, child)| child))?;
+        let [child] =
+            handle.project(|value| map_entry_at(value, index).map(|(_, child)| [child]))?;
         unsafe {
-            *out_value = child;
+            *out_value = into_raw(child);
         }
         Ok(())
     })
@@ -591,11 +565,13 @@ pub unsafe extern "C" fn tav_validate_cose_sign1(
     into_result(|| {
         unsafe { owned_out_ptr(out_sign1, "out_sign1") }?;
         let handle = unsafe { cbor_handle(value, "value") }?;
-        let sign1 = handle.project(|value| {
-            cose_sign1(value).map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
+        let [sign1] = handle.project(|value| {
+            cose_sign1(value)
+                .map(|sign1| [sign1])
+                .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))
         })?;
         unsafe {
-            *out_sign1 = sign1;
+            *out_sign1 = into_raw(sign1);
         }
         Ok(())
     })
@@ -723,8 +699,9 @@ mod tests {
     #[test]
     fn failed_owned_accessors_clear_out_parameters() {
         unsafe {
-            let root =
-                TavCborValue::from_native(NativeCborValue::Array(vec![NativeCborValue::Int(1)]));
+            let root = into_raw(CborView::new(NativeCborValue::Array(vec![
+                NativeCborValue::Int(1),
+            ])));
             let mut child = ptr::dangling_mut();
             let error = tav_cbor_value_array_at(root, 99, &mut child);
             assert!(!error.is_null());

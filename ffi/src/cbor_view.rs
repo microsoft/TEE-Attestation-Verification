@@ -12,7 +12,7 @@ use std::sync::Arc;
 use cose::CborValue as NativeCborValue;
 
 #[derive(Clone)]
-pub(crate) struct CborView {
+pub struct CborView {
     document: Arc<NativeCborValue>,
     node: *const NativeCborValue,
 }
