@@ -7,6 +7,8 @@
 
 #include <cstring>
 
+using namespace tav_test;
+
 namespace {
 
 // COSE P-256 verification-only vector, mirrored from the in-crate Rust tests.
@@ -75,7 +77,7 @@ TEST_CASE("cbor: array children are independently owned views") {
 
     CborHandle child;
     REQUIRE(tav_cbor_value_array_at(root.value, 0, child.out()) == nullptr);
-    CHECK(tav_cbor_value_kind(child.value) == TAV_CBOR_KIND_INT);
+    CHECK(cbor_kind(child.value) == TAV_CBOR_KIND_INT);
     int64_t as_int = 0;
     REQUIRE(tav_cbor_value_int(child.value, &as_int) == nullptr);
     CHECK(as_int == 1);
@@ -137,6 +139,18 @@ TEST_CASE("cbor: failed accessors clear their out-parameters") {
     CHECK(scalar == 0);
     tav_error_free(error);
 
+    // Null handle: reading the kind reports an error rather than dereferencing.
+    TavCborKind kind = TAV_CBOR_KIND_TAGGED;
+    error = tav_cbor_value_kind(nullptr, &kind);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(kind == TAV_CBOR_KIND_INVALID);
+    tav_error_free(error);
+
+    // Null out-parameter is rejected too.
+    error = tav_cbor_value_kind(root.value, nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    tav_error_free(error);
+
     // Out-of-range map entry on a non-map clears both handles.
     TavCborValue *key = reinterpret_cast<TavCborValue *>(0x1);
     TavCborValue *value = reinterpret_cast<TavCborValue *>(0x1);
@@ -177,7 +191,7 @@ TEST_CASE("cbor: map lookup and presence checks") {
     CborHandle bstr_key;
     REQUIRE(tav_cbor_value_map_entry_at(root.value, 2, bstr_key.out(), value.out()) == nullptr);
     REQUIRE(tav_cbor_value_map_at(root.value, bstr_key.value, value.out()) == nullptr);
-    CHECK(tav_cbor_value_kind(value.value) == TAV_CBOR_KIND_SIMPLE);
+    CHECK(cbor_kind(value.value) == TAV_CBOR_KIND_SIMPLE);
 
     // A freshly parsed equivalent key still matches by structural equality.
     const uint8_t key_cbor[] = {0x41, 0xaa};
@@ -289,7 +303,7 @@ TEST_CASE("cbor: simple value extraction") {
     const uint8_t cbor[] = {0xf5};
     CborHandle root;
     REQUIRE(tav_cbor_value_from_bytes(cbor, sizeof(cbor), &root.value) == nullptr);
-    CHECK(tav_cbor_value_kind(root.value) == TAV_CBOR_KIND_SIMPLE);
+    CHECK(cbor_kind(root.value) == TAV_CBOR_KIND_SIMPLE);
 
     uint8_t simple = 0;
     REQUIRE(tav_cbor_value_simple(root.value, &simple) == nullptr);
@@ -311,7 +325,7 @@ TEST_CASE("cbor: tag number and tagged payload") {
     std::vector<uint8_t> env = build_sign1(/*embedded_payload=*/true);
     CborHandle root;
     REQUIRE(tav_cbor_value_from_bytes(env.data(), env.size(), &root.value) == nullptr);
-    CHECK(tav_cbor_value_kind(root.value) == TAV_CBOR_KIND_TAGGED);
+    CHECK(cbor_kind(root.value) == TAV_CBOR_KIND_TAGGED);
 
     uint64_t tag = 0;
     REQUIRE(tav_cbor_value_tag(root.value, &tag) == nullptr);
@@ -320,7 +334,7 @@ TEST_CASE("cbor: tag number and tagged payload") {
     CborHandle payload;
     REQUIRE(tav_cbor_value_tagged_payload(root.value, payload.out()) == nullptr);
     REQUIRE(payload.value != nullptr);
-    CHECK(tav_cbor_value_kind(payload.value) == TAV_CBOR_KIND_ARRAY);
+    CHECK(cbor_kind(payload.value) == TAV_CBOR_KIND_ARRAY);
     size_t payload_len = 0;
     REQUIRE(tav_cbor_value_len(payload.value, &payload_len) == nullptr);
     CHECK(payload_len == 4);
@@ -347,7 +361,7 @@ TEST_CASE("cose: embedded COSE_Sign1 verification succeeds") {
     CborHandle sign1;
     REQUIRE(tav_validate_cose_sign1(root.value, sign1.out()) == nullptr);
     REQUIRE(sign1.value != nullptr);
-    CHECK(tav_cbor_value_kind(sign1.value) == TAV_CBOR_KIND_ARRAY);
+    CHECK(cbor_kind(sign1.value) == TAV_CBOR_KIND_ARRAY);
 
     TavError *error = tav_verify_cose_sign1_embedded(
         sign1.value, kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);

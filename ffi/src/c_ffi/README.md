@@ -4,14 +4,16 @@ Native C ABI for SNP, COSE, and CACI verification. Headers live under
 `ffi/include/tav/`; each header's usage summary documents its own surface in
 more detail (`snp.h`, `cose.h`, `caci.h`, `utils.h`).
 
-All public functions return `NULL` on success or an owned `TavError*` on
-failure. Inspect failures with `tav_error_code`/`tav_error_message`, then free
-them with `tav_error_free`. Owned handle out-parameters are reset to `NULL`
+All public functions except the null-safe `tav_*_free` destructors return `NULL`
+on success or an owned `TavError*` on failure. Inspect failures with
+`tav_error_code`/`tav_error_message`, then free them with `tav_error_free`.
+Handle out-parameters are reset to `NULL`, and scalar out-parameters to zero,
 before any fallible work and set only on success.
 
-If an entry point's implementation panics (e.g. on a bug triggered by
-malformed input), the panic is caught at the FFI boundary and reported as a
-`TAV_ERROR_PANIC` error instead of aborting the host process.
+Passing a null handle is reported as `TAV_ERROR_INVALID_ARGUMENT` rather than
+dereferenced. If an entry point's implementation panics (e.g. on a bug
+triggered by malformed input), the panic is caught at the FFI boundary and
+reported as a `TAV_ERROR_PANIC` error instead of aborting the host process.
 
 ## Building and linking
 
@@ -39,7 +41,8 @@ tav_cbor_value_from_bytes(cbor, cbor_len, &root);
 tav_cbor_value_array_at(root, 0, &child);
 
 tav_cbor_value_free(root); /* child remains valid */
-TavCborKind kind = tav_cbor_value_kind(child);
+TavCborKind kind = TAV_CBOR_KIND_INVALID;
+tav_cbor_value_kind(child, &kind);
 tav_cbor_value_free(child);
 ```
 

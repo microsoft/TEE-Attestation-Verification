@@ -30,6 +30,14 @@ namespace tav_test {
 // Mirrors c_ffi::utils::MAX_INPUT_LEN (1 GiB); not exported by the headers.
 constexpr size_t kMaxInputLen = 1024ull * 1024ull * 1024ull;
 
+// Reads a CBOR handle's kind, asserting the call succeeds, so that positive
+// assertions stay readable.
+inline TavCborKind cbor_kind(const TavCborValue *value) {
+    TavCborKind kind = TAV_CBOR_KIND_INVALID;
+    REQUIRE(tav_cbor_value_kind(value, &kind) == nullptr);
+    return kind;
+}
+
 inline std::vector<uint8_t> read_file(const std::string &relative) {
     std::string path = std::string(TAV_REPO_ROOT) + "/" + relative;
     FILE *file = std::fopen(path.c_str(), "rb");

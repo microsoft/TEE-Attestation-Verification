@@ -21,8 +21,12 @@ use crypto::{CryptoBackend, KeyBackend};
 use cose::{cose_sign1, signature_key_algorithm_for_cose_alg, CborValue as NativeCborValue};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TavCborKind {
+    /// Never returned on success; the value an out-parameter is reset to
+    /// before fallible work.
+    #[default]
+    Invalid = 0,
     Int = 1,
     Simple = 2,
     Bytes = 3,
@@ -179,8 +183,18 @@ pub unsafe extern "C" fn tav_cbor_value_to_bytes(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tav_cbor_value_kind(value: *const TavCborValue) -> TavCborKind {
-    kind(unsafe { (*value).as_native() })
+pub unsafe extern "C" fn tav_cbor_value_kind(
+    value: *const TavCborValue,
+    out: *mut TavCborKind,
+) -> *mut TavError {
+    into_result(|| {
+        unsafe { scalar_out_ptr(out, "out") }?;
+        let value = unsafe { cbor_value(value, "value") }?;
+        unsafe {
+            *out = kind(value);
+        }
+        Ok(())
+    })
 }
 
 #[no_mangle]
@@ -649,6 +663,7 @@ mod tests {
         let header = include_str!("../../include/tav/cose.h");
 
         for (name, value) in [
+            ("TAV_CBOR_KIND_INVALID", TavCborKind::Invalid as i32),
             ("TAV_CBOR_KIND_INT", TavCborKind::Int as i32),
             ("TAV_CBOR_KIND_SIMPLE", TavCborKind::Simple as i32),
             ("TAV_CBOR_KIND_BYTES", TavCborKind::Bytes as i32),

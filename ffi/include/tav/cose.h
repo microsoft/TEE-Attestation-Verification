@@ -38,6 +38,9 @@ extern "C" {
  */
 
 typedef enum TavCborKind {
+    /* Never returned on success; the value an out-parameter is reset to
+     * before fallible work. */
+    TAV_CBOR_KIND_INVALID = 0,
     TAV_CBOR_KIND_INT = 1,
     TAV_CBOR_KIND_SIMPLE = 2,
     TAV_CBOR_KIND_BYTES = 3,
@@ -92,8 +95,10 @@ TAV_COSE_API TavError *tav_cbor_value_to_bytes(
     const TavCborValue *value,
     TavByteBuffer **out_bytes);
 
-/* value must be a valid, non-NULL TavCborValue handle. */
-TAV_COSE_API TavCborKind tav_cbor_value_kind(const TavCborValue *value);
+/* Writes the CBOR major type of value to out_kind. */
+TAV_COSE_API TavError *tav_cbor_value_kind(
+    const TavCborValue *value,
+    TavCborKind *out_kind);
 
 TAV_COSE_API TavError *tav_cbor_value_int(
     const TavCborValue *value,
