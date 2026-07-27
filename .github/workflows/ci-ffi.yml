@@ -16,7 +16,7 @@ permissions:
 jobs:
   native:
     name: Native ${{ matrix.backend.name }} backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,7 @@ jobs:
 
   ffi-wasm-api:
     name: FFI WASM API consumer tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,7 +69,7 @@ jobs:
 
   ffi-c-api:
     name: FFI C API consumer tests (${{ matrix.backend.name }}, ${{ matrix.link }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
