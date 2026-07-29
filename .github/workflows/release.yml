@@ -26,6 +26,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
       - name: Validate tag and version
         id: prepare
         shell: bash
@@ -42,14 +46,15 @@ jobs:
           commit_sha=$(git rev-parse "refs/tags/${candidate_tag}^{commit}")
           normalized_version="${candidate_tag#tav-}"
 
-          for manifest in attestation/Cargo.toml caci/Cargo.toml cose/Cargo.toml crypto/Cargo.toml ffi/Cargo.toml; do
-            manifest_version=$(git show "${commit_sha}:${manifest}" | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["package"]["version"])')
-
-            if [[ "${manifest_version}" != "${normalized_version}" ]]; then
-              echo "Tag ${candidate_tag} does not match ${manifest} version ${manifest_version}" >&2
-              exit 1
-            fi
-          done
+          package_version=$(
+            python3 scripts/check-version-sync.py \
+              --root-path "${GITHUB_WORKSPACE}" \
+              --print-version
+          )
+          if [[ "${package_version}" != "${normalized_version}" ]]; then
+            echo "Tag ${candidate_tag} does not match package version ${package_version}" >&2
+            exit 1
+          fi
 
           echo "tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${normalized_version}" >> "${GITHUB_OUTPUT}"

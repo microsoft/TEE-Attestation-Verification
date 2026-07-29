@@ -68,7 +68,7 @@ def dependency_sections(data: dict[str, Any]) -> Iterator[tuple[str, dict[str, A
             yield f"target.{target_name}.{section}", target.get(section, {})
 
 
-def check_version_sync(root: pathlib.Path) -> None:
+def check_version_sync(root: pathlib.Path) -> str:
     changelog_version = latest_changelog_version(root)
 
     # First check that all packages define the same version
@@ -111,7 +111,7 @@ def check_version_sync(root: pathlib.Path) -> None:
                         f"{manifest}: {section}.{alias} points at internal package {package_name} "
                         f"but version is {actual_version!r}; expected {changelog_version!r}"
                     )
-    print(f"All Cargo package versions and internal dependency versions match {changelog_version}")
+    return changelog_version
 
 
 def main() -> int:
@@ -123,14 +123,27 @@ def main() -> int:
         help = "Path to the root of the repository (default: current working directory)",
         type = pathlib.Path,
     )
+    argparser.add_argument(
+        "--print-version",
+        action="store_true",
+        help="Print the synchronized package version",
+    )
 
     args = argparser.parse_args()
 
     try:
-        check_version_sync(args.root_path)
+        version = check_version_sync(args.root_path)
     except VersionSyncError as error:
         print(error, file=sys.stderr)
         return 1
+
+    if args.print_version:
+        print(version)
+    else:
+        print(
+            "All Cargo package versions and internal dependency versions "
+            f"match {version}"
+        )
     return 0
 
 
