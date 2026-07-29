@@ -648,7 +648,7 @@ mod tests {
     fn c_header_enums_match_rust_enums() {
         let header = include_str!("../../include/tav/cose.h");
 
-        for (name, value) in [
+        let expected = [
             ("TAV_CBOR_KIND_INT", TavCborKind::Int as i32),
             ("TAV_CBOR_KIND_SIMPLE", TavCborKind::Simple as i32),
             ("TAV_CBOR_KIND_BYTES", TavCborKind::Bytes as i32),
@@ -656,6 +656,12 @@ mod tests {
             ("TAV_CBOR_KIND_ARRAY", TavCborKind::Array as i32),
             ("TAV_CBOR_KIND_MAP", TavCborKind::Map as i32),
             ("TAV_CBOR_KIND_TAGGED", TavCborKind::Tagged as i32),
+            ("TAV_COSE_ALG_ES256", cose::COSE_ALG_ES256 as i32),
+            ("TAV_COSE_ALG_ES384", cose::COSE_ALG_ES384 as i32),
+            ("TAV_COSE_ALG_ES512", cose::COSE_ALG_ES512 as i32),
+            ("TAV_COSE_ALG_PS256", cose::COSE_ALG_PS256 as i32),
+            ("TAV_COSE_ALG_PS384", cose::COSE_ALG_PS384 as i32),
+            ("TAV_COSE_ALG_PS512", cose::COSE_ALG_PS512 as i32),
             ("TAV_COSE_TAG_SIGN1", cose::COSE_SIGN1_TAG as i32),
             (
                 "TAV_COSE_SIGN1_PROTECTED",
@@ -687,24 +693,41 @@ mod tests {
             ("TAV_CWT_CLAIMS_ISSUER", cose::CWT_CLAIMS_ISSUER as i32),
             ("TAV_CWT_CLAIMS_SUBJECT", cose::CWT_CLAIMS_SUBJECT as i32),
             ("TAV_CWT_CLAIMS_IAT", cose::CWT_CLAIMS_IAT as i32),
-        ] {
+        ];
+
+        for (name, value) in expected {
             assert_eq!(
                 c_header_enum_value(header, name),
                 Some(value),
                 "{name} in ffi/include/tav/cose.h must match Rust"
             );
         }
+
+        let header_names: std::collections::BTreeSet<&str> = header
+            .lines()
+            .filter_map(|line| {
+                let (name, _) = line.trim().split_once('=')?;
+                let name = name.trim();
+                (name.starts_with("TAV_CBOR_KIND_")
+                    || name.starts_with("TAV_COSE_")
+                    || name.starts_with("TAV_CWT_"))
+                .then_some(name)
+            })
+            .collect();
+        let expected_names: std::collections::BTreeSet<&str> =
+            expected.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            header_names, expected_names,
+            "ffi/include/tav/cose.h ABI constants must exactly match the checked Rust set"
+        );
     }
 
     fn c_header_enum_value(header: &str, name: &str) -> Option<i32> {
-        let line = header
-            .lines()
-            .find(|line| line.trim_start().starts_with(name))?;
-        line.split('=')
-            .nth(1)?
-            .trim()
-            .trim_end_matches(',')
-            .parse()
-            .ok()
+        header.lines().find_map(|line| {
+            let (lhs, rhs) = line.split_once('=')?;
+            (lhs.trim() == name)
+                .then(|| rhs.trim().trim_end_matches(',').parse().ok())
+                .flatten()
+        })
     }
 }
