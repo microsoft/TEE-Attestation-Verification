@@ -1,0 +1,119 @@
+name: Publish NuGet
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tav-* release tag to validate without publishing
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish NuGet package
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'tav-')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Resolve release
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLISHED_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            release_tag="${PUBLISHED_TAG}"
+          else
+            release_tag="${REQUESTED_TAG}"
+          fi
+
+          if [[ ! "${release_tag}" =~ ^tav-[0-9A-Za-z][0-9A-Za-z.-]*$ ]]; then
+            echo "Release tag must use a filename-safe tav-<version> format, got: ${release_tag}" >&2
+            exit 1
+          fi
+
+          version="${release_tag#tav-}"
+          package="TeeAttestationVerification.${version}.nupkg"
+
+          echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "package=${package}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: gh release download "${RELEASE_TAG}" --dir dist
+
+      - name: Verify release assets
+        env:
+          PACKAGE: ${{ steps.release.outputs.package }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f dist/SHA256SUMS ]]; then
+            echo "Release does not contain SHA256SUMS" >&2
+            exit 1
+          fi
+
+          (
+            cd dist
+            sha256sum --check --strict SHA256SUMS
+          )
+
+          if [[ ! -f "dist/${PACKAGE}" ]]; then
+            echo "Release does not contain expected package: ${PACKAGE}" >&2
+            exit 1
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "8.0.423"
+
+      - name: Validate NuGet username
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        shell: bash
+        run: |
+          if [[ -z "${NUGET_USER}" ]]; then
+            echo "Repository variable NUGET_USER is not configured" >&2
+            exit 1
+          fi
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Dry run complete
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PACKAGE: ${{ steps.release.outputs.package }}
+        run: echo "Validated ${PACKAGE} and NuGet trusted publishing; package was not published"
+
+      - name: Publish NuGet package
+        if: github.event_name == 'release'
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+          PACKAGE: ${{ steps.release.outputs.package }}
+        run: >-
+          dotnet nuget push "dist/${PACKAGE}"
+          --api-key "${NUGET_API_KEY}"
+          --source https://api.nuget.org/v3/index.json
