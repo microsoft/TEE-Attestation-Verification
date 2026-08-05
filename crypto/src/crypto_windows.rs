@@ -309,7 +309,6 @@ impl CryptoBackend for Crypto {
         root_store.add_certificate(trusted_cert, "trusted certificate")?;
 
         let intermediate_store = CertStore::memory("restricted intermediate")?;
-        intermediate_store.add_certificate(trusted_cert, "trusted certificate discovery copy")?;
         for (index, cert) in untrusted_chain.iter().enumerate() {
             intermediate_store
                 .add_certificate(cert, &format!("untrusted intermediate certificate {index}"))?;
@@ -317,7 +316,6 @@ impl CryptoBackend for Crypto {
 
         let mut engine_config = CERT_CHAIN_ENGINE_CONFIG {
             cbSize: checked_struct_size::<CERT_CHAIN_ENGINE_CONFIG>()?,
-            hRestrictedOther: intermediate_store.0,
             hExclusiveRoot: root_store.0,
             dwExclusiveFlags: CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
             ..Default::default()
@@ -336,8 +334,18 @@ impl CryptoBackend for Crypto {
             &leaf_context,
             &mut chain_para,
             time_ptr,
-            CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL | CERT_CHAIN_DISABLE_AIA,
+            &intermediate_store,
+            CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL
+                | CERT_CHAIN_DISABLE_AIA
+                | CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE,
         )?;
+        let leaf_der = leaf.to_der()?;
+        let trusted_der = trusted_cert.to_der()?;
+        let untrusted_der = untrusted_chain
+            .iter()
+            .map(|cert| cert.to_der())
+            .collect::<Result<Vec<_>>>()?;
+        chain.validate_path(&leaf_der, &trusted_der, &untrusted_der)?;
         let chain_error_status = chain.error_status();
         if chain_error_status != 0 {
             return Err(format!(
@@ -902,6 +910,7 @@ impl ChainContext {
         leaf: &CertContext,
         parameters: &mut CERT_CHAIN_PARA,
         time: Option<*const FILETIME>,
+        additional_store: &CertStore,
         flags: u32,
     ) -> Result<Self> {
         let mut context = std::ptr::null_mut();
@@ -910,7 +919,7 @@ impl ChainContext {
                 Some(engine.0),
                 leaf.0,
                 time,
-                None,
+                Some(additional_store.0),
                 parameters,
                 flags,
                 None,
@@ -922,6 +931,116 @@ impl ChainContext {
             return Err("CertGetCertificateChain returned a null chain context".into());
         }
         Ok(Self(context))
+    }
+
+    fn validate_path(
+        &self,
+        expected_leaf: &[u8],
+        expected_trusted: &[u8],
+        allowed_intermediates: &[Vec<u8>],
+    ) -> Result<()> {
+        let context = unsafe { self.0.as_ref() }
+            .ok_or("Certificate chain context unexpectedly became null")?;
+        if context.cbSize < checked_struct_size::<CERT_CHAIN_CONTEXT>()? {
+            return Err(format!(
+                "Certificate chain context has invalid size {}",
+                context.cbSize
+            )
+            .into());
+        }
+        if context.cChain != 1 {
+            return Err(format!(
+                "Certificate chain context contains {} simple chains; expected exactly one",
+                context.cChain
+            )
+            .into());
+        }
+        if context.rgpChain.is_null() {
+            return Err("Certificate chain context has a null simple-chain array".into());
+        }
+
+        let simple_chain_ptr = unsafe { *context.rgpChain };
+        let simple_chain = unsafe { simple_chain_ptr.as_ref() }
+            .ok_or("Certificate chain context contains a null simple chain")?;
+        if simple_chain.cbSize < checked_struct_size::<CERT_SIMPLE_CHAIN>()? {
+            return Err(format!(
+                "Certificate simple chain has invalid size {}",
+                simple_chain.cbSize
+            )
+            .into());
+        }
+
+        let element_count = usize::try_from(simple_chain.cElement)
+            .map_err(|_| "Certificate chain element count does not fit usize")?;
+        if element_count == 0 {
+            return Err("Certificate simple chain contains no elements".into());
+        }
+        let max_elements = allowed_intermediates
+            .len()
+            .checked_add(2)
+            .ok_or("Allowed certificate path length overflow")?;
+        if element_count > max_elements {
+            return Err(format!(
+                "Certificate simple chain contains {element_count} elements, exceeding the caller-supplied path limit {max_elements}"
+            )
+            .into());
+        }
+        if simple_chain.rgpElement.is_null() {
+            return Err("Certificate simple chain has a null element array".into());
+        }
+
+        for index in 0..element_count {
+            let element_ptr = unsafe { *simple_chain.rgpElement.add(index) };
+            let element = unsafe { element_ptr.as_ref() }
+                .ok_or_else(|| format!("Certificate chain element {index} is null"))?;
+            if element.cbSize < checked_struct_size::<CERT_CHAIN_ELEMENT>()? {
+                return Err(format!(
+                    "Certificate chain element {index} has invalid size {}",
+                    element.cbSize
+                )
+                .into());
+            }
+
+            let cert_context = unsafe { element.pCertContext.as_ref() }
+                .ok_or_else(|| format!("Certificate chain element {index} has a null context"))?;
+            let encoded_len = usize::try_from(cert_context.cbCertEncoded).map_err(|_| {
+                format!("Certificate chain element {index} length does not fit usize")
+            })?;
+            if encoded_len == 0 || cert_context.pbCertEncoded.is_null() {
+                return Err(format!(
+                    "Certificate chain element {index} has invalid encoded certificate bytes"
+                )
+                .into());
+            }
+            let encoded =
+                unsafe { std::slice::from_raw_parts(cert_context.pbCertEncoded, encoded_len) };
+
+            if index == 0 && encoded != expected_leaf {
+                return Err(
+                    "Certificate chain begins with a certificate other than the supplied leaf"
+                        .into(),
+                );
+            }
+            if index + 1 == element_count && encoded != expected_trusted {
+                return Err(
+                    "Certificate chain terminates at a certificate other than the supplied trust anchor"
+                        .into(),
+                );
+            }
+            if index > 0
+                && index + 1 < element_count
+                && !allowed_intermediates
+                    .iter()
+                    .any(|allowed| allowed.as_slice() == encoded)
+            {
+                return Err(format!(
+                    "Certificate chain element {index} was not supplied by the caller"
+                )
+                .into());
+            }
+        }
+
+        Ok(())
     }
 
     fn error_status(&self) -> u32 {
