@@ -53,7 +53,7 @@ jobs:
         run: cargo build --workspace --no-default-features --features crypto_windows
 
       - name: Test with Windows CNG backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows -- --nocapture
+        run: cargo test --workspace --no-default-features --features crypto_windows -- --nocapture
 
   wasm:
     name: WASM ${{ matrix.backend.name }} backend

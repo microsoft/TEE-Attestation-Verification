@@ -276,6 +276,13 @@ fn extension_lookup_rejects_malformed_oid() {
 }
 
 #[cfg(sync_crypto)]
+#[test]
+fn keys_are_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<crate::Key>();
+}
+
+#[cfg(sync_crypto)]
 mod sync_tests {
     use super::*;
     use crate::CryptoBackend;
@@ -453,6 +460,59 @@ mod async_tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn ecdsa_der_signatures_verify_for_all_supported_curves() {
+        for vector in ec_signature_vectors() {
+            let algorithm = SignatureKeyAlgorithm::Ec(vector.algorithm);
+            let key = <Key as AsyncKeyBackend>::from_spki_der(vector.spki_der, algorithm)
+                .await
+                .expect("ECDSA public key should parse");
+            let signature =
+                <Signature as SignatureBackend>::from_bytes(&vector.der_signature(), algorithm)
+                    .expect("DER ECDSA signature should parse");
+
+            <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, EC_TEST_MESSAGE)
+                .await
+                .expect("DER ECDSA signature should verify");
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg(crypto_backend = "crypto_windows")]
+    async fn malformed_der_ecdsa_signatures_are_rejected() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        for malformed in [
+            &[0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00][..],
+            &[0x30, 0x06, 0x02, 0x01, 0x80, 0x02, 0x01, 0x01][..],
+            &[0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01][..],
+        ] {
+            assert!(
+                <Signature as SignatureBackend>::from_bytes(malformed, algorithm).is_err(),
+                "Malformed DER ECDSA signature should fail"
+            );
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[cfg(crypto_backend = "crypto_windows")]
+    async fn spki_der_rejects_trailing_data() {
+        let mut malformed = P256_SPKI_DER.to_vec();
+        malformed.push(0);
+
+        assert!(
+            <Key as AsyncKeyBackend>::from_spki_der(
+                &malformed,
+                SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+            )
+            .await
+            .is_err(),
+            "SPKI DER with trailing data should fail"
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     async fn rsa_pss_signatures_verify_for_all_supported_hashes() {
         for vector in rsa_pss_signature_vectors() {
             let algorithm = SignatureKeyAlgorithm::RsaPss(vector.algorithm);
@@ -603,6 +663,39 @@ mod async_tests {
         fn components(&self) -> (&'static [u8], &'static [u8]) {
             self.signature.split_at(self.algorithm.scalar_byte_len())
         }
+
+        fn der_signature(&self) -> Vec<u8> {
+            let (r, s) = self.components();
+            let r = der_positive_integer(r);
+            let s = der_positive_integer(s);
+            let sequence_len = r.len() + s.len();
+            let mut der = Vec::with_capacity(sequence_len + 3);
+            der.push(0x30);
+            if sequence_len < 128 {
+                der.push(sequence_len as u8);
+            } else {
+                der.extend_from_slice(&[0x81, sequence_len as u8]);
+            }
+            der.extend_from_slice(&r);
+            der.extend_from_slice(&s);
+            der
+        }
+    }
+
+    fn der_positive_integer(fixed: &[u8]) -> Vec<u8> {
+        let value = fixed
+            .iter()
+            .position(|byte| *byte != 0)
+            .map(|start| &fixed[start..])
+            .unwrap_or(&[0]);
+        let needs_sign_padding = value[0] & 0x80 != 0;
+        let mut der = Vec::with_capacity(value.len() + 3);
+        der.extend_from_slice(&[0x02, (value.len() + usize::from(needs_sign_padding)) as u8]);
+        if needs_sign_padding {
+            der.push(0);
+        }
+        der.extend_from_slice(value);
+        der
     }
 
     fn ec_signature_vectors() -> [EcSignatureVector; 3] {

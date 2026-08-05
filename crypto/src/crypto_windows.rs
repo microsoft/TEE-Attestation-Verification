@@ -10,6 +10,8 @@ use std::time::Duration;
 use windows::core::{Error as WindowsError, PCWSTR};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Security::Cryptography::*;
+use x509_cert::der::Decode;
+use x509_cert::spki::SubjectPublicKeyInfoOwned;
 
 use super::x509_certificate::Certificate;
 use super::{
@@ -21,7 +23,7 @@ use super::{
 pub struct Crypto;
 
 pub struct Key {
-    handle: KeyHandle,
+    spki_der: Vec<u8>,
     algorithm: SignatureKeyAlgorithm,
 }
 
@@ -32,72 +34,16 @@ pub struct Signature {
 
 impl KeyBackend for Key {
     fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
-        checked_u32_len("SPKI DER", spki_der.len())?;
-
-        let mut decoded_size = 0u32;
-        unsafe {
-            CryptDecodeObjectEx(
-                X509_ASN_ENCODING,
-                X509_PUBLIC_KEY_INFO,
-                spki_der,
-                0,
-                None,
-                None,
-                &mut decoded_size,
-            )
-        }
-        .map_err(|e| operation_error("CryptDecodeObjectEx SPKI size query", e))?;
-        if decoded_size < checked_struct_size::<CERT_PUBLIC_KEY_INFO>()? {
-            return Err("CryptDecodeObjectEx returned an undersized CERT_PUBLIC_KEY_INFO".into());
-        }
-
-        let decoded_size_usize = decoded_size as usize;
-        let word_size = size_of::<usize>();
-        let word_count = decoded_size_usize
-            .checked_add(word_size - 1)
-            .ok_or("Decoded SPKI size overflow")?
-            / word_size;
-        let mut decoded = vec![0usize; word_count];
-        let decoded_capacity = word_count
-            .checked_mul(word_size)
-            .ok_or("Decoded SPKI allocation size overflow")?;
-        debug_assert!(align_of::<usize>() >= align_of::<CERT_PUBLIC_KEY_INFO>());
-
-        let mut actual_size = decoded_size;
-        unsafe {
-            CryptDecodeObjectEx(
-                X509_ASN_ENCODING,
-                X509_PUBLIC_KEY_INFO,
-                spki_der,
-                0,
-                None,
-                Some(decoded.as_mut_ptr().cast::<c_void>()),
-                &mut actual_size,
-            )
-        }
-        .map_err(|e| operation_error("CryptDecodeObjectEx SPKI decode", e))?;
-        if actual_size as usize > decoded_capacity
-            || actual_size < checked_struct_size::<CERT_PUBLIC_KEY_INFO>()?
-        {
-            return Err("CryptDecodeObjectEx returned an invalid decoded SPKI size".into());
-        }
-
-        let public_key_info = decoded.as_ptr().cast::<CERT_PUBLIC_KEY_INFO>();
-        let mut handle = BCRYPT_KEY_HANDLE::default();
-        unsafe {
-            CryptImportPublicKeyInfoEx2(
-                X509_ASN_ENCODING,
-                public_key_info,
-                CRYPT_IMPORT_PUBLIC_KEY_FLAGS::default(),
-                None,
-                &mut handle,
-            )
-        }
-        .map_err(|e| operation_error("CryptImportPublicKeyInfoEx2", e))?;
-        let handle = KeyHandle::new(handle)?;
+        SubjectPublicKeyInfoOwned::from_der(spki_der)
+            .map_err(|e| format!("Failed to parse SPKI as strict DER: {e}"))?;
+        let handle = import_spki(spki_der)?;
         validate_imported_key(&handle, algorithm)?;
+        drop(handle);
 
-        Ok(Self { handle, algorithm })
+        Ok(Self {
+            spki_der: spki_der.to_vec(),
+            algorithm,
+        })
     }
 }
 
@@ -251,6 +197,8 @@ impl CryptoBackend for Crypto {
         }
 
         checked_u32_len("signature", signature.bytes.len())?;
+        let handle = import_spki(&key.spki_der)?;
+        validate_imported_key(&handle, key.algorithm)?;
         let digest = Self::digest(signature.algorithm.digest(), signed_bytes)?;
         let digest_id = hash_algorithm_id(signature.algorithm.digest());
         let operation = signature_verification_name(signature.algorithm);
@@ -258,7 +206,7 @@ impl CryptoBackend for Crypto {
         let status = match signature.algorithm {
             SignatureKeyAlgorithm::Ec(_) => unsafe {
                 BCryptVerifySignature(
-                    key.handle.0,
+                    handle.0,
                     None,
                     &digest,
                     &signature.bytes,
@@ -272,7 +220,7 @@ impl CryptoBackend for Crypto {
                 };
                 unsafe {
                     BCryptVerifySignature(
-                        key.handle.0,
+                        handle.0,
                         Some((&padding as *const BCRYPT_PSS_PADDING_INFO).cast::<c_void>()),
                         &digest,
                         &signature.bytes,
@@ -286,7 +234,7 @@ impl CryptoBackend for Crypto {
                 };
                 unsafe {
                     BCryptVerifySignature(
-                        key.handle.0,
+                        handle.0,
                         Some((&padding as *const BCRYPT_PKCS1_PADDING_INFO).cast::<c_void>()),
                         &digest,
                         &signature.bytes,
@@ -392,6 +340,72 @@ impl Key {
     pub fn algorithm(&self) -> SignatureKeyAlgorithm {
         self.algorithm
     }
+}
+
+fn import_spki(spki_der: &[u8]) -> Result<KeyHandle> {
+    checked_u32_len("SPKI DER", spki_der.len())?;
+
+    let mut decoded_size = 0u32;
+    unsafe {
+        CryptDecodeObjectEx(
+            X509_ASN_ENCODING,
+            X509_PUBLIC_KEY_INFO,
+            spki_der,
+            0,
+            None,
+            None,
+            &mut decoded_size,
+        )
+    }
+    .map_err(|e| operation_error("CryptDecodeObjectEx SPKI size query", e))?;
+    if decoded_size < checked_struct_size::<CERT_PUBLIC_KEY_INFO>()? {
+        return Err("CryptDecodeObjectEx returned an undersized CERT_PUBLIC_KEY_INFO".into());
+    }
+
+    let decoded_size_usize = decoded_size as usize;
+    let word_size = size_of::<usize>();
+    let word_count = decoded_size_usize
+        .checked_add(word_size - 1)
+        .ok_or("Decoded SPKI size overflow")?
+        / word_size;
+    let mut decoded = vec![0usize; word_count];
+    let decoded_capacity = word_count
+        .checked_mul(word_size)
+        .ok_or("Decoded SPKI allocation size overflow")?;
+    debug_assert!(align_of::<usize>() >= align_of::<CERT_PUBLIC_KEY_INFO>());
+
+    let mut actual_size = decoded_size;
+    unsafe {
+        CryptDecodeObjectEx(
+            X509_ASN_ENCODING,
+            X509_PUBLIC_KEY_INFO,
+            spki_der,
+            0,
+            None,
+            Some(decoded.as_mut_ptr().cast::<c_void>()),
+            &mut actual_size,
+        )
+    }
+    .map_err(|e| operation_error("CryptDecodeObjectEx SPKI decode", e))?;
+    if actual_size as usize > decoded_capacity
+        || actual_size < checked_struct_size::<CERT_PUBLIC_KEY_INFO>()?
+    {
+        return Err("CryptDecodeObjectEx returned an invalid decoded SPKI size".into());
+    }
+
+    let public_key_info = decoded.as_ptr().cast::<CERT_PUBLIC_KEY_INFO>();
+    let mut handle = BCRYPT_KEY_HANDLE::default();
+    unsafe {
+        CryptImportPublicKeyInfoEx2(
+            X509_ASN_ENCODING,
+            public_key_info,
+            CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG,
+            None,
+            &mut handle,
+        )
+    }
+    .map_err(|e| operation_error("CryptImportPublicKeyInfoEx2 signing key import", e))?;
+    KeyHandle::new(handle)
 }
 
 fn validate_imported_key(handle: &KeyHandle, requested: SignatureKeyAlgorithm) -> Result<()> {
