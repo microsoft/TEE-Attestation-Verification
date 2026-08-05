@@ -7,6 +7,7 @@
 //! - `crypto_openssl` - OpenSSL-based (not available on WASM)
 //! - `crypto_pure_rust` - Pure Rust
 //! - `crypto_webcrypto` - WebCrypto-based async verification for WASM
+//! - `crypto_windows` - Windows CNG and Crypt32
 
 use std::time::Duration;
 
@@ -217,9 +218,12 @@ pub(crate) mod crypto_openssl;
 pub(crate) mod crypto_pure_rust;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
+#[cfg(crypto_backend = "crypto_windows")]
+pub(crate) mod crypto_windows;
 #[cfg(any(
     crypto_backend = "crypto_pure_rust",
-    crypto_backend = "crypto_webcrypto"
+    crypto_backend = "crypto_webcrypto",
+    crypto_backend = "crypto_windows"
 ))]
 mod x509_certificate;
 
@@ -229,6 +233,8 @@ pub type Crypto = crypto_openssl::Crypto;
 pub type Crypto = crypto_pure_rust::Crypto;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub type Crypto = crypto_webcrypto::Crypto;
+#[cfg(crypto_backend = "crypto_windows")]
+pub type Crypto = crypto_windows::Crypto;
 
 /// The certificate type for the active crypto backend.
 pub type Key = <Crypto as AsyncCryptoBackend>::Key;

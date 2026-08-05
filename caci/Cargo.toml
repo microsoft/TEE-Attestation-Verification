@@ -30,6 +30,11 @@ crypto_webcrypto = [
     "attestation/crypto_webcrypto",
     "cose/crypto_webcrypto",
 ]
+crypto_windows = [
+    "crypto/crypto_windows",
+    "attestation/crypto_windows",
+    "cose/crypto_windows",
+]
 
 [dependencies]
 attestation = { package = "tee-attestation-verification-lib", version = "1.0.6", path = "../attestation", default-features = false }

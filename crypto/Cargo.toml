@@ -26,6 +26,7 @@ crypto_pure_rust = [
     "getrandom/js",
 ]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
+crypto_windows = ["dep:pkcs1", "dep:windows", "dep:x509-cert"]
 
 [dependencies]
 foreign-types = { version = "0.3", optional = true }
@@ -41,6 +42,12 @@ x509-cert = { version = "0.2", optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", optional = true }
