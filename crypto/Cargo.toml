@@ -24,6 +24,15 @@ crypto_pure_rust = [
     "dep:sha2",
     "dep:x509-cert",
     "getrandom/js",
+    "p256/ecdsa",
+    "p256/pkcs8",
+    "p256/std",
+    "p384/ecdsa",
+    "p384/pkcs8",
+    "p384/std",
+    "p521/ecdsa",
+    "p521/pkcs8",
+    "p521/std",
 ]
 crypto_symcrypt = [
     "dep:der",
@@ -40,9 +49,9 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 der = { version = "0.7", features = ["derive"], optional = true }
 foreign-types = { version = "0.3", optional = true }
 ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
-p384 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
-p521 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"], optional = true }
+p384 = { version = "0.13", default-features = false, features = ["arithmetic"], optional = true }
+p521 = { version = "0.13", default-features = false, features = ["arithmetic"], optional = true }
 pkcs1 = { version = "0.7", optional = true }
 rsa = { version = "0.9", optional = true }
 sha2 = { version = "0.10", features = ["oid"], optional = true }
@@ -51,6 +60,8 @@ x509-cert = { version = "0.2", optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9", optional = true }
+
+[target.'cfg(all(any(target_os = "linux", target_os = "windows"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 symcrypt = { version = "=0.5.1", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]

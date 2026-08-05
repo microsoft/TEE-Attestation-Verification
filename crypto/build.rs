@@ -21,13 +21,16 @@ fn main() {
     let crypto_backend = if !is_wasm {
         if has_openssl {
             "crypto_openssl"
-        } else if has_symcrypt && matches!(target_os.as_str(), "linux" | "windows") {
+        } else if has_symcrypt
+            && matches!(target_os.as_str(), "linux" | "windows")
+            && matches!(target_arch.as_str(), "x86_64" | "aarch64")
+        {
             "crypto_symcrypt"
         } else if has_pure_rust {
             "crypto_pure_rust"
         } else {
             panic!(
-              "On native targets, at least one target-compatible backend must be enabled (`crypto_openssl`, `crypto_pure_rust`, or `crypto_symcrypt` on Windows and Linux)."
+              "On native targets, at least one target-compatible backend must be enabled (`crypto_openssl`, `crypto_pure_rust`, or `crypto_symcrypt` on Windows/Linux x86_64/aarch64)."
             );
         }
     } else if is_wasm {

@@ -12,7 +12,7 @@ backend features are enabled, `build.rs` selects the target-preferred backend.
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
 | `crypto_openssl` | Native | yes | yes | Uses OpenSSL for native certificate-chain verification and primitive verification. |
-| `crypto_symcrypt` | Windows, Linux | yes | yes | Uses SymCrypt for primitive verification and the shared X.509 path validator. Requires a compatible SymCrypt dynamic library. |
+| `crypto_symcrypt` | Windows/Linux x86_64/aarch64 | yes | yes | Uses SymCrypt for primitive verification and the shared X.509 path validator. Requires a compatible SymCrypt dynamic library. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for primitive verification and the shared X.509 path validator. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Uses RustCrypto crates and the shared X.509 path validator. |
 
@@ -22,11 +22,12 @@ WASM targets prefer `crypto_webcrypto` when enabled, then `crypto_pure_rust`.
 
 The SymCrypt backend uses the released `symcrypt` Rust crate version 0.5.1,
 which supports SymCrypt 103.4.2 and later. Windows CI validates it against the
-Windows system SymCrypt runtime and links using the import library from the
 official SymCrypt 103.11.0 AMD64 release. Set `SYMCRYPT_LIB_PATH` to the
-directory containing `symcrypt.lib` when building on Windows. At runtime,
-Windows loads its system-provided `symcrypt.dll`; applications on systems
-without SymCrypt must provide a compatible runtime.
+directory containing `symcrypt.lib` when building on Windows. Windows does not
+generally provide SymCrypt: applications must deploy a compatible
+`symcrypt.dll` beside the executable. Some Azure Marketplace Windows Server
+images include an older copy in System32, which should not be treated as an
+application dependency.
 
 ## Scope
 

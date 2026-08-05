@@ -3,7 +3,10 @@
 
 //! SymCrypt cryptographic backend.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    borrow::Cow,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use pkcs1::RsaPublicKey;
@@ -371,7 +374,13 @@ fn ec_curve_type(algorithm: EcSignatureKeyAlgorithm) -> CurveType {
 fn uncompressed_ec_public_key(
     key_bytes: &[u8],
     algorithm: EcSignatureKeyAlgorithm,
-) -> Result<Vec<u8>> {
+) -> Result<Cow<'_, [u8]>> {
+    if key_bytes.len() == 1 + algorithm.fixed_signature_byte_len()
+        && key_bytes.first() == Some(&0x04)
+    {
+        return Ok(Cow::Borrowed(key_bytes));
+    }
+
     let bytes = match algorithm {
         EcSignatureKeyAlgorithm::P256 => p256::PublicKey::from_sec1_bytes(key_bytes)
             .map(|key| key.to_encoded_point(false).as_bytes().to_vec())
@@ -383,7 +392,7 @@ fn uncompressed_ec_public_key(
             .map(|key| key.to_encoded_point(false).as_bytes().to_vec())
             .map_err(|e| format!("Failed to parse P-521 public key: {e:?}"))?,
     };
-    Ok(bytes)
+    Ok(Cow::Owned(bytes))
 }
 
 fn ec_curve_oid(algorithm: EcSignatureKeyAlgorithm) -> ObjectIdentifier {

@@ -41,21 +41,57 @@ jobs:
           Expand-Archive -Path $archive -DestinationPath $installDir
           "SYMCRYPT_LIB_PATH=$installDir\dll" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Check Windows SymCrypt runtime
+      - name: Check SymCrypt runtime
         shell: pwsh
         run: |
-          $runtime = Join-Path $env:WINDIR "System32\symcrypt.dll"
-          if (-not (Test-Path $runtime)) {
-            throw "The Windows runner does not provide the system SymCrypt runtime"
+          $runtime = Join-Path $env:SYMCRYPT_LIB_PATH "symcrypt.dll"
+          $version = [version]((Get-Item $runtime).VersionInfo.FileVersion)
+          if ($version -lt [version]"103.4.2") {
+            throw "SymCrypt runtime $version is older than required version 103.4.2"
           }
-          $version = (Get-Item $runtime).VersionInfo.ProductVersion
-          Write-Host "Using Windows system SymCrypt runtime $version from $runtime"
+          Write-Host "Using SymCrypt runtime $version from $runtime"
 
-      - name: Build tests with SymCrypt backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_symcrypt --no-run
+      - name: Build workspace with SymCrypt backend
+        run: |
+          cargo test --workspace --no-default-features --features crypto_symcrypt --no-run
+          cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_symcrypt
 
-      - name: Test with SymCrypt backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_symcrypt -- --nocapture
+      - name: Stage SymCrypt runtime
+        shell: pwsh
+        run: |
+          Copy-Item "$env:SYMCRYPT_LIB_PATH\symcrypt.dll" "target\debug\symcrypt.dll" -Force
+          Copy-Item "$env:SYMCRYPT_LIB_PATH\symcrypt.dll" "target\debug\deps\symcrypt.dll" -Force
+
+      - name: Test workspace with SymCrypt backend
+        run: cargo test --workspace --no-default-features --features crypto_symcrypt -- --nocapture
+
+  linux-symcrypt:
+    name: Linux SymCrypt backend
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rust
+        run: |
+          rustup toolchain install 1.96.0
+          rustc --version
+
+      - name: Install SymCrypt
+        run: |
+          archive="${RUNNER_TEMP}/symcrypt.tar.gz"
+          install_dir="${RUNNER_TEMP}/symcrypt"
+          curl --fail --location --silent --show-error \
+            "https://github.com/microsoft/SymCrypt/releases/download/v103.11.0/symcrypt-linux-generic-amd64-release-103.11.0-748c20f.tar.gz" \
+            --output "${archive}"
+          echo "844d8e2315060e414bc859af6bdef573ce193a75194d164b885b5fbef5bc41f5  ${archive}" \
+            | sha256sum --check
+          mkdir -p "${install_dir}"
+          tar -xzf "${archive}" -C "${install_dir}"
+          echo "LIBRARY_PATH=${install_dir}/lib" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${install_dir}/lib" >> "${GITHUB_ENV}"
+
+      - name: Test workspace with SymCrypt backend
+        run: cargo test --workspace --no-default-features --features crypto_symcrypt -- --nocapture
 
   native:
     name: Native ${{ matrix.backend.name }} backend
