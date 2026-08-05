@@ -20,6 +20,7 @@ path = "src/lib.rs"
 default = ["crypto/default"]
 crypto_openssl = ["crypto/crypto_openssl"]
 crypto_pure_rust = ["crypto/crypto_pure_rust"]
+crypto_symcrypt = ["crypto/crypto_symcrypt"]
 crypto_webcrypto = ["crypto/crypto_webcrypto"]
 kds = [
     "dep:console_error_panic_hook",

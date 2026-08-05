@@ -6,6 +6,7 @@
 //! Supports crypto backends via feature flags:
 //! - `crypto_openssl` - OpenSSL-based (not available on WASM)
 //! - `crypto_pure_rust` - Pure Rust
+//! - `crypto_symcrypt` - SymCrypt-based (not available on WASM)
 //! - `crypto_webcrypto` - WebCrypto-based async verification for WASM
 
 use std::time::Duration;
@@ -215,10 +216,13 @@ where
 pub(crate) mod crypto_openssl;
 #[cfg(crypto_backend = "crypto_pure_rust")]
 pub(crate) mod crypto_pure_rust;
+#[cfg(crypto_backend = "crypto_symcrypt")]
+pub(crate) mod crypto_symcrypt;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
 #[cfg(any(
     crypto_backend = "crypto_pure_rust",
+    crypto_backend = "crypto_symcrypt",
     crypto_backend = "crypto_webcrypto"
 ))]
 mod x509_certificate;
@@ -227,6 +231,8 @@ mod x509_certificate;
 pub type Crypto = crypto_openssl::Crypto;
 #[cfg(crypto_backend = "crypto_pure_rust")]
 pub type Crypto = crypto_pure_rust::Crypto;
+#[cfg(crypto_backend = "crypto_symcrypt")]
+pub type Crypto = crypto_symcrypt::Crypto;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub type Crypto = crypto_webcrypto::Crypto;
 

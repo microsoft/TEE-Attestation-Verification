@@ -25,9 +25,19 @@ crypto_pure_rust = [
     "dep:x509-cert",
     "getrandom/js",
 ]
+crypto_symcrypt = [
+    "dep:der",
+    "dep:p256",
+    "dep:p384",
+    "dep:p521",
+    "dep:pkcs1",
+    "dep:symcrypt",
+    "dep:x509-cert",
+]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 
 [dependencies]
+der = { version = "0.7", features = ["derive"], optional = true }
 foreign-types = { version = "0.3", optional = true }
 ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
@@ -41,6 +51,7 @@ x509-cert = { version = "0.2", optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9", optional = true }
+symcrypt = { version = "=0.5.1", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", optional = true }

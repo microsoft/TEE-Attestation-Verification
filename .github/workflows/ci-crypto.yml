@@ -14,6 +14,49 @@ permissions:
   contents: read
 
 jobs:
+  windows-symcrypt:
+    name: Windows SymCrypt backend
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rust
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.96.0
+          rustc --version
+
+      - name: Install SymCrypt
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "symcrypt.zip"
+          $installDir = Join-Path $env:RUNNER_TEMP "symcrypt"
+          Invoke-WebRequest `
+            -Uri "https://github.com/microsoft/SymCrypt/releases/download/v103.11.0/symcrypt-windows-amd64-release-103.11.0-748c20f1.zip" `
+            -OutFile $archive
+          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actualHash -ne "5e2a9e60c03a60b952e84a3b50984f0d723a4b3ec1585f9cf6e800d4bd61159e") {
+            throw "Unexpected SymCrypt archive SHA-256: $actualHash"
+          }
+          Expand-Archive -Path $archive -DestinationPath $installDir
+          "SYMCRYPT_LIB_PATH=$installDir\dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Check Windows SymCrypt runtime
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:WINDIR "System32\symcrypt.dll"
+          if (-not (Test-Path $runtime)) {
+            throw "The Windows runner does not provide the system SymCrypt runtime"
+          }
+          $version = (Get-Item $runtime).VersionInfo.ProductVersion
+          Write-Host "Using Windows system SymCrypt runtime $version from $runtime"
+
+      - name: Build tests with SymCrypt backend
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_symcrypt --no-run
+
+      - name: Test with SymCrypt backend
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_symcrypt -- --nocapture
+
   native:
     name: Native ${{ matrix.backend.name }} backend
     runs-on: ubuntu-22.04

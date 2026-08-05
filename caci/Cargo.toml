@@ -25,6 +25,11 @@ crypto_pure_rust = [
     "attestation/crypto_pure_rust",
     "cose/crypto_pure_rust",
 ]
+crypto_symcrypt = [
+    "crypto/crypto_symcrypt",
+    "attestation/crypto_symcrypt",
+    "cose/crypto_symcrypt",
+]
 crypto_webcrypto = [
     "crypto/crypto_webcrypto",
     "attestation/crypto_webcrypto",

@@ -29,6 +29,14 @@ const P256_SPKI_DER: &[u8] = &[
     0x84, 0x65, 0x89, 0x96, 0xe8, 0x72, 0xa2, 0x59, 0x6e, 0x85, 0x18,
 ];
 
+#[cfg(crypto_backend = "crypto_symcrypt")]
+const P256_COMPRESSED_SPKI_DER: &[u8] = &[
+    0x30, 0x39, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x22, 0x00, 0x02, 0x44, 0xc8, 0x0b, 0xd0, 0x2c,
+    0x87, 0x3a, 0x73, 0xca, 0x29, 0x7d, 0x35, 0x4b, 0x43, 0xd6, 0xc2, 0xef, 0xb5, 0xed, 0xc2, 0xa0,
+    0x73, 0xa5, 0xdd, 0x64, 0xb3, 0xd1, 0x9e, 0xb3, 0xfb, 0x2c, 0xad,
+];
+
 const P256_SIGNATURE_FIXED: &[u8] = &[
     0x4a, 0xe0, 0x7c, 0x36, 0x2c, 0x8f, 0xde, 0x1e, 0xcd, 0x60, 0x25, 0xa6, 0x78, 0x4a, 0x72, 0x5c,
     0xe3, 0x6a, 0x07, 0x0c, 0xc5, 0x32, 0x55, 0xd3, 0xf0, 0xba, 0xfc, 0x89, 0xd9, 0xaa, 0xd1, 0xc3,
@@ -422,6 +430,29 @@ mod async_tests {
                 .await
                 .expect("ECDSA fixed-width signature should verify");
         }
+    }
+
+    #[cfg(crypto_backend = "crypto_symcrypt")]
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn ecdsa_compressed_public_key_verifies() {
+        let algorithm = EcSignatureKeyAlgorithm::P256;
+        let key = <Key as AsyncKeyBackend>::from_spki_der(
+            P256_COMPRESSED_SPKI_DER,
+            SignatureKeyAlgorithm::Ec(algorithm),
+        )
+        .await
+        .expect("compressed ECDSA public key should parse");
+        let signature = <Signature as SignatureBackend>::from_ec_components(
+            &P256_SIGNATURE_FIXED[..algorithm.scalar_byte_len()],
+            &P256_SIGNATURE_FIXED[algorithm.scalar_byte_len()..],
+            algorithm,
+        )
+        .expect("ECDSA signature components should parse");
+
+        <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, EC_TEST_MESSAGE)
+            .await
+            .expect("ECDSA signature should verify with compressed public key");
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
