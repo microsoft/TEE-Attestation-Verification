@@ -38,6 +38,23 @@ jobs:
       - name: Test with ${{ matrix.backend.name }} backend
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
 
+  windows:
+    name: Windows CNG backend
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Build with Windows CNG backend
+        run: cargo build --workspace --no-default-features --features crypto_windows
+
+      - name: Test with Windows CNG backend
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows -- --nocapture
+
   wasm:
     name: WASM ${{ matrix.backend.name }} backend
     runs-on: ubuntu-22.04
