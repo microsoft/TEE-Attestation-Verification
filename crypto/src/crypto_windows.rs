@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use windows::core::{Owned, PCSTR, PCWSTR, PSTR};
-use windows::Win32::Foundation::{FILETIME, HLOCAL, STATUS_INVALID_SIGNATURE};
+use windows::Win32::Foundation::{
+    FILETIME, HLOCAL, STATUS_INVALID_PARAMETER, STATUS_INVALID_SIGNATURE,
+};
 use windows::Win32::Security::Cryptography::{X509_ASN_ENCODING as X509, *};
 
 use super::{
@@ -377,7 +379,7 @@ impl CryptoBackend for Crypto {
                 }
             }
         };
-        if status == STATUS_INVALID_SIGNATURE {
+        if status == STATUS_INVALID_SIGNATURE || status == STATUS_INVALID_PARAMETER {
             Err("signature verification failed".into())
         } else {
             status.ok().map_err(Into::into)
