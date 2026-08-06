@@ -88,7 +88,10 @@ impl Certificate {
     }
 
     fn extension(&self, oid: &str) -> Result<Option<&CERT_EXTENSION>> {
-        validate_oid(oid)?;
+        let valid = |arc: &str| !arc.is_empty() && arc.bytes().all(|b| b.is_ascii_digit());
+        if oid.split('.').count() < 2 || !oid.split('.').all(valid) {
+            return Err("Invalid dotted-decimal OID".into());
+        }
         let oid = CString::new(oid)?;
         let extensions = self.extensions()?;
         if extensions.is_empty() {
@@ -199,7 +202,7 @@ impl CertificateBackend for Crypto {
 
     fn get_extension_value_by_oid(cert: &Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
         cert.extension(oid)?
-            .map(|ext| Ok(blob(&ext.Value)?.to_vec()))
+            .map(|ext| Ok(slice(ext.Value.pbData, ext.Value.cbData)?.to_vec()))
             .transpose()
     }
 
@@ -212,11 +215,13 @@ impl CertificateBackend for Crypto {
     }
 
     fn subject_name_der(cert: &Certificate) -> Result<Vec<u8>> {
-        Ok(blob(&cert.info()?.Subject)?.to_vec())
+        let value = &cert.info()?.Subject;
+        Ok(slice(value.pbData, value.cbData)?.to_vec())
     }
 
     fn issuer_name_der(cert: &Certificate) -> Result<Vec<u8>> {
-        Ok(blob(&cert.info()?.Issuer)?.to_vec())
+        let value = &cert.info()?.Issuer;
+        Ok(slice(value.pbData, value.cbData)?.to_vec())
     }
 
     fn is_valid_at(cert: &Certificate, unix_time: Duration) -> Result<bool> {
@@ -232,7 +237,10 @@ impl CertificateBackend for Crypto {
         let Some(ext) = cert.extension("2.5.29.19")? else {
             return Ok(None);
         };
-        let decoded = decode(X509_BASIC_CONSTRAINTS2, blob(&ext.Value)?)?;
+        let decoded = decode(
+            X509_BASIC_CONSTRAINTS2,
+            slice(ext.Value.pbData, ext.Value.cbData)?,
+        )?;
         let value = unsafe { &*decoded.0.cast::<CERT_BASIC_CONSTRAINTS2_INFO>() };
         Ok(Some(super::BasicConstraints {
             critical: ext.fCritical.as_bool(),
@@ -377,9 +385,22 @@ impl CryptoBackend for Crypto {
             )
         }?;
         let chain = NonNull::new(raw_chain).ok_or("Null certificate chain")?;
+        let supplied = unsafe {
+            let simple = &**chain.as_ref().rgpChain;
+            let elements = slice(simple.rgpElement, simple.cElement)?;
+            elements
+                .iter()
+                .skip(1)
+                .take(elements.len().saturating_sub(2))
+                .all(|element| {
+                    let context = &*(**element).pCertContext;
+                    let der = slice(context.pbCertEncoded, context.cbCertEncoded).ok();
+                    untrusted.iter().any(|cert| der == cert.der().ok())
+                })
+        };
         let status = unsafe { chain.as_ref().TrustStatus.dwErrorStatus };
         unsafe { CertFreeCertificateChain(chain.as_ptr()) };
-        if status == 0 {
+        if status == 0 && supplied {
             Ok(())
         } else {
             Err(format!("Certificate chain trust error 0x{status:08X}").into())
@@ -446,9 +467,6 @@ fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
             &mut raw,
         )
     }?;
-    if raw.is_invalid() {
-        return Err("CryptImportPublicKeyInfoEx2 returned null".into());
-    }
     Ok(unsafe { Owned::new(raw) })
 }
 
@@ -490,8 +508,8 @@ fn ecdsa_signature(der: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec
     let signature = unsafe { &*signature.0.cast::<CERT_ECC_SIGNATURE>() };
     let width = algorithm.scalar_byte_len();
     let mut output = vec![0; width * 2];
-    let mut r = blob(&signature.r)?.to_vec();
-    let mut s = blob(&signature.s)?.to_vec();
+    let mut r = slice(signature.r.pbData, signature.r.cbData)?.to_vec();
+    let mut s = slice(signature.s.pbData, signature.s.cbData)?.to_vec();
     r.reverse();
     s.reverse();
     pad_component(&r, &mut output[..width])?;
@@ -510,9 +528,6 @@ fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
 
 fn name(value: &CRYPT_INTEGER_BLOB) -> Result<String> {
     let len = unsafe { CertNameToStrW(X509_ASN_ENCODING, value, CERT_X500_NAME_STR, None) };
-    if len == 0 {
-        return Err(windows::core::Error::from_win32().into());
-    }
     let mut output = vec![0; len as usize];
     let len = unsafe {
         CertNameToStrW(
@@ -549,23 +564,8 @@ fn slice<'a, T>(pointer: *const T, len: u32) -> Result<&'a [T]> {
     if len == 0 {
         return Ok(&[]);
     }
-    if pointer.is_null() || len as usize > isize::MAX as usize / size_of::<T>() {
-        return Err("Invalid Windows pointer or length".into());
-    }
+    NonNull::new(pointer.cast_mut()).ok_or("Null Windows pointer")?;
     Ok(unsafe { std::slice::from_raw_parts(pointer, len as usize) })
-}
-
-fn blob(value: &CRYPT_INTEGER_BLOB) -> Result<&[u8]> {
-    slice(value.pbData, value.cbData)
-}
-
-fn validate_oid(oid: &str) -> Result<()> {
-    let valid_arc = |arc: &str| !arc.is_empty() && arc.bytes().all(|b| b.is_ascii_digit());
-    if oid.split('.').count() >= 2 && oid.split('.').all(valid_arc) {
-        Ok(())
-    } else {
-        Err("Invalid dotted-decimal OID".into())
-    }
 }
 
 struct CertStore(HCERTSTORE);
