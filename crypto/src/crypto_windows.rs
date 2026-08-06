@@ -329,7 +329,7 @@ impl CryptoBackend for Crypto {
                 }
             }
         };
-        status.ok()?;
+        status.ok().map_err(|_| "signature verification failed")?;
         Ok(())
     }
 
