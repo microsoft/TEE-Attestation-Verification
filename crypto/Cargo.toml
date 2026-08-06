@@ -26,7 +26,7 @@ crypto_pure_rust = [
     "getrandom/js",
 ]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
-crypto_windows = ["dep:pkcs1", "dep:windows", "dep:x509-cert"]
+crypto_windows = ["dep:windows"]
 
 [dependencies]
 foreign-types = { version = "0.3", optional = true }

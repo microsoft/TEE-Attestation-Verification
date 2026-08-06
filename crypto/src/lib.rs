@@ -222,8 +222,7 @@ pub(crate) mod crypto_webcrypto;
 pub(crate) mod crypto_windows;
 #[cfg(any(
     crypto_backend = "crypto_pure_rust",
-    crypto_backend = "crypto_webcrypto",
-    crypto_backend = "crypto_windows"
+    crypto_backend = "crypto_webcrypto"
 ))]
 mod x509_certificate;
 
