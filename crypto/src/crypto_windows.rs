@@ -220,9 +220,9 @@ impl Certificate {
             return Ok(None);
         };
         let value = blob_bytes(&extension.Value, "keyUsage extension value", true)?;
+        validate_der_bit_string(value, "keyUsage extension")?;
         let decoded = decode_object::<CRYPT_BIT_BLOB>(X509_KEY_USAGE, value, "keyUsage extension")?;
         let usage_bytes = bit_blob_bytes(decoded.get(), "decoded keyUsage", false)?;
-        require_canonical_encoding(X509_KEY_USAGE, decoded.get(), value, "keyUsage extension")?;
 
         Ok(Some(super::KeyUsage {
             key_cert_sign: usage_bytes
@@ -1392,6 +1392,42 @@ fn copy_der_scalar(
     Ok(())
 }
 
+fn validate_der_bit_string(encoded: &[u8], name: &str) -> Result<()> {
+    let mut reader = DerReader::new(encoded);
+    if reader.read_byte()? != 0x03 {
+        return Err(format!("{name} must be a DER BIT STRING").into());
+    }
+    let content_len = reader.read_length()?;
+    let content = reader.read_exact(content_len)?;
+    if !reader.is_empty() {
+        return Err(format!("{name} has trailing data after its DER BIT STRING").into());
+    }
+
+    let (unused_bits, payload) = content
+        .split_first()
+        .ok_or_else(|| format!("{name} has no unused-bits count"))?;
+    if *unused_bits > 7 {
+        return Err(format!("{name} has invalid unused-bits count {unused_bits}").into());
+    }
+    if payload.is_empty() {
+        if *unused_bits != 0 {
+            return Err(format!("{name} has unused bits but an empty payload").into());
+        }
+        return Ok(());
+    }
+    if *unused_bits != 0 {
+        let unused_mask = (1u8 << *unused_bits) - 1;
+        if payload
+            .last()
+            .map(|last| *last & unused_mask != 0)
+            .unwrap_or(false)
+        {
+            return Err(format!("{name} has nonzero declared unused bits").into());
+        }
+    }
+    Ok(())
+}
+
 struct DerReader<'a> {
     bytes: &'a [u8],
     offset: usize,
@@ -1410,7 +1446,7 @@ impl<'a> DerReader<'a> {
         let byte = *self
             .bytes
             .get(self.offset)
-            .ok_or("Unexpected end of DER ECDSA signature")?;
+            .ok_or("Unexpected end of DER input")?;
         self.offset += 1;
         Ok(byte)
     }
@@ -1419,11 +1455,11 @@ impl<'a> DerReader<'a> {
         let end = self
             .offset
             .checked_add(len)
-            .ok_or("DER ECDSA signature length overflow")?;
+            .ok_or("DER input length overflow")?;
         let bytes = self
             .bytes
             .get(self.offset..end)
-            .ok_or("Truncated DER ECDSA signature")?;
+            .ok_or("Truncated DER input")?;
         self.offset = end;
         Ok(bytes)
     }
@@ -1436,25 +1472,25 @@ impl<'a> DerReader<'a> {
 
         let length_bytes = (first & 0x7f) as usize;
         if length_bytes == 0 {
-            return Err("DER ECDSA signature uses an indefinite length".into());
+            return Err("DER input uses an indefinite length".into());
         }
         if length_bytes > size_of::<usize>() {
-            return Err("DER ECDSA signature length does not fit usize".into());
+            return Err("DER input length does not fit usize".into());
         }
 
         let encoded = self.read_exact(length_bytes)?;
         if encoded[0] == 0 {
-            return Err("DER ECDSA signature length has leading zeroes".into());
+            return Err("DER input length has leading zeroes".into());
         }
         let mut length = 0usize;
         for byte in encoded {
             length = length
                 .checked_mul(256)
                 .and_then(|value| value.checked_add(*byte as usize))
-                .ok_or("DER ECDSA signature length overflow")?;
+                .ok_or("DER input length overflow")?;
         }
         if length < 128 {
-            return Err("DER ECDSA signature uses a non-minimal length".into());
+            return Err("DER input uses a non-minimal length".into());
         }
         Ok(length)
     }
