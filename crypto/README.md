@@ -1,7 +1,7 @@
 # TEE Attestation Verification Crypto
 
 Rather than implementing any cryptographic primitives, this crate dispatches these to one of several backends.
-It narrowly exposes a unified surface for signature verification and certificate chain verification across OpenSSL and WebCrypto.
+It narrowly exposes a unified surface for signature verification and certificate chain verification across native and WebCrypto backends.
 There is a fallback pure-rust backend for workloads that don't have webcrypto or openssl available.
 
 ## Backends

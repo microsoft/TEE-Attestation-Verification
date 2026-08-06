@@ -259,6 +259,58 @@ fn certificate_parse_and_encode_wrappers_round_trip() {
     );
 }
 
+#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
+#[test]
+fn from_pem_returns_first_certificate_and_ignores_trailing_content() {
+    let pem = [
+        MILAN_ASK,
+        b"\n",
+        MILAN_ARK,
+        b"\n-----BEGIN CERTIFICATE-----\nnot-base64\n",
+    ]
+    .concat();
+
+    let parsed = Crypto::from_pem(&pem).expect("First certificate should parse");
+
+    assert_eq!(
+        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
+        Crypto::to_der(&cert(MILAN_ASK)).expect("Expected certificate should encode")
+    );
+}
+
+#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
+#[test]
+fn from_pem_chain_returns_empty_without_certificate_records() {
+    let chain =
+        Crypto::from_pem_chain(b"no certificate records").expect("Empty PEM chain should parse");
+
+    assert!(chain.is_empty());
+}
+
+#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
+#[test]
+fn legacy_x509_certificate_pem_label_is_accepted() {
+    let pem = String::from_utf8(MILAN_VCEK.to_vec())
+        .expect("Fixture should be UTF-8")
+        .replace("CERTIFICATE", "X509 CERTIFICATE");
+
+    let parsed = Crypto::from_pem(pem.as_bytes()).expect("Legacy PEM label should parse");
+
+    assert_eq!(
+        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
+        Crypto::to_der(&cert(MILAN_VCEK)).expect("Expected certificate should encode")
+    );
+}
+
+#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
+#[test]
+fn certificate_der_with_trailing_bytes_is_accepted() {
+    let mut der = Crypto::to_der(&cert(MILAN_VCEK)).expect("Fixture should encode");
+    der.extend_from_slice(&[0xde, 0xad]);
+
+    Crypto::from_der(&der).expect("Trailing DER bytes should be ignored");
+}
+
 #[test]
 fn certificate_clone_owns_its_native_reference() {
     let original = cert(MILAN_VCEK);
@@ -345,6 +397,25 @@ fn extension_lookup_rejects_malformed_oid() {
     Crypto::get_extension_value_by_oid(&cert, "not-an-oid").expect_err("Malformed OID should fail");
 }
 
+#[test]
+fn extension_lookup_rejects_invalid_numeric_oid_arcs() {
+    let cert = cert(MILAN_VCEK);
+
+    for oid in ["3.1", "1.40"] {
+        Crypto::get_extension_value_by_oid(&cert, oid)
+            .expect_err("Extension lookup should reject invalid numeric OID arcs");
+        Crypto::extension_criticality(&cert, oid)
+            .expect_err("Extension criticality should reject invalid numeric OID arcs");
+    }
+}
+
+#[cfg(crypto_backend = "crypto_windows")]
+#[test]
+fn certificates_are_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Certificate>();
+}
+
 #[cfg(sync_crypto)]
 #[test]
 fn keys_are_send_and_sync() {
@@ -401,12 +472,19 @@ mod sync_tests {
             .unwrap();
     }
 
-    #[cfg(crypto_backend = "crypto_windows")]
+    #[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
     #[test]
     fn explicitly_trusted_leaf_certificate_verifies() {
         let vcek = cert(MILAN_VCEK);
         <Crypto as CryptoBackend>::verify_chain(&vcek, &[], &vcek, None)
             .expect("Explicitly trusted leaf should match OpenSSL partial-chain semantics");
+    }
+
+    #[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
+    #[test]
+    fn intermediate_certificate_can_be_the_explicit_trust_anchor() {
+        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ASK), &[], &cert(MILAN_VCEK), None)
+            .expect("Explicit intermediate trust anchor should verify its leaf");
     }
 
     #[test]

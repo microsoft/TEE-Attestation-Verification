@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 use std::ffi::{c_void, CString};
-use std::mem::size_of;
+use std::mem::{align_of, size_of};
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::time::Duration;
 
 use windows::core::{Owned, PCSTR, PCWSTR, PSTR};
-use windows::Win32::Foundation::{FILETIME, HLOCAL};
+use windows::Win32::Foundation::{FILETIME, HLOCAL, STATUS_INVALID_SIGNATURE};
 use windows::Win32::Security::Cryptography::{X509_ASN_ENCODING as X509, *};
 
 use super::{
@@ -15,12 +16,20 @@ use super::{
     EcSignatureKeyAlgorithm, KeyBackend, Result, SignatureBackend, SignatureKeyAlgorithm,
 };
 
-const PEM: (&[u8], &[u8]) = (b"-----BEGIN CERTIFICATE-----", b"-----END CERTIFICATE-----");
+const PEM_LABELS: [(&[u8], &[u8]); 2] = [
+    (b"-----BEGIN CERTIFICATE-----", b"-----END CERTIFICATE-----"),
+    (
+        b"-----BEGIN X509 CERTIFICATE-----",
+        b"-----END X509 CERTIFICATE-----",
+    ),
+];
 
 pub struct Crypto;
 
-#[derive(Debug)]
-pub struct Certificate(NonNull<CERT_CONTEXT>);
+#[derive(Clone, Debug)]
+pub struct Certificate(Arc<[u8]>);
+
+struct NativeCertificate(NonNull<CERT_CONTEXT>);
 
 pub struct Key {
     spki: Vec<u8>,
@@ -40,26 +49,53 @@ pub struct Signature {
 
 fn display_name(certificate: &Certificate, subject: bool) -> String {
     certificate
-        .info()
-        .and_then(|info| name(if subject { &info.Subject } else { &info.Issuer }))
+        .with_context(|context| {
+            let info = context.info()?;
+            name(if subject { &info.Subject } else { &info.Issuer })
+        })
         .unwrap_or_else(|_| "<unavailable certificate name>".into())
-}
-
-impl Clone for Certificate {
-    fn clone(&self) -> Self {
-        let context = unsafe { CertDuplicateCertificateContext(Some(self.as_ptr())) };
-        Self(NonNull::new(context).expect("CertDuplicateCertificateContext returned null"))
-    }
-}
-
-impl Drop for Certificate {
-    fn drop(&mut self) {
-        let _ = unsafe { CertFreeCertificateContext(Some(self.as_ptr())) };
-    }
 }
 
 impl Certificate {
     fn from_der(der: &[u8]) -> Result<Self> {
+        NativeCertificate::from_der(der)?;
+        Ok(Self(Arc::from(der)))
+    }
+
+    fn der(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn with_context<T>(
+        &self,
+        operation: impl for<'a> FnOnce(&'a NativeCertificate) -> Result<T>,
+    ) -> Result<T> {
+        let context = NativeCertificate::from_der(self.der())?;
+        operation(&context)
+    }
+
+    fn with_extension<T>(
+        &self,
+        oid: &str,
+        operation: impl for<'a> FnOnce(&'a NativeCertificate, Option<&'a CERT_EXTENSION>) -> Result<T>,
+    ) -> Result<T> {
+        validate_oid(oid)?;
+        let oid = CString::new(oid)?;
+        self.with_context(|context| {
+            let extensions = context.extensions()?;
+            let extension = if extensions.is_empty() {
+                None
+            } else {
+                unsafe { CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() }
+            };
+            operation(context, extension)
+        })
+    }
+}
+
+impl NativeCertificate {
+    fn from_der(der: &[u8]) -> Result<Self> {
+        native_len(der)?;
         let context = unsafe { CertCreateCertificateContext(X509_ASN_ENCODING, der) };
         NonNull::new(context)
             .map(Self)
@@ -78,26 +114,15 @@ impl Certificate {
         unsafe { self.context().pCertInfo.as_ref() }.ok_or_else(|| "Null CERT_INFO".into())
     }
 
-    fn der(&self) -> Result<&[u8]> {
-        slice(self.context().pbCertEncoded, self.context().cbCertEncoded)
-    }
-
     fn extensions(&self) -> Result<&[CERT_EXTENSION]> {
         let info = self.info()?;
-        slice(info.rgExtension, info.cExtension)
+        unsafe { native_slice(info.rgExtension, info.cExtension, self) }
     }
+}
 
-    fn extension(&self, oid: &str) -> Result<Option<&CERT_EXTENSION>> {
-        let valid = |arc: &str| !arc.is_empty() && arc.bytes().all(|b| b.is_ascii_digit());
-        if oid.split('.').count() < 2 || !oid.split('.').all(valid) {
-            return Err("Invalid dotted-decimal OID".into());
-        }
-        let oid = CString::new(oid)?;
-        let extensions = self.extensions()?;
-        if extensions.is_empty() {
-            return Ok(None);
-        }
-        Ok(unsafe { CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
+impl Drop for NativeCertificate {
+    fn drop(&mut self) {
+        let _ = unsafe { CertFreeCertificateContext(Some(self.as_ptr())) };
     }
 }
 
@@ -137,27 +162,16 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Certificate> {
-        let mut chain = Self::from_pem_chain(pem)?;
-        if chain.len() != 1 {
-            return Err(format!("Expected one certificate, found {}", chain.len()).into());
-        }
-        Ok(chain.remove(0))
+        let (record, _) = next_pem_record(pem)?.ok_or("No certificate PEM blocks found")?;
+        Certificate::from_der(&decode_pem(record)?)
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Certificate>> {
-        let find = |input: &[u8], marker: &[u8]| {
-            input.windows(marker.len()).position(|part| part == marker)
-        };
         let mut result = Vec::new();
         let mut rest = pem;
-        while let Some(begin) = find(rest, PEM.0) {
-            rest = &rest[begin..];
-            let end = find(rest, PEM.1).ok_or("Unterminated certificate PEM")? + PEM.1.len();
-            result.push(Certificate::from_der(&decode_pem(&rest[..end])?)?);
-            rest = &rest[end..];
-        }
-        if result.is_empty() {
-            return Err("No certificate PEM blocks found".into());
+        while let Some((record, remaining)) = next_pem_record(rest)? {
+            result.push(Certificate::from_der(&decode_pem(record)?)?);
+            rest = remaining;
         }
         Ok(result)
     }
@@ -167,23 +181,19 @@ impl CertificateBackend for Crypto {
     }
 
     fn to_der(cert: &Certificate) -> Result<Vec<u8>> {
-        Ok(cert.der()?.to_vec())
+        Ok(cert.der().to_vec())
     }
 
     fn to_pem(cert: &Certificate) -> Result<String> {
+        native_len(cert.der())?;
         let mut len = 0;
         let flags = CRYPT_STRING(CRYPT_STRING_BASE64HEADER.0 | CRYPT_STRING_NOCR);
-        if !unsafe { CryptBinaryToStringA(cert.der()?, flags, None, &mut len) }.as_bool() {
+        if !unsafe { CryptBinaryToStringA(cert.der(), flags, None, &mut len) }.as_bool() {
             return Err(windows::core::Error::from_win32().into());
         }
         let mut output = vec![0; len as usize];
         if !unsafe {
-            CryptBinaryToStringA(
-                cert.der()?,
-                flags,
-                Some(PSTR(output.as_mut_ptr())),
-                &mut len,
-            )
+            CryptBinaryToStringA(cert.der(), flags, Some(PSTR(output.as_mut_ptr())), &mut len)
         }
         .as_bool()
         {
@@ -197,13 +207,19 @@ impl CertificateBackend for Crypto {
     }
 
     fn get_public_key(cert: &Certificate) -> Result<Vec<u8>> {
-        encode(X509_PUBLIC_KEY_INFO, &cert.info()?.SubjectPublicKeyInfo)
+        cert.with_context(|context| {
+            encode(X509_PUBLIC_KEY_INFO, &context.info()?.SubjectPublicKeyInfo)
+        })
     }
 
     fn get_extension_value_by_oid(cert: &Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
-        cert.extension(oid)?
-            .map(|ext| Ok(slice(ext.Value.pbData, ext.Value.cbData)?.to_vec()))
-            .transpose()
+        cert.with_extension(oid, |context, extension| {
+            extension
+                .map(|ext| unsafe {
+                    native_slice(ext.Value.pbData, ext.Value.cbData, context).map(<[u8]>::to_vec)
+                })
+                .transpose()
+        })
     }
 
     fn subject_name(cert: &Certificate) -> String {
@@ -215,65 +231,80 @@ impl CertificateBackend for Crypto {
     }
 
     fn subject_name_der(cert: &Certificate) -> Result<Vec<u8>> {
-        let value = &cert.info()?.Subject;
-        Ok(slice(value.pbData, value.cbData)?.to_vec())
+        cert.with_context(|context| {
+            let value = &context.info()?.Subject;
+            Ok(unsafe { native_slice(value.pbData, value.cbData, context)?.to_vec() })
+        })
     }
 
     fn issuer_name_der(cert: &Certificate) -> Result<Vec<u8>> {
-        let value = &cert.info()?.Issuer;
-        Ok(slice(value.pbData, value.cbData)?.to_vec())
+        cert.with_context(|context| {
+            let value = &context.info()?.Issuer;
+            Ok(unsafe { native_slice(value.pbData, value.cbData, context)?.to_vec() })
+        })
     }
 
     fn is_valid_at(cert: &Certificate, unix_time: Duration) -> Result<bool> {
         let time = filetime(unix_time)?;
-        Ok(unsafe { CertVerifyTimeValidity(Some(&time), cert.info()?) } == 0)
+        cert.with_context(|context| {
+            Ok(unsafe { CertVerifyTimeValidity(Some(&time), context.info()?) } == 0)
+        })
     }
 
     fn version(cert: &Certificate) -> Result<u8> {
-        Ok(cert.info()?.dwVersion.try_into()?)
+        cert.with_context(|context| Ok(context.info()?.dwVersion.try_into()?))
     }
 
     fn basic_constraints(cert: &Certificate) -> Result<Option<super::BasicConstraints>> {
-        let Some(ext) = cert.extension("2.5.29.19")? else {
-            return Ok(None);
-        };
-        let decoded = decode(
-            X509_BASIC_CONSTRAINTS2,
-            slice(ext.Value.pbData, ext.Value.cbData)?,
-        )?;
-        let value = unsafe { &*decoded.0.cast::<CERT_BASIC_CONSTRAINTS2_INFO>() };
-        Ok(Some(super::BasicConstraints {
-            critical: ext.fCritical.as_bool(),
-            ca: value.fCA.as_bool(),
-            path_len_constraint: value
-                .fPathLenConstraint
-                .as_bool()
-                .then_some(value.dwPathLenConstraint as usize),
-        }))
+        cert.with_extension("2.5.29.19", |context, extension| {
+            let Some(ext) = extension else {
+                return Ok(None);
+            };
+            let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
+            let decoded = decode(X509_BASIC_CONSTRAINTS2, encoded)?;
+            let value = decoded_ref::<CERT_BASIC_CONSTRAINTS2_INFO>(&decoded)?;
+            Ok(Some(super::BasicConstraints {
+                critical: ext.fCritical.as_bool(),
+                ca: value.fCA.as_bool(),
+                path_len_constraint: value
+                    .fPathLenConstraint
+                    .as_bool()
+                    .then_some(value.dwPathLenConstraint as usize),
+            }))
+        })
     }
 
     fn key_usage(cert: &Certificate) -> Result<Option<super::KeyUsage>> {
-        if cert.extension("2.5.29.15")?.is_none() {
-            return Ok(None);
-        }
-        let mut usage = [0];
-        unsafe { CertGetIntendedKeyUsage(X509_ASN_ENCODING, cert.info()?, &mut usage) }?;
-        Ok(Some(super::KeyUsage {
-            key_cert_sign: usage[0] & CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
-        }))
+        cert.with_extension("2.5.29.15", |_, extension| {
+            if extension.is_none() {
+                return Ok(None);
+            }
+            cert.with_context(|context| {
+                let mut usage = [0];
+                unsafe { CertGetIntendedKeyUsage(X509_ASN_ENCODING, context.info()?, &mut usage) }?;
+                Ok(Some(super::KeyUsage {
+                    key_cert_sign: usage[0] & CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
+                }))
+            })
+        })
     }
 
     fn extension_criticality(cert: &Certificate, oid: &str) -> Result<Option<bool>> {
-        Ok(cert.extension(oid)?.map(|ext| ext.fCritical.as_bool()))
+        cert.with_extension(oid, |_, extension| {
+            Ok(extension.map(|ext| ext.fCritical.as_bool()))
+        })
     }
 
     fn critical_extension_oids(cert: &Certificate) -> Vec<String> {
-        cert.extensions()
-            .into_iter()
-            .flatten()
-            .filter(|ext| ext.fCritical.as_bool())
-            .filter_map(|ext| unsafe { ext.pszObjId.to_string().ok() })
-            .collect()
+        cert.with_context(|context| {
+            Ok(context
+                .extensions()?
+                .iter()
+                .filter(|ext| ext.fCritical.as_bool())
+                .filter_map(|ext| unsafe { ext.pszObjId.to_string().ok() })
+                .collect())
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -293,8 +324,14 @@ impl CryptoBackend for Crypto {
         }
         .ok()?;
         let provider = unsafe { Owned::new(raw) };
+        let mut raw_hash = BCRYPT_HASH_HANDLE::default();
+        unsafe { BCryptCreateHash(*provider, &mut raw_hash, None, None, 0) }.ok()?;
+        let hash = unsafe { Owned::new(raw_hash) };
+        for chunk in input.chunks(u32::MAX as usize) {
+            unsafe { BCryptHashData(*hash, chunk, 0) }.ok()?;
+        }
         let mut output = vec![0; algorithm.byte_len()];
-        unsafe { BCryptHash(*provider, None, input, &mut output) }.ok()?;
+        unsafe { BCryptFinishHash(*hash, &mut output, 0) }.ok()?;
         Ok(output)
     }
 
@@ -303,6 +340,9 @@ impl CryptoBackend for Crypto {
             return Err("Signature algorithm does not match key algorithm".into());
         }
         let handle = import_key(&key.spki)?;
+        if signature.bytes.len() != key_u32_property(&handle, BCRYPT_SIGNATURE_LENGTH)? as usize {
+            return Err("signature verification failed".into());
+        }
         let digest = Self::digest(signature.algorithm.digest(), input)?;
         let hash = hash_id(signature.algorithm.digest());
         let status = match signature.algorithm {
@@ -337,8 +377,11 @@ impl CryptoBackend for Crypto {
                 }
             }
         };
-        status.ok().map_err(|_| "signature verification failed")?;
-        Ok(())
+        if status == STATUS_INVALID_SIGNATURE {
+            Err("signature verification failed".into())
+        } else {
+            status.ok().map_err(Into::into)
+        }
     }
 
     fn verify_chain(
@@ -367,12 +410,13 @@ impl CryptoBackend for Crypto {
             cbSize: size_of::<CERT_CHAIN_PARA>() as u32,
             ..Default::default()
         };
+        let leaf_context = NativeCertificate::from_der(leaf.der())?;
         let time = unix_time.map(filetime).transpose()?;
         let mut raw_chain = std::ptr::null_mut();
         unsafe {
             CertGetCertificateChain(
                 Some(*engine),
-                leaf.as_ptr(),
+                leaf_context.as_ptr(),
                 time.as_ref().map(|value| value as *const FILETIME),
                 Some(intermediates.0),
                 &parameters,
@@ -384,23 +428,50 @@ impl CryptoBackend for Crypto {
                 &mut raw_chain,
             )
         }?;
-        let chain = NonNull::new(raw_chain).ok_or("Null certificate chain")?;
-        let supplied = unsafe {
-            let simple = &**chain.as_ref().rgpChain;
-            let elements = slice(simple.rgpElement, simple.cElement)?;
-            elements
-                .iter()
-                .skip(1)
-                .take(elements.len().saturating_sub(2))
-                .all(|element| {
-                    let context = &*(**element).pCertContext;
-                    let der = slice(context.pbCertEncoded, context.cbCertEncoded).ok();
-                    untrusted.iter().any(|cert| der == cert.der().ok())
-                })
-        };
-        let status = unsafe { chain.as_ref().TrustStatus.dwErrorStatus };
-        unsafe { CertFreeCertificateChain(chain.as_ptr()) };
-        if status == 0 && supplied {
+        let chain = ChainContext::new(raw_chain)?;
+        let context = chain.as_ref();
+        if context.cChain != 1 {
+            return Err(format!(
+                "Expected one simple certificate chain, found {}",
+                context.cChain
+            )
+            .into());
+        }
+        let simple_chains = unsafe { native_slice(context.rgpChain, context.cChain, &chain)? };
+        let simple = unsafe { simple_chains[0].as_ref() }.ok_or("Null simple certificate chain")?;
+        if !simple.pTrustListInfo.is_null() {
+            return Err("CTL-connected certificate chains are not supported".into());
+        }
+        if simple.cElement == 0 {
+            return Err("Certificate chain contains no elements".into());
+        }
+        let elements = unsafe { native_slice(simple.rgpElement, simple.cElement, &chain)? };
+        let contexts = elements
+            .iter()
+            .map(|element| -> Result<&CERT_CONTEXT> {
+                let Some(element) = (unsafe { element.as_ref() }) else {
+                    return Err("Null certificate chain element".into());
+                };
+                let Some(context) = (unsafe { element.pCertContext.as_ref() }) else {
+                    return Err("Null chain certificate context".into());
+                };
+                Ok(context)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let ders = contexts
+            .iter()
+            .map(|context| unsafe {
+                native_slice(context.pbCertEncoded, context.cbCertEncoded, &chain)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let anchored = ders.last().is_some_and(|der| *der == trusted.der());
+        let supplied = ders
+            .iter()
+            .skip(1)
+            .take(ders.len().saturating_sub(2))
+            .all(|der| untrusted.iter().any(|cert| *der == cert.der()));
+        let status = context.TrustStatus.dwErrorStatus;
+        if status == 0 && anchored && supplied {
             Ok(())
         } else {
             Err(format!("Certificate chain trust error 0x{status:08X}").into())
@@ -409,6 +480,7 @@ impl CryptoBackend for Crypto {
 }
 
 fn decode(kind: PCSTR, input: &[u8]) -> Result<Owned<HLOCAL>> {
+    native_len(input)?;
     let mut pointer = std::ptr::null_mut::<c_void>();
     let mut len = 0;
     unsafe {
@@ -440,11 +512,31 @@ fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {
             &mut len,
         )
     }?;
-    let _allocation = unsafe { Owned::new(HLOCAL(pointer)) };
-    Ok(slice(pointer.cast(), len)?.to_vec())
+    NonNull::new(pointer).ok_or("CryptEncodeObjectEx returned null")?;
+    let allocation = unsafe { Owned::new(HLOCAL(pointer)) };
+    Ok(unsafe { native_slice(pointer.cast(), len, &allocation)?.to_vec() })
+}
+
+fn next_pem_record(input: &[u8]) -> Result<Option<(&[u8], &[u8])>> {
+    let find = |marker: &[u8]| input.windows(marker.len()).position(|part| part == marker);
+    let Some((begin, (_, end_marker))) = PEM_LABELS
+        .iter()
+        .filter_map(|label| find(label.0).map(|position| (position, label)))
+        .min_by_key(|(position, _)| *position)
+    else {
+        return Ok(None);
+    };
+    let record = &input[begin..];
+    let end = record
+        .windows(end_marker.len())
+        .position(|part| part == *end_marker)
+        .ok_or("Unterminated certificate PEM")?
+        + end_marker.len();
+    Ok(Some((&record[..end], &record[end..])))
 }
 
 fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
+    native_len(pem)?;
     let flags = CRYPT_STRING(CRYPT_STRING_BASE64HEADER.0 | CRYPT_STRING_STRICT.0);
     let mut len = 0;
     unsafe { CryptStringToBinaryA(pem, flags, None, &mut len, None, None) }?;
@@ -456,7 +548,7 @@ fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
 
 fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
     let info = decode(X509_PUBLIC_KEY_INFO, spki)?;
-    let info = unsafe { &*info.0.cast::<CERT_PUBLIC_KEY_INFO>() };
+    let info = decoded_ref::<CERT_PUBLIC_KEY_INFO>(&info)?;
     let mut raw = BCRYPT_KEY_HANDLE::default();
     unsafe {
         CryptImportPublicKeyInfoEx2(
@@ -495,6 +587,9 @@ fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
     unsafe { BCryptGetProperty(key, property, None, &mut len, 0) }.ok()?;
     let mut output = vec![0; len as usize];
     unsafe { BCryptGetProperty(key, property, Some(&mut output), &mut len, 0) }.ok()?;
+    if len as usize > output.len() {
+        return Err("CNG property length changed between calls".into());
+    }
     let units = output[..len as usize]
         .chunks_exact(2)
         .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
@@ -503,13 +598,23 @@ fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
     Ok(String::from_utf16(&units)?)
 }
 
+fn key_u32_property(key: &Owned<BCRYPT_KEY_HANDLE>, property: PCWSTR) -> Result<u32> {
+    let mut value = [0; size_of::<u32>()];
+    let mut len = 0;
+    unsafe { BCryptGetProperty((**key).into(), property, Some(&mut value), &mut len, 0) }.ok()?;
+    if len as usize != value.len() {
+        return Err("CNG returned an invalid u32 property length".into());
+    }
+    Ok(u32::from_ne_bytes(value))
+}
+
 fn ecdsa_signature(der: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec<u8>> {
-    let signature = decode(X509_ECC_SIGNATURE, der)?;
-    let signature = unsafe { &*signature.0.cast::<CERT_ECC_SIGNATURE>() };
+    let decoded = decode(X509_ECC_SIGNATURE, der)?;
+    let signature = decoded_ref::<CERT_ECC_SIGNATURE>(&decoded)?;
     let width = algorithm.scalar_byte_len();
     let mut output = vec![0; width * 2];
-    let mut r = slice(signature.r.pbData, signature.r.cbData)?.to_vec();
-    let mut s = slice(signature.s.pbData, signature.s.cbData)?.to_vec();
+    let mut r = unsafe { native_slice(signature.r.pbData, signature.r.cbData, &decoded)?.to_vec() };
+    let mut s = unsafe { native_slice(signature.s.pbData, signature.s.cbData, &decoded)?.to_vec() };
     r.reverse();
     s.reverse();
     pad_component(&r, &mut output[..width])?;
@@ -528,6 +633,9 @@ fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
 
 fn name(value: &CRYPT_INTEGER_BLOB) -> Result<String> {
     let len = unsafe { CertNameToStrW(X509_ASN_ENCODING, value, CERT_X500_NAME_STR, None) };
+    if len == 0 {
+        return Err(windows::core::Error::from_win32().into());
+    }
     let mut output = vec![0; len as usize];
     let len = unsafe {
         CertNameToStrW(
@@ -537,7 +645,10 @@ fn name(value: &CRYPT_INTEGER_BLOB) -> Result<String> {
             Some(&mut output),
         )
     } as usize;
-    Ok(String::from_utf16(&output[..len.saturating_sub(1)])?)
+    if len == 0 || len > output.len() {
+        return Err(windows::core::Error::from_win32().into());
+    }
+    Ok(String::from_utf16(&output[..len - 1])?)
 }
 
 fn filetime(time: Duration) -> Result<FILETIME> {
@@ -560,12 +671,73 @@ fn hash_id(algorithm: DigestAlgorithm) -> PCWSTR {
     }
 }
 
-fn slice<'a, T>(pointer: *const T, len: u32) -> Result<&'a [T]> {
+fn validate_oid(oid: &str) -> Result<()> {
+    let arcs = oid.split('.').collect::<Vec<_>>();
+    if arcs.len() < 2
+        || arcs
+            .iter()
+            .any(|arc| arc.is_empty() || !arc.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err("Invalid dotted-decimal OID".into());
+    }
+    let first: u32 = arcs[0].parse()?;
+    let second: u64 = arcs[1].parse()?;
+    if first > 2 || (first < 2 && second > 39) {
+        return Err("Invalid dotted-decimal OID".into());
+    }
+    Ok(())
+}
+
+fn native_len(input: &[u8]) -> Result<u32> {
+    input
+        .len()
+        .try_into()
+        .map_err(|_| "Input exceeds the Windows API length limit".into())
+}
+
+fn decoded_ref<T>(allocation: &Owned<HLOCAL>) -> Result<&T> {
+    let pointer = allocation.0.cast::<T>();
+    let pointer = NonNull::new(pointer).ok_or("Null decoded Windows pointer")?;
+    if pointer.as_ptr() as usize % align_of::<T>() != 0 {
+        return Err("Misaligned decoded Windows pointer".into());
+    }
+    Ok(unsafe { pointer.as_ref() })
+}
+
+unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> Result<&'a [T]> {
     if len == 0 {
         return Ok(&[]);
     }
-    NonNull::new(pointer.cast_mut()).ok_or("Null Windows pointer")?;
-    Ok(unsafe { std::slice::from_raw_parts(pointer, len as usize) })
+    let pointer = NonNull::new(pointer.cast_mut()).ok_or("Null Windows pointer")?;
+    if pointer.as_ptr() as usize % align_of::<T>() != 0 {
+        return Err("Misaligned Windows pointer".into());
+    }
+    let len = len as usize;
+    let _bytes = len
+        .checked_mul(size_of::<T>())
+        .filter(|bytes| *bytes <= isize::MAX as usize)
+        .ok_or("Windows slice is too large")?;
+    Ok(unsafe { std::slice::from_raw_parts(pointer.as_ptr(), len) })
+}
+
+struct ChainContext(NonNull<CERT_CHAIN_CONTEXT>);
+
+impl ChainContext {
+    fn new(context: *mut CERT_CHAIN_CONTEXT) -> Result<Self> {
+        NonNull::new(context)
+            .map(Self)
+            .ok_or_else(|| "Null certificate chain".into())
+    }
+
+    fn as_ref(&self) -> &CERT_CHAIN_CONTEXT {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+impl Drop for ChainContext {
+    fn drop(&mut self) {
+        unsafe { CertFreeCertificateChain(self.0.as_ptr()) };
+    }
 }
 
 struct CertStore(HCERTSTORE);
@@ -582,7 +754,7 @@ impl CertStore {
             CertAddEncodedCertificateToStore(
                 Some(self.0),
                 X509_ASN_ENCODING,
-                certificate.der()?,
+                certificate.der(),
                 CERT_STORE_ADD_ALWAYS,
                 None,
             )

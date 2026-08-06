@@ -23,7 +23,7 @@ pub struct Certificate {
 }
 
 /// Synchronous checking of a certificate path
-#[cfg(all(sync_crypto, not(crypto_backend = "crypto_windows")))]
+#[cfg(sync_crypto)]
 pub fn verify_certificate_path(
     mut verify_signature: impl FnMut(&Certificate, &Certificate) -> Result<()>,
     root_trust_anchor: &Certificate,

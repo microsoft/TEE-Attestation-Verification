@@ -11,13 +11,15 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 ## Crypto Backends
 
 At least one target-compatible crypto backend must be enabled.
-If multiple backends are enabled, the target-compatible backend is selected with `crypto_openssl` and `crypto_webcrypto` preferred over `crypto_pure_rust`.
+If multiple backends are enabled, Windows prefers `crypto_windows`, other
+native targets prefer `crypto_openssl`, and WASM prefers `crypto_webcrypto`.
 
 | Feature | Platforms | sync | async | Dependencies |
 |---|---|---|---|---|
 | `crypto_openssl` | Native | ✓ | ✓ | OpenSSL |
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
 | `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`); selected when enabled and no target-preferred backend is enabled |
+| `crypto_windows` | Windows 8 / Server 2012 or newer | ✓ | ✓ | Windows CNG and Crypt32 |
 
 ## Optional Features
 
