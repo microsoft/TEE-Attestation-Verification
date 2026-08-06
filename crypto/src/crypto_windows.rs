@@ -347,7 +347,6 @@ impl CryptoBackend for Crypto {
         }
         let mut config = CERT_CHAIN_ENGINE_CONFIG {
             cbSize: size_of::<CERT_CHAIN_ENGINE_CONFIG>() as u32,
-            hRestrictedOther: intermediates.0,
             hExclusiveRoot: roots.0,
             hExclusiveTrustedPeople: roots.0,
             dwExclusiveFlags: CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
