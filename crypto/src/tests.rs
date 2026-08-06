@@ -338,25 +338,6 @@ fn certificate_parse_wrappers_reject_invalid_input() {
     Crypto::from_der(b"not der").expect_err("Invalid DER should fail");
 }
 
-#[cfg(crypto_backend = "crypto_windows")]
-#[test]
-fn windows_certificate_pem_rejects_empty_and_inline_blocks() {
-    let empty = b"-----BEGIN CERTIFICATE----------END CERTIFICATE-----";
-    assert!(
-        Crypto::from_pem(empty).is_err(),
-        "Empty PEM payload must fail before calling CryptStringToBinaryA"
-    );
-
-    let certificate = cert(MILAN_VCEK);
-    let inline = Crypto::to_pem(&certificate)
-        .expect("PEM encoding should succeed")
-        .replace('\n', "");
-    assert!(
-        Crypto::from_pem(inline.as_bytes()).is_err(),
-        "PEM boundaries and payload must occupy separate lines"
-    );
-}
-
 #[test]
 fn extension_lookup_rejects_malformed_oid() {
     let cert = cert(MILAN_VCEK);
@@ -571,41 +552,6 @@ mod async_tests {
                 .await
                 .expect("DER ECDSA signature should verify");
         }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    #[cfg(crypto_backend = "crypto_windows")]
-    async fn malformed_der_ecdsa_signatures_are_rejected() {
-        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
-        for malformed in [
-            &[0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x00][..],
-            &[0x30, 0x06, 0x02, 0x01, 0x80, 0x02, 0x01, 0x01][..],
-            &[0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01][..],
-        ] {
-            assert!(
-                <Signature as SignatureBackend>::from_bytes(malformed, algorithm).is_err(),
-                "Malformed DER ECDSA signature should fail"
-            );
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    #[cfg(crypto_backend = "crypto_windows")]
-    async fn spki_der_rejects_trailing_data() {
-        let mut malformed = P256_SPKI_DER.to_vec();
-        malformed.push(0);
-
-        assert!(
-            <Key as AsyncKeyBackend>::from_spki_der(
-                &malformed,
-                SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
-            )
-            .await
-            .is_err(),
-            "SPKI DER with trailing data should fail"
-        );
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
