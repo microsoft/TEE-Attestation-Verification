@@ -479,8 +479,7 @@ mod async_tests {
     }
 
     #[cfg(crypto_backend = "crypto_symcrypt")]
-    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[tokio::test]
     async fn ecdsa_der_signature_verifies() {
         let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
         let key = <Key as AsyncKeyBackend>::from_spki_der(P256_SPKI_DER, algorithm)
@@ -495,8 +494,7 @@ mod async_tests {
     }
 
     #[cfg(crypto_backend = "crypto_symcrypt")]
-    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    #[tokio::test]
     async fn ecdsa_der_signature_left_pads_short_scalar() {
         let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
         let key = <Key as AsyncKeyBackend>::from_spki_der(P256_SHORT_SCALAR_SPKI_DER, algorithm)
