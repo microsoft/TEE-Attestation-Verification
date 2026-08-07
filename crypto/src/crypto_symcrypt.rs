@@ -9,13 +9,18 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use pkcs1::RsaPublicKey;
 use symcrypt::{
     ecc::{CurveType, EcKey, EcKeyUsage},
     hash::{self, HashAlgorithm},
     rsa::{RsaKey, RsaKeyUsage},
 };
+use x509_cert::{
+    der::{oid::ObjectIdentifier, Decode},
+    spki::SubjectPublicKeyInfoRef,
+};
 
-use super::x509_certificate::{self, Certificate as X509Certificate, PublicKey as X509PublicKey};
+use super::x509_certificate::{self, Certificate as X509Certificate};
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -275,15 +280,76 @@ fn verify_x509_certificate_signature(
 }
 
 fn import_spki_key(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<SymCryptKey> {
-    match x509_certificate::parse_spki(spki_der, algorithm)? {
-        X509PublicKey::Ec { algorithm, point } => {
-            let key = EcKey::set_public_key(ec_curve_type(algorithm), point, EcKeyUsage::EcDsa)
-                .map_err(|e| format!("Failed to import SymCrypt EC public key: {e:?}"))?;
+    let spki = SubjectPublicKeyInfoRef::from_der(spki_der)
+        .map_err(|e| format!("Failed to parse public key SPKI: {e:?}"))?;
+    let key_bytes = spki
+        .subject_public_key
+        .as_bytes()
+        .ok_or("Public key SPKI bit string is not byte-aligned")?;
+
+    match algorithm {
+        SignatureKeyAlgorithm::Ec(algorithm) => {
+            // RFC 5480 section 2.1.1 defines id-ecPublicKey.
+            // https://www.rfc-editor.org/rfc/rfc5480.html#section-2.1.1
+            if spki.algorithm.oid != ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") {
+                return Err(
+                    format!("Expected EC public key OID, got {}", spki.algorithm.oid).into(),
+                );
+            }
+
+            let curve_oid = spki
+                .algorithm
+                .parameters
+                .ok_or("EC public key curve parameters are required")?
+                .decode_as::<ObjectIdentifier>()
+                .map_err(|e| format!("Failed to parse EC curve OID: {e:?}"))?;
+            if curve_oid != ec_curve_oid(algorithm) {
+                return Err(format!(
+                    "EC public key curve does not match requested {} algorithm",
+                    algorithm.name()
+                )
+                .into());
+            }
+
+            let expected_len = 1 + 2 * algorithm.scalar_byte_len();
+            if key_bytes.len() != expected_len || key_bytes.first() != Some(&0x04) {
+                return Err(format!(
+                    "An uncompressed SEC1 {} public key is required",
+                    algorithm.name()
+                )
+                .into());
+            }
+
+            let key =
+                EcKey::set_public_key(ec_curve_type(algorithm), &key_bytes[1..], EcKeyUsage::EcDsa)
+                    .map_err(|e| format!("Failed to import SymCrypt EC public key: {e:?}"))?;
             Ok(SymCryptKey::Ec(key))
         }
-        X509PublicKey::Rsa { modulus, exponent } => {
-            let key = RsaKey::set_public_key(modulus, exponent, RsaKeyUsage::Sign)
-                .map_err(|e| format!("Failed to import SymCrypt RSA public key: {e:?}"))?;
+        SignatureKeyAlgorithm::RsaPss(_) | SignatureKeyAlgorithm::RsaPkcs1v15(_) => {
+            // RFC 8017 appendix A.1 defines rsaEncryption.
+            // https://www.rfc-editor.org/rfc/rfc8017.html#appendix-A.1
+            if spki.algorithm.oid != ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") {
+                return Err(
+                    format!("Expected RSA public key OID, got {}", spki.algorithm.oid).into(),
+                );
+            }
+            if spki
+                .algorithm
+                .parameters
+                .map(|parameters| !parameters.is_null())
+                .unwrap_or(false)
+            {
+                return Err("Unsupported RSA public key parameters".into());
+            }
+
+            let rsa = RsaPublicKey::from_der(key_bytes)
+                .map_err(|e| format!("Failed to parse PKCS#1 RSA public key: {e:?}"))?;
+            let key = RsaKey::set_public_key(
+                rsa.modulus.as_bytes(),
+                rsa.public_exponent.as_bytes(),
+                RsaKeyUsage::Sign,
+            )
+            .map_err(|e| format!("Failed to import SymCrypt RSA public key: {e:?}"))?;
             Ok(SymCryptKey::Rsa(key))
         }
     }
@@ -304,6 +370,16 @@ fn ec_curve_type(algorithm: EcSignatureKeyAlgorithm) -> CurveType {
         EcSignatureKeyAlgorithm::P256 => CurveType::NistP256,
         EcSignatureKeyAlgorithm::P384 => CurveType::NistP384,
         EcSignatureKeyAlgorithm::P521 => CurveType::NistP521,
+    }
+}
+
+fn ec_curve_oid(algorithm: EcSignatureKeyAlgorithm) -> ObjectIdentifier {
+    // RFC 5480 section 2.1.1.1 defines the secp256r1, secp384r1, and secp521r1 OIDs.
+    // https://www.rfc-editor.org/rfc/rfc5480.html#section-2.1.1.1
+    match algorithm {
+        EcSignatureKeyAlgorithm::P256 => ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7"),
+        EcSignatureKeyAlgorithm::P384 => ObjectIdentifier::new_unwrap("1.3.132.0.34"),
+        EcSignatureKeyAlgorithm::P521 => ObjectIdentifier::new_unwrap("1.3.132.0.35"),
     }
 }
 
