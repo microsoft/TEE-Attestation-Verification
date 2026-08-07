@@ -60,6 +60,7 @@ fn display_name(certificate: &Certificate, subject: bool) -> String {
 
 impl Certificate {
     fn from_der(der: &[u8]) -> Result<Self> {
+        let der = certificate_der(der)?;
         NativeCertificate::from_der(der)?;
         Ok(Self(Arc::from(der)))
     }
@@ -688,6 +689,43 @@ fn validate_oid(oid: &str) -> Result<()> {
         return Err("Invalid dotted-decimal OID".into());
     }
     Ok(())
+}
+
+fn certificate_der(input: &[u8]) -> Result<&[u8]> {
+    if input.first() != Some(&0x30) {
+        return Err("Certificate is not a DER SEQUENCE".into());
+    }
+    let first = *input.get(1).ok_or("Truncated DER certificate")?;
+    let (header_len, content_len) = if first & 0x80 == 0 {
+        (2, first as usize)
+    } else {
+        let length_bytes = (first & 0x7f) as usize;
+        if length_bytes == 0 || length_bytes > size_of::<usize>() {
+            return Err("Invalid DER certificate length".into());
+        }
+        let encoded = input
+            .get(2..2 + length_bytes)
+            .ok_or("Truncated DER certificate length")?;
+        if encoded[0] == 0 {
+            return Err("Non-minimal DER certificate length".into());
+        }
+        let content_len = encoded.iter().try_fold(0usize, |length, byte| {
+            length
+                .checked_mul(256)
+                .and_then(|length| length.checked_add(*byte as usize))
+                .ok_or("DER certificate length overflow")
+        })?;
+        if content_len < 128 {
+            return Err("Non-minimal DER certificate length".into());
+        }
+        (2 + length_bytes, content_len)
+    };
+    let total_len = header_len
+        .checked_add(content_len)
+        .ok_or("DER certificate length overflow")?;
+    input
+        .get(..total_len)
+        .ok_or_else(|| "Truncated DER certificate".into())
 }
 
 fn native_len(input: &[u8]) -> Result<u32> {

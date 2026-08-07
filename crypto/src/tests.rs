@@ -305,10 +305,15 @@ fn legacy_x509_certificate_pem_label_is_accepted() {
 #[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
 #[test]
 fn certificate_der_with_trailing_bytes_is_accepted() {
-    let mut der = Crypto::to_der(&cert(MILAN_VCEK)).expect("Fixture should encode");
+    let expected = Crypto::to_der(&cert(MILAN_VCEK)).expect("Fixture should encode");
+    let mut der = expected.clone();
     der.extend_from_slice(&[0xde, 0xad]);
 
-    Crypto::from_der(&der).expect("Trailing DER bytes should be ignored");
+    let parsed = Crypto::from_der(&der).expect("Trailing DER bytes should be ignored");
+    assert_eq!(
+        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
+        expected
+    );
 }
 
 #[test]
