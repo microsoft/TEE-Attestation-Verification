@@ -20,14 +20,7 @@ Native targets prefer `crypto_openssl` when enabled, then `crypto_symcrypt`,
 then `crypto_pure_rust`.
 WASM targets prefer `crypto_webcrypto` when enabled, then `crypto_pure_rust`.
 
-The SymCrypt backend uses the released `symcrypt` Rust crate version 0.5.1,
-which supports SymCrypt 103.4.2 and later. Windows CI validates it against the
-official SymCrypt 103.11.0 AMD64 release. Set `SYMCRYPT_LIB_PATH` to the
-directory containing `symcrypt.lib` when building on Windows. Windows does not
-generally provide SymCrypt: applications must deploy a compatible
-`symcrypt.dll` beside the executable. Some Azure Marketplace Windows Server
-images include an older copy in System32, which should not be treated as an
-application dependency.
+The SymCrypt backend is tested against SymCrypt 103.11.0.
 
 ## Scope
 
