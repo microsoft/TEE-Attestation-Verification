@@ -23,6 +23,7 @@ Read the crate-specific docs for API details:
 
 - [`attestation/README.md`](attestation/README.md)
 - [`caci/README.md`](caci/README.md)
+- [`crypto/README.md`](crypto/README.md)
 - [`ffi/README.md`](ffi/README.md)
 
 ## Component dependencies
@@ -50,12 +51,13 @@ flowchart LR
 
 ## Crypto backend selection
 
-To be compliant in multiple environments, we provide backends using openssl and webcrypto, as well as a pure rust backend.
+To be compliant in multiple environments, we provide backends using OpenSSL, SymCrypt, and WebCrypto, as well as a pure-Rust backend.
 At least one target-compatible backend must be enabled:
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
 | `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
+| `crypto_symcrypt` | Windows/Linux x86_64/aarch64 | yes | yes | Native SymCrypt-backed verification, tested with SymCrypt 103.11.0. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 

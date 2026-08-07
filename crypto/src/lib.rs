@@ -231,8 +231,6 @@ mod ecdsa_signature;
     crypto_backend = "crypto_webcrypto"
 ))]
 mod x509_certificate;
-#[cfg(crypto_backend = "crypto_symcrypt")]
-mod x509_spki;
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;

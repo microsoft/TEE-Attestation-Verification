@@ -15,9 +15,8 @@ use symcrypt::{
     rsa::{RsaKey, RsaKeyUsage},
 };
 
-use super::x509_certificate::{self, Certificate as X509Certificate};
+use super::x509_certificate::{self, Certificate as X509Certificate, PublicKey as X509PublicKey};
 use super::x509_policy;
-use super::x509_spki::{self, PublicKey as X509PublicKey};
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
     EcSignatureKeyAlgorithm, KeyBackend, Result, RsaPkcs1v15SignatureKeyAlgorithm,
@@ -276,7 +275,7 @@ fn verify_x509_certificate_signature(
 }
 
 fn import_spki_key(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<SymCryptKey> {
-    match x509_spki::parse_spki(spki_der, algorithm)? {
+    match x509_certificate::parse_spki(spki_der, algorithm)? {
         X509PublicKey::Ec { algorithm, point } => {
             let key = EcKey::set_public_key(ec_curve_type(algorithm), point, EcKeyUsage::EcDsa)
                 .map_err(|e| format!("Failed to import SymCrypt EC public key: {e:?}"))?;
