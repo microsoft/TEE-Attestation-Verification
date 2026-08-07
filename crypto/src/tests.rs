@@ -10,6 +10,7 @@ const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 const GENOA_ARK: &[u8] = include_bytes!("test_data/genoa_ark.pem");
 const GENOA_ASK: &[u8] = include_bytes!("test_data/genoa_ask.pem");
 const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
+const SELF_SIGNED_LEAF: &[u8] = include_bytes!("test_data/self_signed_leaf.pem");
 
 const EC_TEST_MESSAGE: &[u8] = b"tee-attestation-verification crypto ec curve test vector";
 const RSA_PSS_TEST_MESSAGE: &[u8] = b"tee-attestation-verification crypto rsa-pss test vector";
@@ -325,6 +326,12 @@ mod sync_tests {
     }
 
     #[test]
+    fn self_signed_target_may_be_its_own_trust_anchor() {
+        let target = cert(SELF_SIGNED_LEAF);
+        <Crypto as CryptoBackend>::verify_chain(&target, &[], &target, None).unwrap();
+    }
+
+    #[test]
     fn genoa_substitution_in_milan_chain_fails() {
         <Crypto as CryptoBackend>::verify_chain(
             &cert(GENOA_ARK),
@@ -558,6 +565,15 @@ mod async_tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     async fn self_signed_certificates() {
         <Crypto as AsyncCryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK), None)
+            .await
+            .unwrap();
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn self_signed_target_may_be_its_own_trust_anchor() {
+        let target = cert(SELF_SIGNED_LEAF);
+        <Crypto as AsyncCryptoBackend>::verify_chain(&target, &[], &target, None)
             .await
             .unwrap();
     }
