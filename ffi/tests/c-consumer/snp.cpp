@@ -157,6 +157,60 @@ TEST_CASE("snp: a tampered report fails verification and leaves the handle null"
     tav_error_free(error);
 }
 
+TEST_CASE("snp: unverified bytes expose report fields without authenticating them") {
+    MilanInputs in = load_milan_inputs();
+    in.report.at(0x90) ^= 0xff;
+
+    TavSnpAttestationReport *report = nullptr;
+    TavError *error = tav_snp_attestation_report_from_unverified_bytes(
+        in.report.data(), in.report.size(), &report);
+
+    REQUIRE(error == nullptr);
+    REQUIRE(report != nullptr);
+    CHECK(hex_field(report, tav_snp_attestation_report_measurement).rfind("a0", 0) == 0);
+    tav_snp_attestation_report_free(report);
+}
+
+TEST_CASE("snp: invalid unverified report length leaves the handle null") {
+    MilanInputs in = load_milan_inputs();
+    in.report.pop_back();
+
+    TavSnpAttestationReport *report =
+        reinterpret_cast<TavSnpAttestationReport *>(0x1);
+    TavError *error = tav_snp_attestation_report_from_unverified_bytes(
+        in.report.data(), in.report.size(), &report);
+
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(std::string(tav_error_message(error)) ==
+          "Invalid attestation report: expected 1184 bytes, got 1183");
+    CHECK(report == nullptr);
+    tav_error_free(error);
+}
+
+TEST_CASE("snp: unverified report constructor validates pointers") {
+    MilanInputs in = load_milan_inputs();
+
+    TavSnpAttestationReport *report =
+        reinterpret_cast<TavSnpAttestationReport *>(0x1);
+    TavError *error = tav_snp_attestation_report_from_unverified_bytes(
+        nullptr, in.report.size(), &report);
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(std::string(tav_error_message(error)) ==
+          "attestation report pointer is null");
+    CHECK(report == nullptr);
+    tav_error_free(error);
+
+    error = tav_snp_attestation_report_from_unverified_bytes(
+        in.report.data(), in.report.size(), nullptr);
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(std::string(tav_error_message(error)) ==
+          "out_report pointer is null");
+    tav_error_free(error);
+}
+
 TEST_CASE("snp: oversized input is rejected before any dereference") {
     uint8_t dummy = 0;
     TavSnpAttestationReport *report = nullptr;

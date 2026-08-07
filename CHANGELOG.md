@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.7]
+
+[1.0.7]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.7
+
+### Added
+
+- C and .NET FFI constructors for decoding SNP reports without verification. (#101)
+
 ## [1.0.6]
 
 [1.0.6]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.6

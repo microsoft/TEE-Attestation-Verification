@@ -8,7 +8,7 @@ repository's native C ABI.
 Add the package from your configured NuGet feed:
 
 ```bash
-dotnet add package TeeAttestationVerification --version 1.0.6
+dotnet add package TeeAttestationVerification --version 1.0.7
 ```
 
 The runtime environment must provide:
@@ -16,6 +16,19 @@ The runtime environment must provide:
 - a Linux x64 process;
 - glibc 2.35 or newer;
 - OpenSSL 3 (`libssl.so.3` and `libcrypto.so.3`).
+
+## Inspect an unverified SNP report
+
+```csharp
+using SnpAttestationReport report =
+    SnpAttestationReport.FromUnverifiedBytes(reportBytes);
+byte[] chipId = report.ChipId();
+```
+
+`FromUnverifiedBytes` checks only that the input has the fixed SNP report size.
+Field values, reserved bytes, signatures, certificates, and TCBs remain
+untrusted. Use `VerifySnpAttestation` before making trust decisions, and do not
+pass an unverified report to `VerifyCaciAttestation`.
 
 ## Verify a CACI attestation
 
