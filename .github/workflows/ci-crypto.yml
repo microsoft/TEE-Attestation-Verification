@@ -29,41 +29,20 @@ jobs:
       - name: Install SymCrypt
         shell: pwsh
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP "symcrypt.zip"
-          $installDir = Join-Path $env:RUNNER_TEMP "symcrypt"
-          Invoke-WebRequest `
-            -Uri "https://github.com/microsoft/SymCrypt/releases/download/v103.11.0/symcrypt-windows-amd64-release-103.11.0-748c20f1.zip" `
-            -OutFile $archive
-          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          if ($actualHash -ne "5e2a9e60c03a60b952e84a3b50984f0d723a4b3ec1585f9cf6e800d4bd61159e") {
-            throw "Unexpected SymCrypt archive SHA-256: $actualHash"
+          $archive = "$env:RUNNER_TEMP\symcrypt.zip"
+          $installDir = "$env:RUNNER_TEMP\symcrypt"
+          Invoke-WebRequest "https://github.com/microsoft/SymCrypt/releases/download/v103.11.0/symcrypt-windows-amd64-release-103.11.0-748c20f1.zip" -OutFile $archive
+          if ((Get-FileHash $archive).Hash.ToLowerInvariant() -ne "5e2a9e60c03a60b952e84a3b50984f0d723a4b3ec1585f9cf6e800d4bd61159e") {
+            throw "Unexpected SymCrypt archive SHA-256"
           }
-          Expand-Archive -Path $archive -DestinationPath $installDir
-          "SYMCRYPT_LIB_PATH=$installDir\dll" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Check SymCrypt runtime
-        shell: pwsh
-        run: |
-          $runtime = Join-Path $env:SYMCRYPT_LIB_PATH "symcrypt.dll"
-          $version = [version]((Get-Item $runtime).VersionInfo.FileVersion)
-          if ($version -lt [version]"103.4.2") {
-            throw "SymCrypt runtime $version is older than required version 103.4.2"
-          }
-          Write-Host "Using SymCrypt runtime $version from $runtime"
-
-      - name: Build workspace with SymCrypt backend
-        run: |
-          cargo test --workspace --no-default-features --features crypto_symcrypt --no-run
-          cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_symcrypt
-
-      - name: Stage SymCrypt runtime
-        shell: pwsh
-        run: |
-          Copy-Item "$env:SYMCRYPT_LIB_PATH\symcrypt.dll" "target\debug\symcrypt.dll" -Force
-          Copy-Item "$env:SYMCRYPT_LIB_PATH\symcrypt.dll" "target\debug\deps\symcrypt.dll" -Force
+          Expand-Archive $archive $installDir
+          "SYMCRYPT_LIB_PATH=$installDir\dll" >> $env:GITHUB_ENV
+          "$installDir\dll" >> $env:GITHUB_PATH
 
       - name: Test workspace with SymCrypt backend
-        run: cargo test --workspace --no-default-features --features crypto_symcrypt -- --nocapture
+        run: |
+          cargo test --workspace --no-default-features --features crypto_symcrypt -- --nocapture
+          cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_symcrypt
 
   linux-symcrypt:
     name: Linux SymCrypt backend
