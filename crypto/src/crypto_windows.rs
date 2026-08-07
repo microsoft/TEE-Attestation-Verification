@@ -28,6 +28,7 @@ const PEM_LABELS: [(&[u8], &[u8]); 2] = [
 
 pub struct Crypto;
 
+// Own DER for Send + Sync, then reparse it into a short-lived NativeCertificate for each operation.
 #[derive(Clone, Debug)]
 pub struct Certificate(Arc<[u8]>);
 
@@ -76,24 +77,6 @@ impl Certificate {
         let context = NativeCertificate::from_der(self.der())?;
         operation(&context)
     }
-
-    fn with_extension<T>(
-        &self,
-        oid: &str,
-        operation: impl for<'a> FnOnce(&'a NativeCertificate, Option<&'a CERT_EXTENSION>) -> Result<T>,
-    ) -> Result<T> {
-        validate_oid(oid)?;
-        let oid = CString::new(oid)?;
-        self.with_context(|context| {
-            let extensions = context.extensions()?;
-            let extension = if extensions.is_empty() {
-                None
-            } else {
-                unsafe { CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() }
-            };
-            operation(context, extension)
-        })
-    }
 }
 
 impl NativeCertificate {
@@ -120,6 +103,16 @@ impl NativeCertificate {
     fn extensions(&self) -> Result<&[CERT_EXTENSION]> {
         let info = self.info()?;
         unsafe { native_slice(info.rgExtension, info.cExtension, self) }
+    }
+
+    fn extension(&self, oid: &str) -> Result<Option<&CERT_EXTENSION>> {
+        validate_oid(oid)?;
+        let oid = CString::new(oid)?;
+        let extensions = self.extensions()?;
+        if extensions.is_empty() {
+            return Ok(None);
+        }
+        Ok(unsafe { CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
     }
 }
 
@@ -216,8 +209,9 @@ impl CertificateBackend for Crypto {
     }
 
     fn get_extension_value_by_oid(cert: &Certificate, oid: &str) -> Result<Option<Vec<u8>>> {
-        cert.with_extension(oid, |context, extension| {
-            extension
+        cert.with_context(|context| {
+            context
+                .extension(oid)?
                 .map(|ext| unsafe {
                     native_slice(ext.Value.pbData, ext.Value.cbData, context).map(<[u8]>::to_vec)
                 })
@@ -259,8 +253,8 @@ impl CertificateBackend for Crypto {
     }
 
     fn basic_constraints(cert: &Certificate) -> Result<Option<super::BasicConstraints>> {
-        cert.with_extension("2.5.29.19", |context, extension| {
-            let Some(ext) = extension else {
+        cert.with_context(|context| {
+            let Some(ext) = context.extension("2.5.29.19")? else {
                 return Ok(None);
             };
             let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
@@ -278,24 +272,20 @@ impl CertificateBackend for Crypto {
     }
 
     fn key_usage(cert: &Certificate) -> Result<Option<super::KeyUsage>> {
-        cert.with_extension("2.5.29.15", |_, extension| {
-            if extension.is_none() {
+        cert.with_context(|context| {
+            if context.extension("2.5.29.15")?.is_none() {
                 return Ok(None);
             }
-            cert.with_context(|context| {
-                let mut usage = [0];
-                unsafe { CertGetIntendedKeyUsage(X509_ASN_ENCODING, context.info()?, &mut usage) }?;
-                Ok(Some(super::KeyUsage {
-                    key_cert_sign: usage[0] & CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
-                }))
-            })
+            let mut usage = [0];
+            unsafe { CertGetIntendedKeyUsage(X509_ASN_ENCODING, context.info()?, &mut usage) }?;
+            Ok(Some(super::KeyUsage {
+                key_cert_sign: usage[0] & CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
+            }))
         })
     }
 
     fn extension_criticality(cert: &Certificate, oid: &str) -> Result<Option<bool>> {
-        cert.with_extension(oid, |_, extension| {
-            Ok(extension.map(|ext| ext.fCritical.as_bool()))
-        })
+        cert.with_context(|context| Ok(context.extension(oid)?.map(|ext| ext.fCritical.as_bool())))
     }
 
     fn critical_extension_oids(cert: &Certificate) -> Vec<String> {
