@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(all(async_crypto, not(sync_crypto)))]
+#![allow(unused)]
+
 use std::{future::Future, pin::Pin};
 
-#[cfg(crypto_backend = "crypto_symcrypt")]
 use pkcs1::RsaPublicKey;
 use pkcs1::{RsaPssParams, TrailerField};
 use x509_cert::der::{
@@ -13,10 +13,8 @@ use x509_cert::der::{
 };
 use x509_cert::ext::pkix::{BasicConstraints as X509BasicConstraints, KeyUsage as X509KeyUsage};
 use x509_cert::spki::AlgorithmIdentifierOwned;
-#[cfg(crypto_backend = "crypto_symcrypt")]
 use x509_cert::spki::SubjectPublicKeyInfoRef;
 
-#[cfg(crypto_backend = "crypto_symcrypt")]
 use super::EcSignatureKeyAlgorithm;
 use super::{
     BasicConstraints, KeyUsage, Result, RsaPkcs1v15SignatureKeyAlgorithm,
@@ -28,7 +26,6 @@ pub struct Certificate {
     inner: x509_cert::Certificate,
 }
 
-#[cfg(crypto_backend = "crypto_symcrypt")]
 pub(crate) enum PublicKey<'a> {
     Ec {
         algorithm: EcSignatureKeyAlgorithm,
@@ -40,7 +37,6 @@ pub(crate) enum PublicKey<'a> {
     },
 }
 
-#[cfg(crypto_backend = "crypto_symcrypt")]
 pub(crate) fn parse_spki(
     spki_der: &[u8],
     algorithm: SignatureKeyAlgorithm,
@@ -113,17 +109,17 @@ pub(crate) fn parse_spki(
     }
 }
 
-#[cfg(crypto_backend = "crypto_symcrypt")]
 fn ec_curve_oid(algorithm: EcSignatureKeyAlgorithm) -> ObjectIdentifier {
+    // RFC 5480 section 2.1.1.1 defines the secp256r1, secp384r1, and secp521r1 OIDs.
+    // https://www.rfc-editor.org/rfc/rfc5480.html#section-2.1.1.1
     match algorithm {
-        EcSignatureKeyAlgorithm::P256 => oid::P256,
-        EcSignatureKeyAlgorithm::P384 => oid::P384,
-        EcSignatureKeyAlgorithm::P521 => oid::P521,
+        EcSignatureKeyAlgorithm::P256 => ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7"),
+        EcSignatureKeyAlgorithm::P384 => ObjectIdentifier::new_unwrap("1.3.132.0.34"),
+        EcSignatureKeyAlgorithm::P521 => ObjectIdentifier::new_unwrap("1.3.132.0.35"),
     }
 }
 
 /// Synchronous checking of a certificate path
-#[cfg(sync_crypto)]
 pub fn verify_certificate_path(
     mut verify_signature: impl FnMut(&Certificate, &Certificate) -> Result<()>,
     root_trust_anchor: &Certificate,
@@ -151,9 +147,6 @@ pub fn verify_certificate_path(
 }
 
 /// Asynchronous checking of the certificate path
-// If sync_crypto enabled, this is automatically dispatched to verify_certificate_path
-// So disable if sync_crypto is enabled to avoid unused warnings
-#[cfg(all(async_crypto, not(sync_crypto)))]
 pub async fn verify_certificate_path_async<F>(
     mut verify_signature: F,
     root_trust_anchor: &Certificate,
@@ -419,15 +412,7 @@ fn rsa_pss_hash_oid(algorithm: RsaPssSignatureKeyAlgorithm) -> ObjectIdentifier 
 mod oid {
     use x509_cert::der::oid::ObjectIdentifier;
 
-    #[cfg(crypto_backend = "crypto_symcrypt")]
     pub const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
-    #[cfg(crypto_backend = "crypto_symcrypt")]
-    pub const P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
-    #[cfg(crypto_backend = "crypto_symcrypt")]
-    pub const P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
-    #[cfg(crypto_backend = "crypto_symcrypt")]
-    pub const P521: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.35");
-    #[cfg(crypto_backend = "crypto_symcrypt")]
     pub const RSA_ENCRYPTION: ObjectIdentifier =
         ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
 

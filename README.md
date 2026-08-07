@@ -57,7 +57,7 @@ At least one target-compatible backend must be enabled:
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
 | `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
-| `crypto_symcrypt` | Windows/Linux x86_64/aarch64 | yes | yes | Native SymCrypt-backed verification, tested with SymCrypt 103.11.0. |
+| `crypto_symcrypt` | Native | yes | yes | Native SymCrypt-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 
