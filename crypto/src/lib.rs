@@ -221,11 +221,18 @@ pub(crate) mod crypto_symcrypt;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
 #[cfg(any(
+    crypto_backend = "crypto_symcrypt",
+    crypto_backend = "crypto_webcrypto"
+))]
+mod ecdsa_signature;
+#[cfg(any(
     crypto_backend = "crypto_pure_rust",
     crypto_backend = "crypto_symcrypt",
     crypto_backend = "crypto_webcrypto"
 ))]
 mod x509_certificate;
+#[cfg(crypto_backend = "crypto_symcrypt")]
+mod x509_spki;
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;

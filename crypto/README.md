@@ -12,7 +12,7 @@ backend features are enabled, `build.rs` selects the target-preferred backend.
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
 | `crypto_openssl` | Native | yes | yes | Uses OpenSSL for native certificate-chain verification and primitive verification. |
-| `crypto_symcrypt` | Windows/Linux x86_64/aarch64 | yes | yes | Uses SymCrypt for primitive verification and the shared X.509 path validator. Requires a compatible SymCrypt dynamic library. |
+| `crypto_symcrypt` | Windows/Linux x86_64/aarch64 | yes | yes | Uses SymCrypt for primitive verification and the shared X.509 path validator. Requires a compatible SymCrypt dynamic library and uncompressed SEC1 EC public keys. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for primitive verification and the shared X.509 path validator. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Uses RustCrypto crates and the shared X.509 path validator. |
 

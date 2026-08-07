@@ -1068,7 +1068,6 @@ dependencies = [
 name = "tee-attestation-verification-crypto"
 version = "1.0.6"
 dependencies = [
- "der",
  "ecdsa",
  "foreign-types",
  "getrandom",

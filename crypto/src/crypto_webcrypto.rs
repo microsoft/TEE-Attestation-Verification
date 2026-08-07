@@ -55,7 +55,7 @@ impl SignatureBackend for Signature {
         match algorithm {
             SignatureKeyAlgorithm::Ec(algorithm) => Ok(Signature::Ecdsa {
                 algorithm,
-                fixed: ecdsa_der_to_fixed(signature, algorithm)?,
+                fixed: super::ecdsa_signature::ecdsa_der_to_fixed(signature, algorithm)?,
             }),
             SignatureKeyAlgorithm::RsaPss(algorithm) => Ok(Signature::RsaPss {
                 algorithm,
@@ -69,22 +69,10 @@ impl SignatureBackend for Signature {
     }
 
     fn from_ec_components(r: &[u8], s: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Self> {
-        let expected_len = algorithm.scalar_byte_len();
-        if r.len() != expected_len || s.len() != expected_len {
-            return Err(format!(
-                "Invalid ECDSA {} component length: expected {}, got r={} s={}",
-                algorithm.name(),
-                expected_len,
-                r.len(),
-                s.len()
-            )
-            .into());
-        }
-
-        let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
-        fixed.extend_from_slice(r);
-        fixed.extend_from_slice(s);
-        Ok(Signature::Ecdsa { algorithm, fixed })
+        Ok(Signature::Ecdsa {
+            algorithm,
+            fixed: super::ecdsa_signature::fixed_from_components(r, s, algorithm)?,
+        })
     }
 }
 
@@ -349,111 +337,6 @@ fn verify_params(algorithm: SignatureKeyAlgorithm) -> Result<Object> {
         SignatureKeyAlgorithm::RsaPss(algorithm) => rsa_pss_verify_params(algorithm.salt_len()),
         SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => rsa_pkcs1v15_params(algorithm.digest()),
     }
-}
-
-fn ecdsa_der_to_fixed(signature: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec<u8>> {
-    let mut index = 0;
-    if signature.get(index) != Some(&0x30) {
-        return Err("ECDSA signature must be a DER SEQUENCE".into());
-    }
-    index += 1;
-
-    let sequence_len = read_der_len(signature, &mut index)?;
-    let sequence_end = index
-        .checked_add(sequence_len)
-        .ok_or("ECDSA signature DER length overflow")?;
-    if sequence_end != signature.len() {
-        return Err("ECDSA signature DER SEQUENCE length does not match input".into());
-    }
-
-    let r = read_der_integer_fixed(signature, &mut index, sequence_end, "r", algorithm)?;
-    let s = read_der_integer_fixed(signature, &mut index, sequence_end, "s", algorithm)?;
-    if index != sequence_end {
-        return Err("ECDSA signature DER SEQUENCE has trailing data".into());
-    }
-
-    let mut fixed = Vec::with_capacity(algorithm.fixed_signature_byte_len());
-    fixed.extend_from_slice(&r);
-    fixed.extend_from_slice(&s);
-    Ok(fixed)
-}
-
-fn read_der_len(input: &[u8], index: &mut usize) -> Result<usize> {
-    let first = *input
-        .get(*index)
-        .ok_or("Unexpected end of DER while reading length")?;
-    *index += 1;
-
-    if first & 0x80 == 0 {
-        return Ok(first as usize);
-    }
-
-    let len_len = (first & 0x7f) as usize;
-    if len_len == 0 {
-        return Err("Indefinite DER lengths are not supported".into());
-    }
-    if len_len > std::mem::size_of::<usize>() {
-        return Err("DER length is too large".into());
-    }
-    if input.len().saturating_sub(*index) < len_len {
-        return Err("Unexpected end of DER while reading long-form length".into());
-    }
-
-    let mut len = 0usize;
-    for byte in &input[*index..*index + len_len] {
-        len = len
-            .checked_mul(256)
-            .and_then(|len| len.checked_add(*byte as usize))
-            .ok_or("DER length overflow")?;
-    }
-    *index += len_len;
-    Ok(len)
-}
-
-fn read_der_integer_fixed(
-    input: &[u8],
-    index: &mut usize,
-    limit: usize,
-    name: &str,
-    algorithm: EcSignatureKeyAlgorithm,
-) -> Result<Vec<u8>> {
-    if *index >= limit || input.get(*index) != Some(&0x02) {
-        return Err(format!("ECDSA signature DER missing INTEGER {name}").into());
-    }
-    *index += 1;
-
-    let len = read_der_len(input, index)?;
-    let end = index
-        .checked_add(len)
-        .ok_or("ECDSA signature DER INTEGER length overflow")?;
-    if len == 0 || end > limit {
-        return Err(format!("Invalid ECDSA signature DER INTEGER {name} length").into());
-    }
-
-    let mut component = &input[*index..end];
-    *index = end;
-
-    if component[0] & 0x80 != 0 {
-        return Err(format!("ECDSA signature DER INTEGER {name} is negative").into());
-    }
-    if component.len() > 1 && component[0] == 0 {
-        component = &component[1..];
-    }
-
-    let expected_len = algorithm.scalar_byte_len();
-    if component.len() > expected_len {
-        return Err(format!(
-            "Invalid ECDSA {} {name} component length: expected <= {}, got {}",
-            algorithm.name(),
-            expected_len,
-            component.len()
-        )
-        .into());
-    }
-
-    let mut fixed = vec![0; expected_len];
-    fixed[expected_len - component.len()..].copy_from_slice(component);
-    Ok(fixed)
 }
 
 fn webcrypto_signature_bytes(

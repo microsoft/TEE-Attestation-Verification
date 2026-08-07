@@ -466,24 +466,16 @@ mod async_tests {
     #[cfg(crypto_backend = "crypto_symcrypt")]
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    async fn ecdsa_compressed_public_key_verifies() {
-        let algorithm = EcSignatureKeyAlgorithm::P256;
-        let key = <Key as AsyncKeyBackend>::from_spki_der(
-            P256_COMPRESSED_SPKI_DER,
-            SignatureKeyAlgorithm::Ec(algorithm),
-        )
-        .await
-        .expect("compressed ECDSA public key should parse");
-        let signature = <Signature as SignatureBackend>::from_ec_components(
-            &P256_SIGNATURE_FIXED[..algorithm.scalar_byte_len()],
-            &P256_SIGNATURE_FIXED[algorithm.scalar_byte_len()..],
-            algorithm,
-        )
-        .expect("ECDSA signature components should parse");
-
-        <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, EC_TEST_MESSAGE)
+    async fn ecdsa_compressed_public_key_is_rejected() {
+        assert!(
+            <Key as AsyncKeyBackend>::from_spki_der(
+                P256_COMPRESSED_SPKI_DER,
+                SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256),
+            )
             .await
-            .expect("ECDSA signature should verify with compressed public key");
+            .is_err(),
+            "compressed ECDSA public key should fail"
+        );
     }
 
     #[cfg(crypto_backend = "crypto_symcrypt")]
