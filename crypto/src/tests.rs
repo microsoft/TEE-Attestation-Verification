@@ -277,6 +277,36 @@ fn extension_lookup_rejects_malformed_oid() {
 }
 
 #[test]
+fn basic_constraints_decode_from_a_certificate_authority() {
+    let constraints = Crypto::basic_constraints(&cert(MILAN_ASK))
+        .expect("Basic constraints should decode")
+        .expect("ASK should have basic constraints");
+
+    assert!(constraints.critical);
+    assert!(constraints.ca);
+    assert_eq!(constraints.path_len_constraint, Some(0));
+
+    assert_eq!(
+        Crypto::basic_constraints(&cert(MILAN_VCEK)).expect("Basic constraints should decode"),
+        None
+    );
+}
+
+#[test]
+fn key_usage_decodes_certificate_signing() {
+    let usage = Crypto::key_usage(&cert(MILAN_ASK))
+        .expect("Key usage should decode")
+        .expect("ASK should have key usage");
+
+    assert!(usage.key_cert_sign);
+
+    assert_eq!(
+        Crypto::key_usage(&cert(MILAN_VCEK)).expect("Key usage should decode"),
+        None
+    );
+}
+
+#[test]
 fn critical_extension_oids_list_the_critical_extensions() {
     let oids = Crypto::critical_extension_oids(&cert(MILAN_ASK));
 
