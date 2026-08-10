@@ -416,29 +416,69 @@ impl CryptoBackend for Crypto {
                 CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL
                     | CERT_CHAIN_DISABLE_AIA
                     | CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE
-                    | CERT_CHAIN_ENABLE_PEER_TRUST,
+                    | CERT_CHAIN_DISABLE_PASS1_QUALITY_FILTERING
+                    | CERT_CHAIN_ENABLE_PEER_TRUST
+                    | CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS,
                 None,
                 &mut raw_chain,
             )
         }?;
         let chain = ChainContext::new(raw_chain)?;
-        let context = chain.as_ref();
-        if context.cChain != 1 {
-            return Err(format!(
-                "Expected one simple certificate chain, found {}",
-                context.cChain
-            )
-            .into());
+        let primary_status = chain.as_ref().TrustStatus.dwErrorStatus;
+        for context in chain.contexts()? {
+            if chain.is_supplied_path(context, trusted, untrusted)? {
+                return Ok(());
+            }
         }
-        let simple_chains = unsafe { native_slice(context.rgpChain, context.cChain, &chain)? };
+        Err(format!(
+            "No acceptable caller-supplied certificate chain (primary trust error 0x{primary_status:08X})"
+        )
+        .into())
+    }
+}
+
+impl ChainContext {
+    fn contexts(&self) -> Result<Vec<&CERT_CHAIN_CONTEXT>> {
+        let primary = self.as_ref();
+        let lower = unsafe {
+            native_slice(
+                primary.rgpLowerQualityChainContext,
+                primary.cLowerQualityChainContext,
+                self,
+            )?
+        };
+        let mut contexts = Vec::with_capacity(lower.len() + 1);
+        contexts.push(primary);
+        for (index, context) in lower.iter().enumerate() {
+            let Some(context) = (unsafe { context.as_ref() }) else {
+                return Err(format!("Null lower-quality certificate chain {index}").into());
+            };
+            contexts.push(context);
+        }
+        Ok(contexts)
+    }
+
+    fn is_supplied_path(
+        &self,
+        context: &CERT_CHAIN_CONTEXT,
+        trusted: &Certificate,
+        untrusted: &[&Certificate],
+    ) -> Result<bool> {
+        if context.TrustStatus.dwErrorStatus != 0 {
+            return Ok(false);
+        }
+        if context.cChain != 1 {
+            return Ok(false);
+        }
+        let simple_chains = unsafe { native_slice(context.rgpChain, context.cChain, self)? };
         let simple = unsafe { simple_chains[0].as_ref() }.ok_or("Null simple certificate chain")?;
         if !simple.pTrustListInfo.is_null() {
-            return Err("CTL-connected certificate chains are not supported".into());
+            return Ok(false);
         }
         if simple.cElement == 0 {
             return Err("Certificate chain contains no elements".into());
         }
-        let elements = unsafe { native_slice(simple.rgpElement, simple.cElement, &chain)? };
+        let elements = unsafe { native_slice(simple.rgpElement, simple.cElement, self)? };
         let contexts = elements
             .iter()
             .map(|element| -> Result<&CERT_CONTEXT> {
@@ -454,7 +494,7 @@ impl CryptoBackend for Crypto {
         let ders = contexts
             .iter()
             .map(|context| unsafe {
-                native_slice(context.pbCertEncoded, context.cbCertEncoded, &chain)
+                native_slice(context.pbCertEncoded, context.cbCertEncoded, self)
             })
             .collect::<Result<Vec<_>>>()?;
         let anchored = ders.last().is_some_and(|der| *der == trusted.der());
@@ -463,12 +503,7 @@ impl CryptoBackend for Crypto {
             .skip(1)
             .take(ders.len().saturating_sub(2))
             .all(|der| untrusted.iter().any(|cert| *der == cert.der()));
-        let status = context.TrustStatus.dwErrorStatus;
-        if status == 0 && anchored && supplied {
-            Ok(())
-        } else {
-            Err(format!("Certificate chain trust error 0x{status:08X}").into())
-        }
+        Ok(anchored && supplied)
     }
 }
 

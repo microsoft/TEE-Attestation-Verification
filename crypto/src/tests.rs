@@ -4,6 +4,9 @@
 use crate::{Certificate, CertificateBackend, Crypto, DigestAlgorithm};
 use std::time::Duration;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_test::wasm_bindgen_test;
+
 const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
 const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
 const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
@@ -259,7 +262,8 @@ fn certificate_parse_and_encode_wrappers_round_trip() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 fn certificate_extension_lookup_returns_native_value_bytes() {
     let vcek = cert(MILAN_VCEK);
 

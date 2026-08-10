@@ -49,11 +49,25 @@ jobs:
           rustup update stable
           rustup default stable
 
-      - name: Build with Windows CNG backend
-        run: cargo build --workspace --no-default-features --features crypto_windows
+      - name: Build and test each crate with Windows CNG backend
+        shell: pwsh
+        run: |
+          $manifests = @(
+            "crypto/Cargo.toml",
+            "cose/Cargo.toml",
+            "attestation/Cargo.toml",
+            "caci/Cargo.toml",
+            "ffi/Cargo.toml"
+          )
+          foreach ($manifest in $manifests) {
+            cargo build --manifest-path $manifest --no-default-features --features crypto_windows
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo test --manifest-path $manifest --no-default-features --features crypto_windows -- --nocapture
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Test with Windows CNG backend
-        run: cargo test --workspace --no-default-features --features crypto_windows -- --nocapture
+      - name: Build verification CLI with Windows CNG backend
+        run: cargo build --manifest-path attestation/Cargo.toml --bin verify-attestation --no-default-features --features crypto_windows,kds
 
   wasm:
     name: WASM ${{ matrix.backend.name }} backend
