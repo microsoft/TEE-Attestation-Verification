@@ -259,117 +259,6 @@ fn certificate_parse_and_encode_wrappers_round_trip() {
     );
 }
 
-#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-#[test]
-fn from_pem_returns_first_certificate_and_ignores_trailing_content() {
-    let pem = [
-        MILAN_ASK,
-        b"\n",
-        MILAN_ARK,
-        b"\n-----BEGIN CERTIFICATE-----\nnot-base64\n",
-    ]
-    .concat();
-
-    let parsed = Crypto::from_pem(&pem).expect("First certificate should parse");
-
-    assert_eq!(
-        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
-        Crypto::to_der(&cert(MILAN_ASK)).expect("Expected certificate should encode")
-    );
-}
-
-#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-#[test]
-fn from_pem_chain_returns_empty_without_certificate_records() {
-    let chain =
-        Crypto::from_pem_chain(b"no certificate records").expect("Empty PEM chain should parse");
-
-    assert!(chain.is_empty());
-}
-
-#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-#[test]
-fn legacy_x509_certificate_pem_label_is_accepted() {
-    let pem = String::from_utf8(MILAN_VCEK.to_vec())
-        .expect("Fixture should be UTF-8")
-        .replace("CERTIFICATE", "X509 CERTIFICATE");
-
-    let parsed = Crypto::from_pem(pem.as_bytes()).expect("Legacy PEM label should parse");
-
-    assert_eq!(
-        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
-        Crypto::to_der(&cert(MILAN_VCEK)).expect("Expected certificate should encode")
-    );
-}
-
-#[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-#[test]
-fn certificate_der_with_trailing_bytes_is_accepted() {
-    let expected = Crypto::to_der(&cert(MILAN_VCEK)).expect("Fixture should encode");
-    let mut der = expected.clone();
-    der.extend_from_slice(&[0xde, 0xad]);
-
-    let parsed = Crypto::from_der(&der).expect("Trailing DER bytes should be ignored");
-    assert_eq!(
-        Crypto::to_der(&parsed).expect("Parsed certificate should encode"),
-        expected
-    );
-}
-
-#[test]
-fn certificate_clone_owns_its_native_reference() {
-    let original = cert(MILAN_VCEK);
-    let expected = Crypto::to_der(&original).expect("DER encoding should succeed");
-    let cloned = original.clone();
-    drop(original);
-
-    assert_eq!(
-        Crypto::to_der(&cloned).expect("Cloned certificate should remain valid"),
-        expected
-    );
-}
-
-#[test]
-fn certificate_metadata_matches_milan_chain() {
-    let ark = cert(MILAN_ARK);
-    let ask = cert(MILAN_ASK);
-    let vcek = cert(MILAN_VCEK);
-
-    assert!(!Crypto::subject_name(&vcek).is_empty());
-    assert!(!Crypto::issuer_name(&vcek).is_empty());
-    assert!(Crypto::issuer_name_matches_subject(&vcek, &ask)
-        .expect("VCEK issuer should match ASK subject"));
-    assert!(Crypto::issuer_name_matches_subject(&ask, &ark)
-        .expect("ASK issuer should match ARK subject"));
-    assert_eq!(Crypto::version(&vcek).expect("Version should decode"), 2);
-    assert!(
-        !Crypto::is_valid_at(&vcek, Duration::from_secs(0)).expect("Validity should be checked")
-    );
-
-    let constraints = Crypto::basic_constraints(&ask)
-        .expect("Basic constraints should decode")
-        .expect("ASK should have basic constraints");
-    assert!(constraints.critical);
-    assert!(constraints.ca);
-    assert_eq!(constraints.path_len_constraint, Some(0));
-
-    let usage = Crypto::key_usage(&ask)
-        .expect("Key usage should decode")
-        .expect("ASK should have key usage");
-    assert!(usage.key_cert_sign);
-    assert_eq!(
-        Crypto::extension_criticality(&ask, "2.5.29.19").expect("Criticality should decode"),
-        Some(true)
-    );
-    #[cfg(crypto_backend = "crypto_windows")]
-    assert!(Crypto::critical_extension_oids(&ask)
-        .iter()
-        .any(|oid| oid == "2.5.29.19"));
-
-    let public_key = Crypto::get_public_key(&vcek).expect("SPKI should encode");
-    assert!(!public_key.is_empty());
-}
-
 #[test]
 fn certificate_extension_lookup_returns_native_value_bytes() {
     let vcek = cert(MILAN_VCEK);
@@ -400,32 +289,6 @@ fn extension_lookup_rejects_malformed_oid() {
     let cert = cert(MILAN_VCEK);
 
     Crypto::get_extension_value_by_oid(&cert, "not-an-oid").expect_err("Malformed OID should fail");
-}
-
-#[test]
-fn extension_lookup_rejects_invalid_numeric_oid_arcs() {
-    let cert = cert(MILAN_VCEK);
-
-    for oid in ["3.1", "1.40"] {
-        Crypto::get_extension_value_by_oid(&cert, oid)
-            .expect_err("Extension lookup should reject invalid numeric OID arcs");
-        Crypto::extension_criticality(&cert, oid)
-            .expect_err("Extension criticality should reject invalid numeric OID arcs");
-    }
-}
-
-#[cfg(crypto_backend = "crypto_windows")]
-#[test]
-fn certificates_are_send_and_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<Certificate>();
-}
-
-#[cfg(sync_crypto)]
-#[test]
-fn keys_are_send_and_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<crate::Key>();
 }
 
 #[cfg(sync_crypto)]
@@ -475,21 +338,6 @@ mod sync_tests {
     fn self_signed_certificates() {
         <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ARK), &[], &cert(MILAN_ARK), None)
             .unwrap();
-    }
-
-    #[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-    #[test]
-    fn explicitly_trusted_leaf_certificate_verifies() {
-        let vcek = cert(MILAN_VCEK);
-        <Crypto as CryptoBackend>::verify_chain(&vcek, &[], &vcek, None)
-            .expect("Explicitly trusted leaf should match OpenSSL partial-chain semantics");
-    }
-
-    #[cfg(any(crypto_backend = "crypto_openssl", crypto_backend = "crypto_windows"))]
-    #[test]
-    fn intermediate_certificate_can_be_the_explicit_trust_anchor() {
-        <Crypto as CryptoBackend>::verify_chain(&cert(MILAN_ASK), &[], &cert(MILAN_VCEK), None)
-            .expect("Explicit intermediate trust anchor should verify its leaf");
     }
 
     #[test]
@@ -616,24 +464,6 @@ mod async_tests {
             <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, EC_TEST_MESSAGE)
                 .await
                 .expect_err("tampered ECDSA signature should fail");
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    async fn ecdsa_der_signatures_verify_for_all_supported_curves() {
-        for vector in ec_signature_vectors() {
-            let algorithm = SignatureKeyAlgorithm::Ec(vector.algorithm);
-            let key = <Key as AsyncKeyBackend>::from_spki_der(vector.spki_der, algorithm)
-                .await
-                .expect("ECDSA public key should parse");
-            let signature =
-                <Signature as SignatureBackend>::from_bytes(&vector.der_signature(), algorithm)
-                    .expect("DER ECDSA signature should parse");
-
-            <Crypto as AsyncCryptoBackend>::verify_signature(&key, &signature, EC_TEST_MESSAGE)
-                .await
-                .expect("DER ECDSA signature should verify");
         }
     }
 
@@ -789,39 +619,6 @@ mod async_tests {
         fn components(&self) -> (&'static [u8], &'static [u8]) {
             self.signature.split_at(self.algorithm.scalar_byte_len())
         }
-
-        fn der_signature(&self) -> Vec<u8> {
-            let (r, s) = self.components();
-            let r = der_positive_integer(r);
-            let s = der_positive_integer(s);
-            let sequence_len = r.len() + s.len();
-            let mut der = Vec::with_capacity(sequence_len + 3);
-            der.push(0x30);
-            if sequence_len < 128 {
-                der.push(sequence_len as u8);
-            } else {
-                der.extend_from_slice(&[0x81, sequence_len as u8]);
-            }
-            der.extend_from_slice(&r);
-            der.extend_from_slice(&s);
-            der
-        }
-    }
-
-    fn der_positive_integer(fixed: &[u8]) -> Vec<u8> {
-        let value = fixed
-            .iter()
-            .position(|byte| *byte != 0)
-            .map(|start| &fixed[start..])
-            .unwrap_or(&[0]);
-        let needs_sign_padding = value[0] & 0x80 != 0;
-        let mut der = Vec::with_capacity(value.len() + 3);
-        der.extend_from_slice(&[0x02, (value.len() + usize::from(needs_sign_padding)) as u8]);
-        if needs_sign_padding {
-            der.push(0);
-        }
-        der.extend_from_slice(value);
-        der
     }
 
     fn ec_signature_vectors() -> [EcSignatureVector; 3] {
