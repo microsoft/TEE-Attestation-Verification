@@ -254,9 +254,10 @@ impl CryptoBackend for Crypto {
             &leaf.inner,
         )?;
 
+        let singleton_path = untrusted_chain.is_empty() && trusted_cert == leaf;
         let policy_path = std::iter::once(trusted_cert)
             .chain(untrusted_chain.iter().copied())
-            .chain(std::iter::once(leaf));
+            .chain((!singleton_path).then_some(leaf));
         x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time.unwrap_or(unix_time_now()?))
     }
 }
