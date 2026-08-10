@@ -276,6 +276,18 @@ fn extension_lookup_rejects_malformed_oid() {
     Crypto::get_extension_value_by_oid(&cert, "not-an-oid").expect_err("Malformed OID should fail");
 }
 
+#[test]
+fn critical_extension_oids_list_the_critical_extensions() {
+    let oids = Crypto::critical_extension_oids(&cert(MILAN_ASK));
+
+    assert!(oids.iter().any(|oid| oid == "2.5.29.19"));
+    assert!(oids
+        .iter()
+        .all(|oid| Crypto::extension_criticality(&cert(MILAN_ASK), oid)
+            .expect("Criticality should decode")
+            == Some(true)));
+}
+
 #[cfg(sync_crypto)]
 mod sync_tests {
     use super::*;
