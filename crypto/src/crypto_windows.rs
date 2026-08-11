@@ -35,12 +35,13 @@ const PEM_LABELS: [(&[u8], &[u8]); 2] = [
 
 pub struct Crypto;
 
-// Own DER for Send + Sync, then reparse it into a short-lived NativeCertificate for each operation.
+/// Owns Crypt32-validated DER and recreates operation-scoped contexts so handles are not shared.
 #[derive(Clone, Debug)]
 pub struct Certificate(Arc<[u8]>);
 
 struct NativeCertificate(NonNull<Crypto32::CERT_CONTEXT>);
 
+/// Owns CNG-validated SPKI DER and recreates operation-scoped keys so handles are not shared.
 pub struct Key {
     spki: Vec<u8>,
     algorithm: SignatureKeyAlgorithm,
@@ -57,20 +58,10 @@ pub struct Signature {
     algorithm: SignatureKeyAlgorithm,
 }
 
-fn display_name(certificate: &Certificate, subject: bool) -> String {
-    certificate
-        .with_context(|context| {
-            let info = context.info()?;
-            name(if subject { &info.Subject } else { &info.Issuer })
-        })
-        .unwrap_or_else(|_| "<unavailable certificate name>".into())
-}
-
 impl Certificate {
     fn from_der(der: &[u8]) -> Result<Self> {
-        let der = certificate_der(der)?;
-        NativeCertificate::from_der(der)?;
-        Ok(Self(Arc::from(der)))
+        let context = NativeCertificate::from_der(der)?;
+        Ok(Self(Arc::from(context.der()?)))
     }
 
     fn der(&self) -> &[u8] {
@@ -108,6 +99,11 @@ impl NativeCertificate {
         unsafe { self.context().pCertInfo.as_ref() }.ok_or_else(|| "Null CERT_INFO".into())
     }
 
+    fn der(&self) -> Result<&[u8]> {
+        let context = self.context();
+        unsafe { native_slice(context.pbCertEncoded, context.cbCertEncoded, self) }
+    }
+
     fn extensions(&self) -> Result<&[Crypto32::CERT_EXTENSION]> {
         let info = self.info()?;
         unsafe { native_slice(info.rgExtension, info.cExtension, self) }
@@ -133,7 +129,23 @@ impl Drop for NativeCertificate {
 impl KeyBackend for Key {
     fn from_spki_der(spki: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         let key = import_key(spki)?;
-        validate_key(&key, algorithm)?;
+        let actual = key_property((*key).into(), BCRYPT_ALGORITHM_NAME)?;
+        let valid = match algorithm {
+            SignatureKeyAlgorithm::Ec(algorithm) => {
+                actual
+                    == match algorithm {
+                        EcSignatureKeyAlgorithm::P256 => "ECDSA_P256",
+                        EcSignatureKeyAlgorithm::P384 => "ECDSA_P384",
+                        EcSignatureKeyAlgorithm::P521 => "ECDSA_P521",
+                    }
+            }
+            _ => actual == "RSA" || actual == "RSA_SIGN",
+        };
+        if !valid {
+            return Err(
+                format!("Public key algorithm {actual} does not match {algorithm:?}").into(),
+            );
+        }
         Ok(Self {
             spki: spki.to_vec(),
             algorithm,
@@ -144,7 +156,23 @@ impl KeyBackend for Key {
 impl SignatureBackend for Signature {
     fn from_bytes(bytes: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         let bytes = match algorithm {
-            SignatureKeyAlgorithm::Ec(ec) => ecdsa_signature(bytes, ec)?,
+            SignatureKeyAlgorithm::Ec(algorithm) => {
+                let decoded = decode::<Crypto32::CERT_ECC_SIGNATURE>(bytes)?;
+                let signature = decoded.as_ref();
+                let width = algorithm.scalar_byte_len();
+                let mut output = vec![0; width * 2];
+                let mut r = unsafe {
+                    native_slice(signature.r.pbData, signature.r.cbData, &decoded)?.to_vec()
+                };
+                let mut s = unsafe {
+                    native_slice(signature.s.pbData, signature.s.cbData, &decoded)?.to_vec()
+                };
+                r.reverse();
+                s.reverse();
+                pad_component(&r, &mut output[..width])?;
+                pad_component(&s, &mut output[width..])?;
+                output
+            }
             _ => bytes.to_vec(),
         };
         Ok(Self { bytes, algorithm })
@@ -166,8 +194,7 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Certificate> {
-        let (record, _) = next_pem_record(pem)?.ok_or("No certificate PEM blocks found")?;
-        Certificate::from_der(&decode_pem(record)?)
+        Certificate::from_der(&decode_pem(pem)?)
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Certificate>> {
@@ -210,6 +237,10 @@ impl CertificateBackend for Crypto {
         {
             return Err(windows::core::Error::from_win32().into());
         }
+        if len as usize > output.len() {
+            return Err("CryptBinaryToStringA output length changed between calls".into());
+        }
+        // The second call reports the written length.
         output.truncate(len as usize);
         if output.last() == Some(&0) {
             output.pop();
@@ -238,11 +269,13 @@ impl CertificateBackend for Crypto {
     }
 
     fn subject_name(cert: &Certificate) -> String {
-        display_name(cert, true)
+        cert.with_context(|context| name(&context.info()?.Subject))
+            .unwrap_or_else(|_| "<unavailable certificate name>".into())
     }
 
     fn issuer_name(cert: &Certificate) -> String {
-        display_name(cert, false)
+        cert.with_context(|context| name(&context.info()?.Issuer))
+            .unwrap_or_else(|_| "<unavailable certificate name>".into())
     }
 
     fn subject_name_der(cert: &Certificate) -> Result<Vec<u8>> {
@@ -272,12 +305,13 @@ impl CertificateBackend for Crypto {
 
     fn basic_constraints(cert: &Certificate) -> Result<Option<super::BasicConstraints>> {
         cert.with_context(|context| {
+            // Basic Constraints, RFC 5280 §4.2.1.9.
             let Some(ext) = context.extension("2.5.29.19")? else {
                 return Ok(None);
             };
             let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
-            let decoded = decode(Crypto32::X509_BASIC_CONSTRAINTS2, encoded)?;
-            let value = decoded_ref::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(&decoded)?;
+            let decoded = decode::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(encoded)?;
+            let value = decoded.as_ref();
             Ok(Some(super::BasicConstraints {
                 critical: ext.fCritical.as_bool(),
                 ca: value.fCA.as_bool(),
@@ -531,14 +565,41 @@ impl ChainContext {
     }
 }
 
-fn decode(kind: PCSTR, input: &[u8]) -> Result<Owned<HLOCAL>> {
+trait DecodeType {
+    const KIND: PCSTR;
+}
+
+impl DecodeType for Crypto32::CERT_ECC_SIGNATURE {
+    const KIND: PCSTR = Crypto32::X509_ECC_SIGNATURE;
+}
+
+impl DecodeType for Crypto32::CERT_BASIC_CONSTRAINTS2_INFO {
+    const KIND: PCSTR = Crypto32::X509_BASIC_CONSTRAINTS2;
+}
+
+impl DecodeType for Crypto32::CERT_PUBLIC_KEY_INFO {
+    const KIND: PCSTR = Crypto32::X509_PUBLIC_KEY_INFO;
+}
+
+struct Decoded<T> {
+    value: NonNull<T>,
+    _allocation: Owned<HLOCAL>,
+}
+
+impl<T> Decoded<T> {
+    fn as_ref(&self) -> &T {
+        unsafe { self.value.as_ref() }
+    }
+}
+
+fn decode<T: DecodeType>(input: &[u8]) -> Result<Decoded<T>> {
     native_len(input)?;
     let mut pointer = std::ptr::null_mut::<c_void>();
     let mut len = 0;
     unsafe {
         Crypto32::CryptDecodeObjectEx(
             Crypto32::X509_ASN_ENCODING,
-            kind,
+            T::KIND,
             input,
             Crypto32::CRYPT_DECODE_ALLOC_FLAG,
             None,
@@ -547,7 +608,47 @@ fn decode(kind: PCSTR, input: &[u8]) -> Result<Owned<HLOCAL>> {
         )
     }?;
     NonNull::<c_void>::new(pointer).ok_or("CryptDecodeObjectEx returned null")?;
-    Ok(unsafe { Owned::new(HLOCAL(pointer)) })
+    let allocation = unsafe { Owned::new(HLOCAL(pointer)) };
+    if (len as usize) < size_of::<T>() {
+        return Err("CryptDecodeObjectEx returned a truncated value".into());
+    }
+    let value =
+        NonNull::new(allocation.0.cast::<T>()).ok_or("CryptDecodeObjectEx returned null")?;
+    if value.as_ptr() as usize % align_of::<T>() != 0 {
+        return Err("Misaligned decoded Windows pointer".into());
+    }
+    Ok(Decoded {
+        value,
+        _allocation: allocation,
+    })
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn output_types_select_matching_decode_kinds() {
+        let signature = decode::<Crypto32::CERT_ECC_SIGNATURE>(&[
+            0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02,
+        ])
+        .expect("ECDSA signature should decode");
+        assert_eq!(signature.as_ref().r.cbData, 1);
+        assert_eq!(signature.as_ref().s.cbData, 1);
+
+        let constraints =
+            decode::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(&[0x30, 0x03, 0x01, 0x01, 0xff])
+                .expect("Basic Constraints should decode");
+        assert!(constraints.as_ref().fCA.as_bool());
+
+        let public_key = decode::<Crypto32::CERT_PUBLIC_KEY_INFO>(&[
+            0x30, 0x1c, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+            0x01, 0x05, 0x00, 0x03, 0x0b, 0x00, 0x30, 0x08, 0x02, 0x01, 0x01, 0x02, 0x03, 0x01,
+            0x00, 0x01,
+        ])
+        .expect("SubjectPublicKeyInfo should decode");
+        assert_eq!(public_key.as_ref().PublicKey.cbData, 10);
+    }
 }
 
 fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {
@@ -603,39 +704,18 @@ fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
-    let info = decode(Crypto32::X509_PUBLIC_KEY_INFO, spki)?;
-    let info = decoded_ref::<Crypto32::CERT_PUBLIC_KEY_INFO>(&info)?;
+    let info = decode::<Crypto32::CERT_PUBLIC_KEY_INFO>(spki)?;
     let mut raw = BCRYPT_KEY_HANDLE::default();
     unsafe {
         Crypto32::CryptImportPublicKeyInfoEx2(
             Crypto32::X509_ASN_ENCODING,
-            info,
+            info.as_ref(),
             Crypto32::CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG,
             None,
             &mut raw,
         )
     }?;
     Ok(unsafe { Owned::new(raw) })
-}
-
-fn validate_key(key: &Owned<BCRYPT_KEY_HANDLE>, expected: SignatureKeyAlgorithm) -> Result<()> {
-    let actual = key_property((**key).into(), BCRYPT_ALGORITHM_NAME)?;
-    let valid = match expected {
-        SignatureKeyAlgorithm::Ec(algorithm) => {
-            actual
-                == match algorithm {
-                    EcSignatureKeyAlgorithm::P256 => "ECDSA_P256",
-                    EcSignatureKeyAlgorithm::P384 => "ECDSA_P384",
-                    EcSignatureKeyAlgorithm::P521 => "ECDSA_P521",
-                }
-        }
-        _ => actual == "RSA" || actual == "RSA_SIGN",
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(format!("Public key algorithm {actual} does not match {expected:?}").into())
-    }
 }
 
 fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
@@ -662,20 +742,6 @@ fn key_u32_property(key: &Owned<BCRYPT_KEY_HANDLE>, property: PCWSTR) -> Result<
         return Err("CNG returned an invalid u32 property length".into());
     }
     Ok(u32::from_ne_bytes(value))
-}
-
-fn ecdsa_signature(der: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec<u8>> {
-    let decoded = decode(Crypto32::X509_ECC_SIGNATURE, der)?;
-    let signature = decoded_ref::<Crypto32::CERT_ECC_SIGNATURE>(&decoded)?;
-    let width = algorithm.scalar_byte_len();
-    let mut output = vec![0; width * 2];
-    let mut r = unsafe { native_slice(signature.r.pbData, signature.r.cbData, &decoded)?.to_vec() };
-    let mut s = unsafe { native_slice(signature.s.pbData, signature.s.cbData, &decoded)?.to_vec() };
-    r.reverse();
-    s.reverse();
-    pad_component(&r, &mut output[..width])?;
-    pad_component(&s, &mut output[width..])?;
-    Ok(output)
 }
 
 fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
@@ -751,57 +817,11 @@ fn validate_oid(oid: &str) -> Result<()> {
     Ok(())
 }
 
-fn certificate_der(input: &[u8]) -> Result<&[u8]> {
-    if input.first() != Some(&0x30) {
-        return Err("Certificate is not a DER SEQUENCE".into());
-    }
-    let first = *input.get(1).ok_or("Truncated DER certificate")?;
-    let (header_len, content_len) = if first & 0x80 == 0 {
-        (2, first as usize)
-    } else {
-        let length_bytes = (first & 0x7f) as usize;
-        if length_bytes == 0 || length_bytes > size_of::<usize>() {
-            return Err("Invalid DER certificate length".into());
-        }
-        let encoded = input
-            .get(2..2 + length_bytes)
-            .ok_or("Truncated DER certificate length")?;
-        if encoded[0] == 0 {
-            return Err("Non-minimal DER certificate length".into());
-        }
-        let content_len = encoded.iter().try_fold(0usize, |length, byte| {
-            length
-                .checked_mul(256)
-                .and_then(|length| length.checked_add(*byte as usize))
-                .ok_or("DER certificate length overflow")
-        })?;
-        if content_len < 128 {
-            return Err("Non-minimal DER certificate length".into());
-        }
-        (2 + length_bytes, content_len)
-    };
-    let total_len = header_len
-        .checked_add(content_len)
-        .ok_or("DER certificate length overflow")?;
-    input
-        .get(..total_len)
-        .ok_or_else(|| "Truncated DER certificate".into())
-}
-
 fn native_len(input: &[u8]) -> Result<u32> {
     input
         .len()
         .try_into()
         .map_err(|_| "Input exceeds the Windows API length limit".into())
-}
-
-fn decoded_ref<T>(allocation: &Owned<HLOCAL>) -> Result<&T> {
-    let pointer = allocation.0.cast::<T>();
-    let pointer = NonNull::new(pointer).ok_or("Null decoded Windows pointer")?;
-    if pointer.as_ptr() as usize % align_of::<T>() != 0 {
-        return Err("Misaligned decoded Windows pointer".into());
-    }
-    Ok(unsafe { pointer.as_ref() })
 }
 
 unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> Result<&'a [T]> {
