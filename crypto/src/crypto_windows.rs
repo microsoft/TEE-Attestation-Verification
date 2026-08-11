@@ -11,7 +11,14 @@ use windows::core::{Owned, PCSTR, PCWSTR, PSTR};
 use windows::Win32::Foundation::{
     FILETIME, HLOCAL, STATUS_INVALID_PARAMETER, STATUS_INVALID_SIGNATURE,
 };
-use windows::Win32::Security::Cryptography::{X509_ASN_ENCODING as X509, *};
+use windows::Win32::Security::Cryptography::{
+    self as Crypto32, BCryptCreateHash, BCryptFinishHash, BCryptGetProperty, BCryptHashData,
+    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALGORITHM_NAME, BCRYPT_ALG_HANDLE,
+    BCRYPT_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_KEY_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS,
+    BCRYPT_PAD_PKCS1, BCRYPT_PAD_PSS, BCRYPT_PKCS1_PADDING_INFO, BCRYPT_PSS_PADDING_INFO,
+    BCRYPT_SHA256_ALGORITHM, BCRYPT_SHA384_ALGORITHM, BCRYPT_SHA512_ALGORITHM,
+    BCRYPT_SIGNATURE_LENGTH,
+};
 
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -32,7 +39,7 @@ pub struct Crypto;
 #[derive(Clone, Debug)]
 pub struct Certificate(Arc<[u8]>);
 
-struct NativeCertificate(NonNull<CERT_CONTEXT>);
+struct NativeCertificate(NonNull<Crypto32::CERT_CONTEXT>);
 
 pub struct Key {
     spki: Vec<u8>,
@@ -82,43 +89,44 @@ impl Certificate {
 impl NativeCertificate {
     fn from_der(der: &[u8]) -> Result<Self> {
         native_len(der)?;
-        let context = unsafe { CertCreateCertificateContext(X509_ASN_ENCODING, der) };
+        let context =
+            unsafe { Crypto32::CertCreateCertificateContext(Crypto32::X509_ASN_ENCODING, der) };
         NonNull::new(context)
             .map(Self)
             .ok_or_else(|| windows::core::Error::from_win32().into())
     }
 
-    fn as_ptr(&self) -> *const CERT_CONTEXT {
+    fn as_ptr(&self) -> *const Crypto32::CERT_CONTEXT {
         self.0.as_ptr()
     }
 
-    fn context(&self) -> &CERT_CONTEXT {
+    fn context(&self) -> &Crypto32::CERT_CONTEXT {
         unsafe { self.0.as_ref() }
     }
 
-    fn info(&self) -> Result<&CERT_INFO> {
+    fn info(&self) -> Result<&Crypto32::CERT_INFO> {
         unsafe { self.context().pCertInfo.as_ref() }.ok_or_else(|| "Null CERT_INFO".into())
     }
 
-    fn extensions(&self) -> Result<&[CERT_EXTENSION]> {
+    fn extensions(&self) -> Result<&[Crypto32::CERT_EXTENSION]> {
         let info = self.info()?;
         unsafe { native_slice(info.rgExtension, info.cExtension, self) }
     }
 
-    fn extension(&self, oid: &str) -> Result<Option<&CERT_EXTENSION>> {
+    fn extension(&self, oid: &str) -> Result<Option<&Crypto32::CERT_EXTENSION>> {
         validate_oid(oid)?;
         let oid = CString::new(oid)?;
         let extensions = self.extensions()?;
         if extensions.is_empty() {
             return Ok(None);
         }
-        Ok(unsafe { CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
+        Ok(unsafe { Crypto32::CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
     }
 }
 
 impl Drop for NativeCertificate {
     fn drop(&mut self) {
-        let _ = unsafe { CertFreeCertificateContext(Some(self.as_ptr())) };
+        let _ = unsafe { Crypto32::CertFreeCertificateContext(Some(self.as_ptr())) };
     }
 }
 
@@ -183,13 +191,20 @@ impl CertificateBackend for Crypto {
     fn to_pem(cert: &Certificate) -> Result<String> {
         native_len(cert.der())?;
         let mut len = 0;
-        let flags = CRYPT_STRING(CRYPT_STRING_BASE64HEADER.0 | CRYPT_STRING_NOCR);
-        if !unsafe { CryptBinaryToStringA(cert.der(), flags, None, &mut len) }.as_bool() {
+        let flags = Crypto32::CRYPT_STRING(
+            Crypto32::CRYPT_STRING_BASE64HEADER.0 | Crypto32::CRYPT_STRING_NOCR,
+        );
+        if !unsafe { Crypto32::CryptBinaryToStringA(cert.der(), flags, None, &mut len) }.as_bool() {
             return Err(windows::core::Error::from_win32().into());
         }
         let mut output = vec![0; len as usize];
         if !unsafe {
-            CryptBinaryToStringA(cert.der(), flags, Some(PSTR(output.as_mut_ptr())), &mut len)
+            Crypto32::CryptBinaryToStringA(
+                cert.der(),
+                flags,
+                Some(PSTR(output.as_mut_ptr())),
+                &mut len,
+            )
         }
         .as_bool()
         {
@@ -204,7 +219,10 @@ impl CertificateBackend for Crypto {
 
     fn get_public_key(cert: &Certificate) -> Result<Vec<u8>> {
         cert.with_context(|context| {
-            encode(X509_PUBLIC_KEY_INFO, &context.info()?.SubjectPublicKeyInfo)
+            encode(
+                Crypto32::X509_PUBLIC_KEY_INFO,
+                &context.info()?.SubjectPublicKeyInfo,
+            )
         })
     }
 
@@ -244,7 +262,7 @@ impl CertificateBackend for Crypto {
     fn is_valid_at(cert: &Certificate, unix_time: Duration) -> Result<bool> {
         let time = filetime(unix_time)?;
         cert.with_context(|context| {
-            Ok(unsafe { CertVerifyTimeValidity(Some(&time), context.info()?) } == 0)
+            Ok(unsafe { Crypto32::CertVerifyTimeValidity(Some(&time), context.info()?) } == 0)
         })
     }
 
@@ -258,8 +276,8 @@ impl CertificateBackend for Crypto {
                 return Ok(None);
             };
             let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
-            let decoded = decode(X509_BASIC_CONSTRAINTS2, encoded)?;
-            let value = decoded_ref::<CERT_BASIC_CONSTRAINTS2_INFO>(&decoded)?;
+            let decoded = decode(Crypto32::X509_BASIC_CONSTRAINTS2, encoded)?;
+            let value = decoded_ref::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(&decoded)?;
             Ok(Some(super::BasicConstraints {
                 critical: ext.fCritical.as_bool(),
                 ca: value.fCA.as_bool(),
@@ -277,9 +295,15 @@ impl CertificateBackend for Crypto {
                 return Ok(None);
             }
             let mut usage = [0];
-            unsafe { CertGetIntendedKeyUsage(X509_ASN_ENCODING, context.info()?, &mut usage) }?;
+            unsafe {
+                Crypto32::CertGetIntendedKeyUsage(
+                    Crypto32::X509_ASN_ENCODING,
+                    context.info()?,
+                    &mut usage,
+                )
+            }?;
             Ok(Some(super::KeyUsage {
-                key_cert_sign: usage[0] & CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
+                key_cert_sign: usage[0] & Crypto32::CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
             }))
         })
     }
@@ -389,36 +413,36 @@ impl CryptoBackend for Crypto {
         for cert in untrusted {
             intermediates.add(cert)?;
         }
-        let mut config = CERT_CHAIN_ENGINE_CONFIG {
-            cbSize: size_of::<CERT_CHAIN_ENGINE_CONFIG>() as u32,
+        let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
+            cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
             hExclusiveRoot: roots.0,
             hExclusiveTrustedPeople: roots.0,
-            dwExclusiveFlags: CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
+            dwExclusiveFlags: Crypto32::CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
             ..Default::default()
         };
-        let mut raw_engine = HCERTCHAINENGINE::default();
-        unsafe { CertCreateCertificateChainEngine(&mut config, &mut raw_engine) }?;
+        let mut raw_engine = Crypto32::HCERTCHAINENGINE::default();
+        unsafe { Crypto32::CertCreateCertificateChainEngine(&mut config, &mut raw_engine) }?;
         let engine = unsafe { Owned::new(raw_engine) };
-        let parameters = CERT_CHAIN_PARA {
-            cbSize: size_of::<CERT_CHAIN_PARA>() as u32,
+        let parameters = Crypto32::CERT_CHAIN_PARA {
+            cbSize: size_of::<Crypto32::CERT_CHAIN_PARA>() as u32,
             ..Default::default()
         };
         let leaf_context = NativeCertificate::from_der(leaf.der())?;
         let time = unix_time.map(filetime).transpose()?;
         let mut raw_chain = std::ptr::null_mut();
         unsafe {
-            CertGetCertificateChain(
+            Crypto32::CertGetCertificateChain(
                 Some(*engine),
                 leaf_context.as_ptr(),
                 time.as_ref().map(|value| value as *const FILETIME),
                 Some(intermediates.0),
                 &parameters,
-                CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL
-                    | CERT_CHAIN_DISABLE_AIA
-                    | CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE
-                    | CERT_CHAIN_DISABLE_PASS1_QUALITY_FILTERING
-                    | CERT_CHAIN_ENABLE_PEER_TRUST
-                    | CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS,
+                Crypto32::CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL
+                    | Crypto32::CERT_CHAIN_DISABLE_AIA
+                    | Crypto32::CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE
+                    | Crypto32::CERT_CHAIN_DISABLE_PASS1_QUALITY_FILTERING
+                    | Crypto32::CERT_CHAIN_ENABLE_PEER_TRUST
+                    | Crypto32::CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS,
                 None,
                 &mut raw_chain,
             )
@@ -438,7 +462,7 @@ impl CryptoBackend for Crypto {
 }
 
 impl ChainContext {
-    fn contexts(&self) -> Result<Vec<&CERT_CHAIN_CONTEXT>> {
+    fn contexts(&self) -> Result<Vec<&Crypto32::CERT_CHAIN_CONTEXT>> {
         let primary = self.as_ref();
         let lower = unsafe {
             native_slice(
@@ -460,7 +484,7 @@ impl ChainContext {
 
     fn is_supplied_path(
         &self,
-        context: &CERT_CHAIN_CONTEXT,
+        context: &Crypto32::CERT_CHAIN_CONTEXT,
         trusted: &Certificate,
         untrusted: &[&Certificate],
     ) -> Result<bool> {
@@ -481,7 +505,7 @@ impl ChainContext {
         let elements = unsafe { native_slice(simple.rgpElement, simple.cElement, self)? };
         let contexts = elements
             .iter()
-            .map(|element| -> Result<&CERT_CONTEXT> {
+            .map(|element| -> Result<&Crypto32::CERT_CONTEXT> {
                 let Some(element) = (unsafe { element.as_ref() }) else {
                     return Err("Null certificate chain element".into());
                 };
@@ -512,11 +536,11 @@ fn decode(kind: PCSTR, input: &[u8]) -> Result<Owned<HLOCAL>> {
     let mut pointer = std::ptr::null_mut::<c_void>();
     let mut len = 0;
     unsafe {
-        CryptDecodeObjectEx(
-            X509_ASN_ENCODING,
+        Crypto32::CryptDecodeObjectEx(
+            Crypto32::X509_ASN_ENCODING,
             kind,
             input,
-            CRYPT_DECODE_ALLOC_FLAG,
+            Crypto32::CRYPT_DECODE_ALLOC_FLAG,
             None,
             Some((&mut pointer as *mut *mut c_void).cast()),
             &mut len,
@@ -530,11 +554,11 @@ fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {
     let mut pointer = std::ptr::null_mut::<c_void>();
     let mut len = 0;
     unsafe {
-        CryptEncodeObjectEx(
-            X509_ASN_ENCODING,
+        Crypto32::CryptEncodeObjectEx(
+            Crypto32::X509_ASN_ENCODING,
             kind,
             (value as *const T).cast(),
-            CRYPT_ENCODE_ALLOC_FLAG,
+            Crypto32::CRYPT_ENCODE_ALLOC_FLAG,
             None,
             Some((&mut pointer as *mut *mut c_void).cast()),
             &mut len,
@@ -565,24 +589,28 @@ fn next_pem_record(input: &[u8]) -> Result<Option<(&[u8], &[u8])>> {
 
 fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
     native_len(pem)?;
-    let flags = CRYPT_STRING(CRYPT_STRING_BASE64HEADER.0 | CRYPT_STRING_STRICT.0);
+    let flags = Crypto32::CRYPT_STRING(
+        Crypto32::CRYPT_STRING_BASE64HEADER.0 | Crypto32::CRYPT_STRING_STRICT.0,
+    );
     let mut len = 0;
-    unsafe { CryptStringToBinaryA(pem, flags, None, &mut len, None, None) }?;
+    unsafe { Crypto32::CryptStringToBinaryA(pem, flags, None, &mut len, None, None) }?;
     let mut output = vec![0; len as usize];
-    unsafe { CryptStringToBinaryA(pem, flags, Some(output.as_mut_ptr()), &mut len, None, None) }?;
+    unsafe {
+        Crypto32::CryptStringToBinaryA(pem, flags, Some(output.as_mut_ptr()), &mut len, None, None)
+    }?;
     output.truncate(len as usize);
     Ok(output)
 }
 
 fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
-    let info = decode(X509_PUBLIC_KEY_INFO, spki)?;
-    let info = decoded_ref::<CERT_PUBLIC_KEY_INFO>(&info)?;
+    let info = decode(Crypto32::X509_PUBLIC_KEY_INFO, spki)?;
+    let info = decoded_ref::<Crypto32::CERT_PUBLIC_KEY_INFO>(&info)?;
     let mut raw = BCRYPT_KEY_HANDLE::default();
     unsafe {
-        CryptImportPublicKeyInfoEx2(
-            X509_ASN_ENCODING,
+        Crypto32::CryptImportPublicKeyInfoEx2(
+            Crypto32::X509_ASN_ENCODING,
             info,
-            CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG,
+            Crypto32::CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG,
             None,
             &mut raw,
         )
@@ -637,8 +665,8 @@ fn key_u32_property(key: &Owned<BCRYPT_KEY_HANDLE>, property: PCWSTR) -> Result<
 }
 
 fn ecdsa_signature(der: &[u8], algorithm: EcSignatureKeyAlgorithm) -> Result<Vec<u8>> {
-    let decoded = decode(X509_ECC_SIGNATURE, der)?;
-    let signature = decoded_ref::<CERT_ECC_SIGNATURE>(&decoded)?;
+    let decoded = decode(Crypto32::X509_ECC_SIGNATURE, der)?;
+    let signature = decoded_ref::<Crypto32::CERT_ECC_SIGNATURE>(&decoded)?;
     let width = algorithm.scalar_byte_len();
     let mut output = vec![0; width * 2];
     let mut r = unsafe { native_slice(signature.r.pbData, signature.r.cbData, &decoded)?.to_vec() };
@@ -659,17 +687,24 @@ fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
     Ok(())
 }
 
-fn name(value: &CRYPT_INTEGER_BLOB) -> Result<String> {
-    let len = unsafe { CertNameToStrW(X509_ASN_ENCODING, value, CERT_X500_NAME_STR, None) };
+fn name(value: &Crypto32::CRYPT_INTEGER_BLOB) -> Result<String> {
+    let len = unsafe {
+        Crypto32::CertNameToStrW(
+            Crypto32::X509_ASN_ENCODING,
+            value,
+            Crypto32::CERT_X500_NAME_STR,
+            None,
+        )
+    };
     if len == 0 {
         return Err(windows::core::Error::from_win32().into());
     }
     let mut output = vec![0; len as usize];
     let len = unsafe {
-        CertNameToStrW(
-            X509_ASN_ENCODING,
+        Crypto32::CertNameToStrW(
+            Crypto32::X509_ASN_ENCODING,
             value,
-            CERT_X500_NAME_STR,
+            Crypto32::CERT_X500_NAME_STR,
             Some(&mut output),
         )
     } as usize;
@@ -785,42 +820,48 @@ unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> 
     Ok(unsafe { std::slice::from_raw_parts(pointer.as_ptr(), len) })
 }
 
-struct ChainContext(NonNull<CERT_CHAIN_CONTEXT>);
+struct ChainContext(NonNull<Crypto32::CERT_CHAIN_CONTEXT>);
 
 impl ChainContext {
-    fn new(context: *mut CERT_CHAIN_CONTEXT) -> Result<Self> {
+    fn new(context: *mut Crypto32::CERT_CHAIN_CONTEXT) -> Result<Self> {
         NonNull::new(context)
             .map(Self)
             .ok_or_else(|| "Null certificate chain".into())
     }
 
-    fn as_ref(&self) -> &CERT_CHAIN_CONTEXT {
+    fn as_ref(&self) -> &Crypto32::CERT_CHAIN_CONTEXT {
         unsafe { self.0.as_ref() }
     }
 }
 
 impl Drop for ChainContext {
     fn drop(&mut self) {
-        unsafe { CertFreeCertificateChain(self.0.as_ptr()) };
+        unsafe { Crypto32::CertFreeCertificateChain(self.0.as_ptr()) };
     }
 }
 
-struct CertStore(HCERTSTORE);
+struct CertStore(Crypto32::HCERTSTORE);
 
 impl CertStore {
     fn new() -> Result<Self> {
         Ok(Self(unsafe {
-            CertOpenStore(CERT_STORE_PROV_MEMORY, X509, None, Default::default(), None)
+            Crypto32::CertOpenStore(
+                Crypto32::CERT_STORE_PROV_MEMORY,
+                Crypto32::X509_ASN_ENCODING,
+                None,
+                Default::default(),
+                None,
+            )
         }?))
     }
 
     fn add(&self, certificate: &Certificate) -> Result<()> {
         unsafe {
-            CertAddEncodedCertificateToStore(
+            Crypto32::CertAddEncodedCertificateToStore(
                 Some(self.0),
-                X509_ASN_ENCODING,
+                Crypto32::X509_ASN_ENCODING,
                 certificate.der(),
-                CERT_STORE_ADD_ALWAYS,
+                Crypto32::CERT_STORE_ADD_ALWAYS,
                 None,
             )
         }?;
@@ -830,6 +871,6 @@ impl CertStore {
 
 impl Drop for CertStore {
     fn drop(&mut self) {
-        let _ = unsafe { CertCloseStore(Some(self.0), 0) };
+        let _ = unsafe { Crypto32::CertCloseStore(Some(self.0), 0) };
     }
 }
