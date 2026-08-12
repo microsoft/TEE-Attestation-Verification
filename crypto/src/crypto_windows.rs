@@ -453,20 +453,15 @@ impl CryptoBackend for Crypto {
         }
         let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
             cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
-            hRestrictedRoot: roots.0,
-            hRestrictedOther: intermediates.0,
+            hExclusiveRoot: roots.0,
+            hExclusiveTrustedPeople: roots.0,
+            dwExclusiveFlags: Crypto32::CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
             ..Default::default()
         };
-        eprintln!(
-            "Creating restricted Crypt32 chain engine (roots={}, intermediates={})",
-            1,
-            untrusted.len()
-        );
         let engine = into_owned(|handle| unsafe {
             Crypto32::CertCreateCertificateChainEngine(&mut config, handle)
         })
         .map_err(|error| format!("CertCreateCertificateChainEngine failed: {error}"))?;
-        eprintln!("Created restricted Crypt32 chain engine");
         let parameters = Crypto32::CERT_CHAIN_PARA {
             cbSize: size_of::<Crypto32::CERT_CHAIN_PARA>() as u32,
             ..Default::default()
@@ -474,11 +469,6 @@ impl CryptoBackend for Crypto {
         let leaf_context = NativeCertificate::from_der(leaf.der())?;
         let time = unix_time.map(filetime).transpose()?;
         let mut raw_chain = std::ptr::null_mut();
-        eprintln!(
-            "Building Crypt32 chain (intermediates={}, explicit_time={})",
-            untrusted.len(),
-            time.is_some()
-        );
         unsafe {
             Crypto32::CertGetCertificateChain(
                 Some(*engine),
@@ -499,10 +489,6 @@ impl CryptoBackend for Crypto {
         .map_err(|error| format!("CertGetCertificateChain failed: {error}"))?;
         let chain = ChainContext::new(raw_chain)?;
         let primary_status = chain.as_ref().TrustStatus.dwErrorStatus;
-        eprintln!(
-            "Built Crypt32 chain (primary_status=0x{primary_status:08X}, candidates={})",
-            chain.contexts()?.len()
-        );
         for context in chain.contexts()? {
             if chain.is_supplied_path(context, trusted, untrusted)? {
                 return Ok(());
@@ -692,161 +678,6 @@ mod pem_chain_tests {
         let error = Crypto::from_pem_chain(pem).expect_err("unterminated PEM should fail");
 
         assert_eq!(error.to_string(), "Unterminated certificate PEM");
-    }
-}
-
-#[cfg(test)]
-mod restricted_store_tests {
-    use super::*;
-    use std::os::windows::ffi::OsStrExt;
-
-    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
-    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
-
-    #[test]
-    fn chain_engine_restricted_store_matrix() {
-        let root = Crypto::from_pem(MILAN_ARK).expect("root should parse");
-        let intermediate = Crypto::from_pem(MILAN_ASK).expect("intermediate should parse");
-        let roots = CertStore::new().expect("root store should open");
-        roots.add(&root).expect("root should be added");
-        let intermediates = CertStore::new().expect("intermediate store should open");
-        intermediates
-            .add(&intermediate)
-            .expect("intermediate should be added");
-        let system_roots = CertStore(
-            unsafe { Crypto32::CertOpenSystemStoreW(None, windows::core::w!("ROOT")) }
-                .expect("system root store should open"),
-        );
-        let system_root_context =
-            unsafe { Crypto32::CertEnumCertificatesInStore(system_roots.0, None) };
-        let system_root_context =
-            NonNull::new(system_root_context).expect("system root store should not be empty");
-        let system_root = NativeCertificate(system_root_context);
-        let system_root_subset = CertStore::new().expect("system root subset should open");
-        let system_root_der = Certificate::from_der(
-            system_root
-                .der()
-                .expect("system root DER should be readable"),
-        )
-        .expect("system root should parse");
-        system_root_subset
-            .add(&system_root_der)
-            .expect("system root should be added to subset");
-        let custom_root_path =
-            std::env::temp_dir().join(format!("tav-custom-root-{}.sst", std::process::id()));
-        let system_root_path =
-            std::env::temp_dir().join(format!("tav-system-root-{}.sst", std::process::id()));
-        let custom_root_path_wide = custom_root_path
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect::<Vec<_>>();
-        let system_root_path_wide = system_root_path
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect::<Vec<_>>();
-        unsafe {
-            Crypto32::CertSaveStore(
-                roots.0,
-                Crypto32::X509_ASN_ENCODING,
-                Crypto32::CERT_STORE_SAVE_AS_STORE,
-                Crypto32::CERT_STORE_SAVE_TO_FILENAME_W,
-                custom_root_path_wide.as_ptr().cast_mut().cast(),
-                0,
-            )
-        }
-        .expect("custom root store should save");
-        unsafe {
-            Crypto32::CertSaveStore(
-                system_root_subset.0,
-                Crypto32::X509_ASN_ENCODING,
-                Crypto32::CERT_STORE_SAVE_AS_STORE,
-                Crypto32::CERT_STORE_SAVE_TO_FILENAME_W,
-                system_root_path_wide.as_ptr().cast_mut().cast(),
-                0,
-            )
-        }
-        .expect("system root subset should save");
-        let file_custom_root = CertStore(
-            unsafe {
-                Crypto32::CertOpenStore(
-                    Crypto32::CERT_STORE_PROV_FILENAME_W,
-                    Crypto32::X509_ASN_ENCODING,
-                    None,
-                    Crypto32::CERT_STORE_OPEN_EXISTING_FLAG | Crypto32::CERT_STORE_READONLY_FLAG,
-                    Some(custom_root_path_wide.as_ptr().cast()),
-                )
-            }
-            .expect("custom root file store should open"),
-        );
-        let file_system_root_subset = CertStore(
-            unsafe {
-                Crypto32::CertOpenStore(
-                    Crypto32::CERT_STORE_PROV_FILENAME_W,
-                    Crypto32::X509_ASN_ENCODING,
-                    None,
-                    Crypto32::CERT_STORE_OPEN_EXISTING_FLAG | Crypto32::CERT_STORE_READONLY_FLAG,
-                    Some(system_root_path_wide.as_ptr().cast()),
-                )
-            }
-            .expect("system root file store should open"),
-        );
-
-        let cases = [
-            ("system-root", Some(system_roots.0), None, None),
-            (
-                "memory-system-root-subset",
-                Some(system_root_subset.0),
-                None,
-                None,
-            ),
-            ("file-custom-root", Some(file_custom_root.0), None, None),
-            (
-                "file-system-root-subset",
-                Some(file_system_root_subset.0),
-                None,
-                None,
-            ),
-            ("root", Some(roots.0), None, None),
-            ("trust", None, Some(roots.0), None),
-            ("other", None, None, Some(intermediates.0)),
-            ("root+trust", Some(roots.0), Some(roots.0), None),
-            ("root+other", Some(roots.0), None, Some(intermediates.0)),
-            ("trust+other", None, Some(roots.0), Some(intermediates.0)),
-            (
-                "root+trust+other",
-                Some(roots.0),
-                Some(roots.0),
-                Some(intermediates.0),
-            ),
-        ];
-        let mut results = Vec::new();
-        for (name, restricted_root, restricted_trust, restricted_other) in cases {
-            let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
-                cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
-                hRestrictedRoot: restricted_root.unwrap_or_default(),
-                hRestrictedTrust: restricted_trust.unwrap_or_default(),
-                hRestrictedOther: restricted_other.unwrap_or_default(),
-                ..Default::default()
-            };
-            let mut engine = Crypto32::HCERTCHAINENGINE::default();
-            let result =
-                unsafe { Crypto32::CertCreateCertificateChainEngine(&mut config, &mut engine) };
-            match result {
-                Ok(()) => {
-                    results.push(format!("{name}: success"));
-                    unsafe { Crypto32::CertFreeCertificateChainEngine(Some(engine)) };
-                }
-                Err(error) => results.push(format!("{name}: {error}")),
-            }
-        }
-
-        drop(file_custom_root);
-        drop(file_system_root_subset);
-        std::fs::remove_file(custom_root_path).expect("custom root store file should be removed");
-        std::fs::remove_file(system_root_path).expect("system root store file should be removed");
-        panic!("restricted store matrix:\n{}", results.join("\n"));
     }
 }
 
