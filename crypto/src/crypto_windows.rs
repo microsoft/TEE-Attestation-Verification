@@ -457,9 +457,16 @@ impl CryptoBackend for Crypto {
             hRestrictedOther: intermediates.0,
             ..Default::default()
         };
+        eprintln!(
+            "Creating restricted Crypt32 chain engine (roots={}, intermediates={})",
+            1,
+            untrusted.len()
+        );
         let engine = into_owned(|handle| unsafe {
             Crypto32::CertCreateCertificateChainEngine(&mut config, handle)
-        })?;
+        })
+        .map_err(|error| format!("CertCreateCertificateChainEngine failed: {error}"))?;
+        eprintln!("Created restricted Crypt32 chain engine");
         let parameters = Crypto32::CERT_CHAIN_PARA {
             cbSize: size_of::<Crypto32::CERT_CHAIN_PARA>() as u32,
             ..Default::default()
@@ -467,6 +474,11 @@ impl CryptoBackend for Crypto {
         let leaf_context = NativeCertificate::from_der(leaf.der())?;
         let time = unix_time.map(filetime).transpose()?;
         let mut raw_chain = std::ptr::null_mut();
+        eprintln!(
+            "Building Crypt32 chain (intermediates={}, explicit_time={})",
+            untrusted.len(),
+            time.is_some()
+        );
         unsafe {
             Crypto32::CertGetCertificateChain(
                 Some(*engine),
@@ -483,9 +495,14 @@ impl CryptoBackend for Crypto {
                 None,
                 &mut raw_chain,
             )
-        }?;
+        }
+        .map_err(|error| format!("CertGetCertificateChain failed: {error}"))?;
         let chain = ChainContext::new(raw_chain)?;
         let primary_status = chain.as_ref().TrustStatus.dwErrorStatus;
+        eprintln!(
+            "Built Crypt32 chain (primary_status=0x{primary_status:08X}, candidates={})",
+            chain.contexts()?.len()
+        );
         for context in chain.contexts()? {
             if chain.is_supplied_path(context, trusted, untrusted)? {
                 return Ok(());
