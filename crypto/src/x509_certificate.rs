@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(all(async_crypto, not(sync_crypto)))]
-use std::{future::Future, pin::Pin};
-
 use pkcs1::{RsaPssParams, TrailerField};
 use x509_cert::der::{
     asn1::AnyRef, oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode,
@@ -20,72 +17,6 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Certificate {
     inner: x509_cert::Certificate,
-}
-
-/// Synchronous checking of a certificate path
-#[cfg(sync_crypto)]
-pub fn verify_certificate_path(
-    mut verify_signature: impl FnMut(&Certificate, &Certificate) -> Result<()>,
-    root_trust_anchor: &Certificate,
-    untrusted_chain: &[&Certificate],
-    leaf: &Certificate,
-) -> Result<()> {
-    // Verify that the chain is properly ordered and that signatures are valid.
-    let full_chain = untrusted_chain
-        .iter()
-        .copied()
-        .chain(std::iter::once(leaf))
-        .collect::<Vec<_>>();
-
-    // The trusted certificate must issue the first certificate in the path.
-    verify_signature(root_trust_anchor, full_chain[0])
-        .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
-    for edge in full_chain.windows(2) {
-        let issuer = edge[0];
-        let subject = edge[1];
-        verify_signature(issuer, subject)
-            .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
-    }
-
-    Ok(())
-}
-
-/// Asynchronous checking of the certificate path
-// If sync_crypto enabled, this is automatically dispatched to verify_certificate_path
-// So disable if sync_crypto is enabled to avoid unused warnings
-#[cfg(all(async_crypto, not(sync_crypto)))]
-pub async fn verify_certificate_path_async<F>(
-    mut verify_signature: F,
-    root_trust_anchor: &Certificate,
-    untrusted_chain: &[&Certificate],
-    leaf: &Certificate,
-) -> Result<()>
-where
-    F: for<'a> FnMut(
-        &'a Certificate,
-        &'a Certificate,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>>,
-{
-    // Verify that the chain is properly ordered and that signatures are valid.
-    let full_chain = untrusted_chain
-        .iter()
-        .copied()
-        .chain(std::iter::once(leaf))
-        .collect::<Vec<_>>();
-
-    // The trusted certificate must issue the first certificate in the path.
-    verify_signature(root_trust_anchor, full_chain[0])
-        .await
-        .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
-    for edge in full_chain.windows(2) {
-        let issuer = edge[0];
-        let subject = edge[1];
-        verify_signature(issuer, subject)
-            .await
-            .map_err(|e| format!("Certificate signature verification failed: {e}"))?;
-    }
-
-    Ok(())
 }
 
 impl Certificate {

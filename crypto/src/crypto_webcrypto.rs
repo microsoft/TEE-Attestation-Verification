@@ -14,7 +14,7 @@ use std::time::Duration;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use super::x509_certificate::{self, Certificate as X509Certificate};
+use super::x509_certificate::Certificate as X509Certificate;
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend,
@@ -242,7 +242,7 @@ impl AsyncCryptoBackend for Crypto {
             .map(|cert| &cert.inner)
             .collect::<Vec<_>>();
 
-        x509_certificate::verify_certificate_path_async(
+        x509_policy::verify_certificate_path_async(
             |issuer, subject| Box::pin(verify_x509_certificate_signature(issuer, subject)),
             &trusted_cert.inner,
             &untrusted_x509,

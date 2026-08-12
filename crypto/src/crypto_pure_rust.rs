@@ -22,7 +22,7 @@ use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::x509_certificate::{self, Certificate};
+use super::x509_certificate::Certificate;
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -331,7 +331,7 @@ impl CryptoBackend for Crypto {
         leaf: &Certificate,
         unix_time: Option<Duration>,
     ) -> Result<()> {
-        x509_certificate::verify_certificate_path(
+        x509_policy::verify_certificate_path(
             verify_certificate_signature,
             trusted_cert,
             untrusted_chain,
