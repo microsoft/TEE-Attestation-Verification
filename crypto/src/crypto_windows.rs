@@ -6,7 +6,7 @@ use std::mem::{align_of, size_of};
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::core::{Free, Owned, PCSTR, PCWSTR, PSTR};
 use windows::Win32::Foundation::{
@@ -440,135 +440,44 @@ impl CryptoBackend for Crypto {
     }
 
     fn verify_chain(
-        trusted: &Certificate,
-        untrusted: &[&Certificate],
-        leaf: &Certificate,
+        trusted_cert: &Self::Certificate,
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
         unix_time: Option<Duration>,
     ) -> Result<()> {
-        let roots = CertStore::new()?;
-        roots.add(trusted)?;
-        let intermediates = CertStore::new()?;
-        for cert in untrusted {
-            intermediates.add(cert)?;
-        }
-        let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
-            cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
-            hExclusiveRoot: roots.0,
-            hExclusiveTrustedPeople: roots.0,
-            dwExclusiveFlags: Crypto32::CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
-            ..Default::default()
-        };
-        let engine = into_owned(|handle| unsafe {
-            Crypto32::CertCreateCertificateChainEngine(&mut config, handle)
-        })
-        .map_err(|error| format!("CertCreateCertificateChainEngine failed: {error}"))?;
-        let parameters = Crypto32::CERT_CHAIN_PARA {
-            cbSize: size_of::<Crypto32::CERT_CHAIN_PARA>() as u32,
-            ..Default::default()
-        };
-        let leaf_context = NativeCertificate::from_der(leaf.der())?;
-        let time = unix_time.map(filetime).transpose()?;
-        let mut raw_chain = std::ptr::null_mut();
-        unsafe {
-            Crypto32::CertGetCertificateChain(
-                Some(*engine),
-                leaf_context.as_ptr(),
-                time.as_ref().map(|value| value as *const FILETIME),
-                Some(intermediates.0),
-                &parameters,
-                Crypto32::CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL
-                    | Crypto32::CERT_CHAIN_DISABLE_AIA
-                    | Crypto32::CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE
-                    | Crypto32::CERT_CHAIN_DISABLE_PASS1_QUALITY_FILTERING
-                    | Crypto32::CERT_CHAIN_ENABLE_PEER_TRUST
-                    | Crypto32::CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS,
-                None,
-                &mut raw_chain,
-            )
-        }
-        .map_err(|error| format!("CertGetCertificateChain failed: {error}"))?;
-        let chain = ChainContext::new(raw_chain)?;
-        let primary_status = chain.as_ref().TrustStatus.dwErrorStatus;
-        for context in chain.contexts()? {
-            if chain.is_supplied_path(context, trusted, untrusted)? {
-                return Ok(());
-            }
-        }
-        Err(format!(
-            "No acceptable caller-supplied certificate chain (primary trust error 0x{primary_status:08X})"
+        super::x509_policy::verify_certificate_path(
+            verify_x509_certificate_signature,
+            trusted_cert,
+            untrusted_chain,
+            leaf,
+        )?;
+
+        let policy_path = std::iter::once(trusted_cert)
+            .chain(untrusted_chain.iter().copied())
+            .chain(std::iter::once(leaf));
+        super::x509_policy::rfc5280_policy::<Crypto, _>(
+            policy_path,
+            unix_time.unwrap_or(SystemTime::now().duration_since(UNIX_EPOCH)?),
         )
-        .into())
     }
 }
 
-impl ChainContext {
-    fn contexts(&self) -> Result<Vec<&Crypto32::CERT_CHAIN_CONTEXT>> {
-        let primary = self.as_ref();
-        let lower = unsafe {
-            native_slice(
-                primary.rgpLowerQualityChainContext,
-                primary.cLowerQualityChainContext,
-                self,
-            )?
-        };
-        let mut contexts = Vec::with_capacity(lower.len() + 1);
-        contexts.push(primary);
-        for (index, context) in lower.iter().enumerate() {
-            let Some(context) = (unsafe { context.as_ref() }) else {
-                return Err(format!("Null lower-quality certificate chain {index}").into());
-            };
-            contexts.push(context);
-        }
-        Ok(contexts)
-    }
-
-    fn is_supplied_path(
-        &self,
-        context: &Crypto32::CERT_CHAIN_CONTEXT,
-        trusted: &Certificate,
-        untrusted: &[&Certificate],
-    ) -> Result<bool> {
-        if context.TrustStatus.dwErrorStatus != 0 {
-            return Ok(false);
-        }
-        if context.cChain != 1 {
-            return Ok(false);
-        }
-        let simple_chains = unsafe { native_slice(context.rgpChain, context.cChain, self)? };
-        let simple = unsafe { simple_chains[0].as_ref() }.ok_or("Null simple certificate chain")?;
-        if !simple.pTrustListInfo.is_null() {
-            return Ok(false);
-        }
-        if simple.cElement == 0 {
-            return Err("Certificate chain contains no elements".into());
-        }
-        let elements = unsafe { native_slice(simple.rgpElement, simple.cElement, self)? };
-        let contexts = elements
-            .iter()
-            .map(|element| -> Result<&Crypto32::CERT_CONTEXT> {
-                let Some(element) = (unsafe { element.as_ref() }) else {
-                    return Err("Null certificate chain element".into());
-                };
-                let Some(context) = (unsafe { element.pCertContext.as_ref() }) else {
-                    return Err("Null chain certificate context".into());
-                };
-                Ok(context)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let ders = contexts
-            .iter()
-            .map(|context| unsafe {
-                native_slice(context.pbCertEncoded, context.cbCertEncoded, self)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let anchored = ders.last().is_some_and(|der| *der == trusted.der());
-        let supplied = ders
-            .iter()
-            .skip(1)
-            .take(ders.len().saturating_sub(2))
-            .all(|der| untrusted.iter().any(|cert| *der == cert.der()));
-        Ok(anchored && supplied)
-    }
+fn verify_x509_certificate_signature(issuer: &Certificate, subject: &Certificate) -> Result<()> {
+    issuer.with_context(|issuer| {
+        subject.with_context(|subject| unsafe {
+            Crypto32::CryptVerifyCertificateSignatureEx(
+                None,
+                Crypto32::X509_ASN_ENCODING,
+                Crypto32::CRYPT_VERIFY_CERT_SIGN_SUBJECT_CERT,
+                subject.as_ptr().cast(),
+                Crypto32::CRYPT_VERIFY_CERT_SIGN_ISSUER_CERT,
+                Some(issuer.as_ptr().cast()),
+                Default::default(),
+                None,
+            )
+            .map_err(Into::into)
+        })
+    })
 }
 
 trait DecodeType {
@@ -885,59 +794,4 @@ unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> 
         .filter(|bytes| *bytes <= isize::MAX as usize)
         .ok_or("Windows slice is too large")?;
     Ok(unsafe { std::slice::from_raw_parts(pointer.as_ptr(), len) })
-}
-
-struct ChainContext(NonNull<Crypto32::CERT_CHAIN_CONTEXT>);
-
-impl ChainContext {
-    fn new(context: *mut Crypto32::CERT_CHAIN_CONTEXT) -> Result<Self> {
-        NonNull::new(context)
-            .map(Self)
-            .ok_or_else(|| "Null certificate chain".into())
-    }
-
-    fn as_ref(&self) -> &Crypto32::CERT_CHAIN_CONTEXT {
-        unsafe { self.0.as_ref() }
-    }
-}
-
-impl Drop for ChainContext {
-    fn drop(&mut self) {
-        unsafe { Crypto32::CertFreeCertificateChain(self.0.as_ptr()) };
-    }
-}
-
-struct CertStore(Crypto32::HCERTSTORE);
-
-impl CertStore {
-    fn new() -> Result<Self> {
-        Ok(Self(unsafe {
-            Crypto32::CertOpenStore(
-                Crypto32::CERT_STORE_PROV_MEMORY,
-                Crypto32::X509_ASN_ENCODING,
-                None,
-                Default::default(),
-                None,
-            )
-        }?))
-    }
-
-    fn add(&self, certificate: &Certificate) -> Result<()> {
-        unsafe {
-            Crypto32::CertAddEncodedCertificateToStore(
-                Some(self.0),
-                Crypto32::X509_ASN_ENCODING,
-                certificate.der(),
-                Crypto32::CERT_STORE_ADD_ALWAYS,
-                None,
-            )
-        }?;
-        Ok(())
-    }
-}
-
-impl Drop for CertStore {
-    fn drop(&mut self) {
-        let _ = unsafe { Crypto32::CertCloseStore(Some(self.0), 0) };
-    }
 }
