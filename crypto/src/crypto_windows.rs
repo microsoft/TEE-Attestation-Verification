@@ -696,6 +696,63 @@ mod pem_chain_tests {
 }
 
 #[cfg(test)]
+mod restricted_store_tests {
+    use super::*;
+
+    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
+    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
+
+    #[test]
+    fn chain_engine_restricted_store_matrix() {
+        let root = Crypto::from_pem(MILAN_ARK).expect("root should parse");
+        let intermediate = Crypto::from_pem(MILAN_ASK).expect("intermediate should parse");
+        let roots = CertStore::new().expect("root store should open");
+        roots.add(&root).expect("root should be added");
+        let intermediates = CertStore::new().expect("intermediate store should open");
+        intermediates
+            .add(&intermediate)
+            .expect("intermediate should be added");
+
+        let cases = [
+            ("root", Some(roots.0), None, None),
+            ("trust", None, Some(roots.0), None),
+            ("other", None, None, Some(intermediates.0)),
+            ("root+trust", Some(roots.0), Some(roots.0), None),
+            ("root+other", Some(roots.0), None, Some(intermediates.0)),
+            ("trust+other", None, Some(roots.0), Some(intermediates.0)),
+            (
+                "root+trust+other",
+                Some(roots.0),
+                Some(roots.0),
+                Some(intermediates.0),
+            ),
+        ];
+        let mut results = Vec::new();
+        for (name, restricted_root, restricted_trust, restricted_other) in cases {
+            let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
+                cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
+                hRestrictedRoot: restricted_root.unwrap_or_default(),
+                hRestrictedTrust: restricted_trust.unwrap_or_default(),
+                hRestrictedOther: restricted_other.unwrap_or_default(),
+                ..Default::default()
+            };
+            let mut engine = Crypto32::HCERTCHAINENGINE::default();
+            let result =
+                unsafe { Crypto32::CertCreateCertificateChainEngine(&mut config, &mut engine) };
+            match result {
+                Ok(()) => {
+                    results.push(format!("{name}: success"));
+                    unsafe { Crypto32::CertFreeCertificateChainEngine(Some(engine)) };
+                }
+                Err(error) => results.push(format!("{name}: {error}")),
+            }
+        }
+
+        panic!("restricted store matrix:\n{}", results.join("\n"));
+    }
+}
+
+#[cfg(test)]
 mod decode_tests {
     use super::*;
 
