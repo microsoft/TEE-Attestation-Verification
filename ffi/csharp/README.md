@@ -8,7 +8,7 @@ repository's native C ABI.
 Add the package from your configured NuGet feed:
 
 ```bash
-dotnet add package TeeAttestationVerification --version 1.0.6
+dotnet add package TeeAttestationVerification --version 1.0.7
 ```
 
 The runtime environment must provide:
