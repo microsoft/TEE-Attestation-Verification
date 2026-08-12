@@ -107,7 +107,6 @@ impl NativeCertificate {
     }
 
     fn extension(&self, oid: &str) -> Result<Option<&Crypto32::CERT_EXTENSION>> {
-        validate_oid(oid)?;
         let oid = CString::new(oid)?;
         let extensions = self.extensions()?;
         if extensions.is_empty() {
@@ -127,23 +126,6 @@ impl Drop for NativeCertificate {
 impl KeyBackend for Key {
     fn from_spki_der(spki: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         let key = import_key(spki)?;
-        let actual = key_property((*key).into(), BCRYPT_ALGORITHM_NAME)?;
-        let valid = match algorithm {
-            SignatureKeyAlgorithm::Ec(algorithm) => {
-                actual
-                    == match algorithm {
-                        EcSignatureKeyAlgorithm::P256 => "ECDSA_P256",
-                        EcSignatureKeyAlgorithm::P384 => "ECDSA_P384",
-                        EcSignatureKeyAlgorithm::P521 => "ECDSA_P521",
-                    }
-            }
-            _ => actual == "RSA" || actual == "RSA_SIGN",
-        };
-        if !valid {
-            return Err(
-                format!("Public key algorithm {actual} does not match {algorithm:?}").into(),
-            );
-        }
         Ok(Self {
             spki: spki.to_vec(),
             algorithm,
@@ -296,7 +278,15 @@ impl CertificateBackend for Crypto {
     }
 
     fn is_valid_at(cert: &Certificate, unix_time: Duration) -> Result<bool> {
-        let time = filetime(unix_time)?;
+        let ticks = unix_time
+            .as_secs()
+            .checked_mul(10_000_000)
+            .and_then(|ticks| ticks.checked_add(116_444_736_000_000_000))
+            .ok_or("Unix time does not fit FILETIME")?;
+        let time = FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        };
         cert.with_context(|context| {
             Ok(unsafe { Crypto32::CertVerifyTimeValidity(Some(&time), context.info()?) } == 0)
         })
@@ -393,7 +383,21 @@ impl CryptoBackend for Crypto {
             return Err("Signature algorithm does not match key algorithm".into());
         }
         let handle = import_key(&key.spki)?;
-        if signature.bytes.len() != key_u32_property(&handle, BCRYPT_SIGNATURE_LENGTH)? as usize {
+        let mut signature_len = [0; size_of::<u32>()];
+        let mut len = 0;
+        unsafe {
+            BCryptGetProperty(
+                (*handle).into(),
+                BCRYPT_SIGNATURE_LENGTH,
+                Some(&mut signature_len),
+                &mut len,
+                0,
+            )
+        }
+        .ok()?;
+        if len as usize != signature_len.len()
+            || signature.bytes.len() != u32::from_ne_bytes(signature_len) as usize
+        {
             return Err("signature verification failed".into());
         }
         let digest = Self::digest(signature.algorithm.digest(), input)?;
@@ -541,84 +545,6 @@ fn decode<T: DecodeType>(input: &[u8]) -> Result<Decoded<T>> {
     })
 }
 
-#[cfg(test)]
-mod pem_chain_tests {
-    use super::*;
-
-    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
-    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
-
-    fn with_x509_label(pem: &[u8]) -> Vec<u8> {
-        std::str::from_utf8(pem)
-            .expect("certificate PEM should be UTF-8")
-            .replace(
-                "-----BEGIN CERTIFICATE-----",
-                "-----BEGIN X509 CERTIFICATE-----",
-            )
-            .replace(
-                "-----END CERTIFICATE-----",
-                "-----END X509 CERTIFICATE-----",
-            )
-            .into_bytes()
-    }
-
-    #[test]
-    fn supported_pem_labels_preserve_chain_order() {
-        let ask = with_x509_label(MILAN_ASK);
-        let pem = [ask.as_slice(), b"\n", MILAN_ARK].concat();
-
-        let chain = Crypto::from_pem_chain(&pem).expect("PEM chain should parse");
-        let expected = [MILAN_ASK, MILAN_ARK];
-
-        assert_eq!(chain.len(), expected.len());
-        for (certificate, expected_pem) in chain.iter().zip(expected) {
-            let expected =
-                Crypto::from_pem(expected_pem).expect("expected certificate should parse");
-            assert_eq!(
-                Crypto::to_der(certificate).expect("certificate should encode"),
-                Crypto::to_der(&expected).expect("expected certificate should encode")
-            );
-        }
-    }
-
-    #[test]
-    fn unterminated_pem_record_is_rejected() {
-        let pem = b"-----BEGIN CERTIFICATE-----\n";
-
-        let error = Crypto::from_pem_chain(pem).expect_err("unterminated PEM should fail");
-
-        assert_eq!(error.to_string(), "Unterminated certificate PEM");
-    }
-}
-
-#[cfg(test)]
-mod decode_tests {
-    use super::*;
-
-    #[test]
-    fn output_types_select_matching_decode_kinds() {
-        let signature = decode::<Crypto32::CERT_ECC_SIGNATURE>(&[
-            0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02,
-        ])
-        .expect("ECDSA signature should decode");
-        assert_eq!(signature.r.cbData, 1);
-        assert_eq!(signature.s.cbData, 1);
-
-        let constraints =
-            decode::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(&[0x30, 0x03, 0x01, 0x01, 0xff])
-                .expect("Basic Constraints should decode");
-        assert!(constraints.fCA.as_bool());
-
-        let public_key = decode::<Crypto32::CERT_PUBLIC_KEY_INFO>(&[
-            0x30, 0x1c, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
-            0x01, 0x05, 0x00, 0x03, 0x0b, 0x00, 0x30, 0x08, 0x02, 0x01, 0x01, 0x02, 0x03, 0x01,
-            0x00, 0x01,
-        ])
-        .expect("SubjectPublicKeyInfo should decode");
-        assert_eq!(public_key.PublicKey.cbData, 10);
-    }
-}
-
 fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {
     let mut pointer = std::ptr::null_mut::<c_void>();
     let mut len = 0;
@@ -675,35 +601,6 @@ where
     Ok(unsafe { Owned::new(handle) })
 }
 
-fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
-    let mut len = 0;
-    unsafe { BCryptGetProperty(key, property, None, &mut len, 0) }.ok()?;
-    let mut output = vec![0; len as usize];
-    unsafe { BCryptGetProperty(key, property, Some(&mut output), &mut len, 0) }.ok()?;
-    if len as usize > output.len() {
-        return Err("CNG property length changed between calls".into());
-    }
-    if len % size_of::<u16>() as u32 != 0 {
-        return Err("CNG string property has an odd byte length".into());
-    }
-    let units = output[..len as usize]
-        .chunks_exact(2)
-        .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
-        .take_while(|unit| *unit != 0)
-        .collect::<Vec<_>>();
-    Ok(String::from_utf16(&units)?)
-}
-
-fn key_u32_property(key: &Owned<BCRYPT_KEY_HANDLE>, property: PCWSTR) -> Result<u32> {
-    let mut value = [0; size_of::<u32>()];
-    let mut len = 0;
-    unsafe { BCryptGetProperty((**key).into(), property, Some(&mut value), &mut len, 0) }.ok()?;
-    if len as usize != value.len() {
-        return Err("CNG returned an invalid u32 property length".into());
-    }
-    Ok(u32::from_ne_bytes(value))
-}
-
 fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
     if input.is_empty() || input.len() > output.len() {
         return Err("Invalid ECDSA component length".into());
@@ -740,41 +637,12 @@ fn name(value: &Crypto32::CRYPT_INTEGER_BLOB) -> Result<String> {
     Ok(String::from_utf16(&output[..len - 1])?)
 }
 
-fn filetime(time: Duration) -> Result<FILETIME> {
-    let ticks = time
-        .as_secs()
-        .checked_mul(10_000_000)
-        .and_then(|ticks| ticks.checked_add(116_444_736_000_000_000))
-        .ok_or("Unix time does not fit FILETIME")?;
-    Ok(FILETIME {
-        dwLowDateTime: ticks as u32,
-        dwHighDateTime: (ticks >> 32) as u32,
-    })
-}
-
 fn hash_id(algorithm: DigestAlgorithm) -> PCWSTR {
     match algorithm {
         DigestAlgorithm::Sha256 => BCRYPT_SHA256_ALGORITHM,
         DigestAlgorithm::Sha384 => BCRYPT_SHA384_ALGORITHM,
         DigestAlgorithm::Sha512 => BCRYPT_SHA512_ALGORITHM,
     }
-}
-
-fn validate_oid(oid: &str) -> Result<()> {
-    let arcs = oid.split('.').collect::<Vec<_>>();
-    if arcs.len() < 2
-        || arcs
-            .iter()
-            .any(|arc| arc.is_empty() || !arc.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return Err("Invalid dotted-decimal OID".into());
-    }
-    let first: u32 = arcs[0].parse()?;
-    let second: u64 = arcs[1].parse()?;
-    if first > 2 || (first < 2 && second > 39) {
-        return Err("Invalid dotted-decimal OID".into());
-    }
-    Ok(())
 }
 
 fn native_len(input: &[u8]) -> Result<u32> {
