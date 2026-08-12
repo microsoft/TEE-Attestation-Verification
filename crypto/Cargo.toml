@@ -2,7 +2,7 @@
 name = "tee-attestation-verification-crypto"
 version = "1.0.7"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.85"
 repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["confidentiality", "sev-snp", "tpm"]
 description = "Cryptographic backends for TEE attestation verification"
@@ -44,7 +44,7 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-# 0.61 is the newest windows-rs release line compatible with the declared Rust 1.77 MSRV.
+# 0.61 supports the workspace MSRV while exposing the required Crypt32 and CNG APIs.
 windows = { version = "0.61.3", optional = true, features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",

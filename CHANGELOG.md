@@ -9,7 +9,6 @@
 - C and .NET FFI constructors for decoding SNP reports without verification. (#101)
 - Windows CNG crypto provider. (#100)
 
-
 ## [1.0.6]
 
 [1.0.6]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.6

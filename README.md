@@ -58,7 +58,7 @@ At least one target-compatible backend must be enabled:
 | `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
-| `crypto_windows` | Windows 8 / Server 2012 or newer | yes | yes | Windows CNG and Crypt32-backed verification. |
+| `crypto_windows` | Windows 10 / Server 2016 or newer | yes | yes | Windows CNG and Crypt32-backed verification. |
 
 These features are forwarded by the domain crates and the `tee-attestation-verification-ffi` crate to the crypto sub-crate.
 
