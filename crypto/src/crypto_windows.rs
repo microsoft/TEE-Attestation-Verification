@@ -698,6 +698,7 @@ mod pem_chain_tests {
 #[cfg(test)]
 mod restricted_store_tests {
     use super::*;
+    use std::os::windows::ffi::OsStrExt;
 
     const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
     const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
@@ -731,12 +732,79 @@ mod restricted_store_tests {
         system_root_subset
             .add(&system_root_der)
             .expect("system root should be added to subset");
+        let custom_root_path =
+            std::env::temp_dir().join(format!("tav-custom-root-{}.sst", std::process::id()));
+        let system_root_path =
+            std::env::temp_dir().join(format!("tav-system-root-{}.sst", std::process::id()));
+        let custom_root_path_wide = custom_root_path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        let system_root_path_wide = system_root_path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        unsafe {
+            Crypto32::CertSaveStore(
+                roots.0,
+                Crypto32::X509_ASN_ENCODING,
+                Crypto32::CERT_STORE_SAVE_AS_STORE,
+                Crypto32::CERT_STORE_SAVE_TO_FILENAME_W,
+                custom_root_path_wide.as_ptr().cast_mut().cast(),
+                0,
+            )
+        }
+        .expect("custom root store should save");
+        unsafe {
+            Crypto32::CertSaveStore(
+                system_root_subset.0,
+                Crypto32::X509_ASN_ENCODING,
+                Crypto32::CERT_STORE_SAVE_AS_STORE,
+                Crypto32::CERT_STORE_SAVE_TO_FILENAME_W,
+                system_root_path_wide.as_ptr().cast_mut().cast(),
+                0,
+            )
+        }
+        .expect("system root subset should save");
+        let file_custom_root = CertStore(
+            unsafe {
+                Crypto32::CertOpenStore(
+                    Crypto32::CERT_STORE_PROV_FILENAME_W,
+                    Crypto32::X509_ASN_ENCODING,
+                    None,
+                    Crypto32::CERT_STORE_OPEN_EXISTING_FLAG | Crypto32::CERT_STORE_READONLY_FLAG,
+                    Some(custom_root_path_wide.as_ptr().cast()),
+                )
+            }
+            .expect("custom root file store should open"),
+        );
+        let file_system_root_subset = CertStore(
+            unsafe {
+                Crypto32::CertOpenStore(
+                    Crypto32::CERT_STORE_PROV_FILENAME_W,
+                    Crypto32::X509_ASN_ENCODING,
+                    None,
+                    Crypto32::CERT_STORE_OPEN_EXISTING_FLAG | Crypto32::CERT_STORE_READONLY_FLAG,
+                    Some(system_root_path_wide.as_ptr().cast()),
+                )
+            }
+            .expect("system root file store should open"),
+        );
 
         let cases = [
             ("system-root", Some(system_roots.0), None, None),
             (
                 "memory-system-root-subset",
                 Some(system_root_subset.0),
+                None,
+                None,
+            ),
+            ("file-custom-root", Some(file_custom_root.0), None, None),
+            (
+                "file-system-root-subset",
+                Some(file_system_root_subset.0),
                 None,
                 None,
             ),
@@ -774,6 +842,10 @@ mod restricted_store_tests {
             }
         }
 
+        drop(file_custom_root);
+        drop(file_system_root_subset);
+        std::fs::remove_file(custom_root_path).expect("custom root store file should be removed");
+        std::fs::remove_file(system_root_path).expect("system root store file should be removed");
         panic!("restricted store matrix:\n{}", results.join("\n"));
     }
 }
