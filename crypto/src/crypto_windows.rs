@@ -3,21 +3,21 @@
 
 use std::ffi::{c_void, CString};
 use std::mem::{align_of, size_of};
+use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Duration;
 
-use windows::core::{Owned, PCSTR, PCWSTR, PSTR};
+use windows::core::{Free, Owned, PCSTR, PCWSTR, PSTR};
 use windows::Win32::Foundation::{
     FILETIME, HLOCAL, STATUS_INVALID_PARAMETER, STATUS_INVALID_SIGNATURE,
 };
 use windows::Win32::Security::Cryptography::{
     self as Crypto32, BCryptCreateHash, BCryptFinishHash, BCryptGetProperty, BCryptHashData,
-    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALGORITHM_NAME, BCRYPT_ALG_HANDLE,
-    BCRYPT_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_KEY_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS,
-    BCRYPT_PAD_PKCS1, BCRYPT_PAD_PSS, BCRYPT_PKCS1_PADDING_INFO, BCRYPT_PSS_PADDING_INFO,
-    BCRYPT_SHA256_ALGORITHM, BCRYPT_SHA384_ALGORITHM, BCRYPT_SHA512_ALGORITHM,
-    BCRYPT_SIGNATURE_LENGTH,
+    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALGORITHM_NAME, BCRYPT_HANDLE,
+    BCRYPT_KEY_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS, BCRYPT_PAD_PKCS1, BCRYPT_PAD_PSS,
+    BCRYPT_PKCS1_PADDING_INFO, BCRYPT_PSS_PADDING_INFO, BCRYPT_SHA256_ALGORITHM,
+    BCRYPT_SHA384_ALGORITHM, BCRYPT_SHA512_ALGORITHM, BCRYPT_SIGNATURE_LENGTH,
 };
 
 use super::{
@@ -25,13 +25,10 @@ use super::{
     EcSignatureKeyAlgorithm, KeyBackend, Result, SignatureBackend, SignatureKeyAlgorithm,
 };
 
-const PEM_LABELS: [(&[u8], &[u8]); 2] = [
-    (b"-----BEGIN CERTIFICATE-----", b"-----END CERTIFICATE-----"),
-    (
-        b"-----BEGIN X509 CERTIFICATE-----",
-        b"-----END X509 CERTIFICATE-----",
-    ),
-];
+const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+const PEM_END: &str = "-----END CERTIFICATE-----";
+const X509_PEM_BEGIN: &str = "-----BEGIN X509 CERTIFICATE-----";
+const X509_PEM_END: &str = "-----END X509 CERTIFICATE-----";
 
 pub struct Crypto;
 
@@ -122,6 +119,7 @@ impl NativeCertificate {
 
 impl Drop for NativeCertificate {
     fn drop(&mut self) {
+        // Microsoft documents this as always returning nonzero, so discard it.
         let _ = unsafe { Crypto32::CertFreeCertificateContext(Some(self.as_ptr())) };
     }
 }
@@ -158,22 +156,21 @@ impl SignatureBackend for Signature {
         let bytes = match algorithm {
             SignatureKeyAlgorithm::Ec(algorithm) => {
                 let decoded = decode::<Crypto32::CERT_ECC_SIGNATURE>(bytes)?;
-                let signature = decoded.as_ref();
                 let width = algorithm.scalar_byte_len();
                 let mut output = vec![0; width * 2];
-                let mut r = unsafe {
-                    native_slice(signature.r.pbData, signature.r.cbData, &decoded)?.to_vec()
-                };
-                let mut s = unsafe {
-                    native_slice(signature.s.pbData, signature.s.cbData, &decoded)?.to_vec()
-                };
+                let mut r =
+                    unsafe { native_slice(decoded.r.pbData, decoded.r.cbData, &decoded)?.to_vec() };
+                let mut s =
+                    unsafe { native_slice(decoded.s.pbData, decoded.s.cbData, &decoded)?.to_vec() };
                 r.reverse();
                 s.reverse();
                 pad_component(&r, &mut output[..width])?;
                 pad_component(&s, &mut output[width..])?;
                 output
             }
-            _ => bytes.to_vec(),
+            SignatureKeyAlgorithm::RsaPss(_) | SignatureKeyAlgorithm::RsaPkcs1v15(_) => {
+                bytes.to_vec()
+            }
         };
         Ok(Self { bytes, algorithm })
     }
@@ -198,13 +195,18 @@ impl CertificateBackend for Crypto {
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Certificate>> {
-        let mut result = Vec::new();
-        let mut rest = pem;
-        while let Some((record, remaining)) = next_pem_record(rest)? {
-            result.push(Certificate::from_der(&decode_pem(record)?)?);
-            rest = remaining;
-        }
-        Ok(result)
+        let pem = std::str::from_utf8(pem)?
+            .replace(X509_PEM_BEGIN, PEM_BEGIN)
+            .replace(X509_PEM_END, PEM_END);
+        pem.split_inclusive(PEM_END)
+            .filter(|record| record.contains(PEM_BEGIN))
+            .map(|record| {
+                if !record.ends_with(PEM_END) {
+                    return Err("Unterminated certificate PEM".into());
+                }
+                Certificate::from_der(&decode_pem(record.as_bytes())?)
+            })
+            .collect()
     }
 
     fn from_der(der: &[u8]) -> Result<Certificate> {
@@ -221,6 +223,7 @@ impl CertificateBackend for Crypto {
         let flags = Crypto32::CRYPT_STRING(
             Crypto32::CRYPT_STRING_BASE64HEADER.0 | Crypto32::CRYPT_STRING_NOCR,
         );
+        // discovers length to allocate the buffer
         if !unsafe { Crypto32::CryptBinaryToStringA(cert.der(), flags, None, &mut len) }.as_bool() {
             return Err(windows::core::Error::from_win32().into());
         }
@@ -238,7 +241,7 @@ impl CertificateBackend for Crypto {
             return Err(windows::core::Error::from_win32().into());
         }
         if len as usize > output.len() {
-            return Err("CryptBinaryToStringA output length changed between calls".into());
+            return Err("CryptBinaryToStringA output length increased between calls".into());
         }
         // The second call reports the written length.
         output.truncate(len as usize);
@@ -311,14 +314,13 @@ impl CertificateBackend for Crypto {
             };
             let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
             let decoded = decode::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(encoded)?;
-            let value = decoded.as_ref();
             Ok(Some(super::BasicConstraints {
                 critical: ext.fCritical.as_bool(),
-                ca: value.fCA.as_bool(),
-                path_len_constraint: value
+                ca: decoded.fCA.as_bool(),
+                path_len_constraint: decoded
                     .fPathLenConstraint
                     .as_bool()
-                    .then_some(value.dwPathLenConstraint as usize),
+                    .then_some(decoded.dwPathLenConstraint as usize),
             }))
         })
     }
@@ -364,20 +366,20 @@ impl CryptoBackend for Crypto {
     type Signature = Signature;
 
     fn digest(algorithm: DigestAlgorithm, input: &[u8]) -> Result<Vec<u8>> {
-        let mut raw = BCRYPT_ALG_HANDLE::default();
-        unsafe {
-            BCryptOpenAlgorithmProvider(
-                &mut raw,
-                hash_id(algorithm),
-                PCWSTR::null(),
-                BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS::default(),
-            )
-        }
-        .ok()?;
-        let provider = unsafe { Owned::new(raw) };
-        let mut raw_hash = BCRYPT_HASH_HANDLE::default();
-        unsafe { BCryptCreateHash(*provider, &mut raw_hash, None, None, 0) }.ok()?;
-        let hash = unsafe { Owned::new(raw_hash) };
+        let provider = into_owned(|handle| {
+            unsafe {
+                BCryptOpenAlgorithmProvider(
+                    handle,
+                    hash_id(algorithm),
+                    PCWSTR::null(),
+                    BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS::default(),
+                )
+            }
+            .ok()
+        })?;
+        let hash = into_owned(|handle| {
+            unsafe { BCryptCreateHash(*provider, handle, None, None, 0) }.ok()
+        })?;
         for chunk in input.chunks(u32::MAX as usize) {
             unsafe { BCryptHashData(*hash, chunk, 0) }.ok()?;
         }
@@ -397,6 +399,8 @@ impl CryptoBackend for Crypto {
         let digest = Self::digest(signature.algorithm.digest(), input)?;
         let hash = hash_id(signature.algorithm.digest());
         let status = match signature.algorithm {
+            // With dwFlags == 0, BCryptVerifySignature requires pPaddingInfo == NULL.
+            // https://learn.microsoft.com/windows/win32/api/bcrypt/nf-bcrypt-bcryptverifysignature
             SignatureKeyAlgorithm::Ec(_) => unsafe {
                 BCryptVerifySignature(*handle, None, &digest, &signature.bytes, Default::default())
             },
@@ -454,9 +458,9 @@ impl CryptoBackend for Crypto {
             dwExclusiveFlags: Crypto32::CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
             ..Default::default()
         };
-        let mut raw_engine = Crypto32::HCERTCHAINENGINE::default();
-        unsafe { Crypto32::CertCreateCertificateChainEngine(&mut config, &mut raw_engine) }?;
-        let engine = unsafe { Owned::new(raw_engine) };
+        let engine = into_owned(|handle| unsafe {
+            Crypto32::CertCreateCertificateChainEngine(&mut config, handle)
+        })?;
         let parameters = Crypto32::CERT_CHAIN_PARA {
             cbSize: size_of::<Crypto32::CERT_CHAIN_PARA>() as u32,
             ..Default::default()
@@ -586,8 +590,10 @@ struct Decoded<T> {
     _allocation: Owned<HLOCAL>,
 }
 
-impl<T> Decoded<T> {
-    fn as_ref(&self) -> &T {
+impl<T> Deref for Decoded<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
         unsafe { self.value.as_ref() }
     }
 }
@@ -624,6 +630,56 @@ fn decode<T: DecodeType>(input: &[u8]) -> Result<Decoded<T>> {
 }
 
 #[cfg(test)]
+mod pem_chain_tests {
+    use super::*;
+
+    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
+    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
+
+    fn with_x509_label(pem: &[u8]) -> Vec<u8> {
+        std::str::from_utf8(pem)
+            .expect("certificate PEM should be UTF-8")
+            .replace(
+                "-----BEGIN CERTIFICATE-----",
+                "-----BEGIN X509 CERTIFICATE-----",
+            )
+            .replace(
+                "-----END CERTIFICATE-----",
+                "-----END X509 CERTIFICATE-----",
+            )
+            .into_bytes()
+    }
+
+    #[test]
+    fn supported_pem_labels_preserve_chain_order() {
+        let ask = with_x509_label(MILAN_ASK);
+        let pem = [ask.as_slice(), b"\n", MILAN_ARK].concat();
+
+        let chain = Crypto::from_pem_chain(&pem).expect("PEM chain should parse");
+        let expected = [MILAN_ASK, MILAN_ARK];
+
+        assert_eq!(chain.len(), expected.len());
+        for (certificate, expected_pem) in chain.iter().zip(expected) {
+            let expected =
+                Crypto::from_pem(expected_pem).expect("expected certificate should parse");
+            assert_eq!(
+                Crypto::to_der(certificate).expect("certificate should encode"),
+                Crypto::to_der(&expected).expect("expected certificate should encode")
+            );
+        }
+    }
+
+    #[test]
+    fn unterminated_pem_record_is_rejected() {
+        let pem = b"-----BEGIN CERTIFICATE-----\n";
+
+        let error = Crypto::from_pem_chain(pem).expect_err("unterminated PEM should fail");
+
+        assert_eq!(error.to_string(), "Unterminated certificate PEM");
+    }
+}
+
+#[cfg(test)]
 mod decode_tests {
     use super::*;
 
@@ -633,13 +689,13 @@ mod decode_tests {
             0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02,
         ])
         .expect("ECDSA signature should decode");
-        assert_eq!(signature.as_ref().r.cbData, 1);
-        assert_eq!(signature.as_ref().s.cbData, 1);
+        assert_eq!(signature.r.cbData, 1);
+        assert_eq!(signature.s.cbData, 1);
 
         let constraints =
             decode::<Crypto32::CERT_BASIC_CONSTRAINTS2_INFO>(&[0x30, 0x03, 0x01, 0x01, 0xff])
                 .expect("Basic Constraints should decode");
-        assert!(constraints.as_ref().fCA.as_bool());
+        assert!(constraints.fCA.as_bool());
 
         let public_key = decode::<Crypto32::CERT_PUBLIC_KEY_INFO>(&[
             0x30, 0x1c, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
@@ -647,7 +703,7 @@ mod decode_tests {
             0x00, 0x01,
         ])
         .expect("SubjectPublicKeyInfo should decode");
-        assert_eq!(public_key.as_ref().PublicKey.cbData, 10);
+        assert_eq!(public_key.PublicKey.cbData, 10);
     }
 }
 
@@ -670,24 +726,6 @@ fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {
     Ok(unsafe { native_slice(pointer.cast(), len, &allocation)?.to_vec() })
 }
 
-fn next_pem_record(input: &[u8]) -> Result<Option<(&[u8], &[u8])>> {
-    let find = |marker: &[u8]| input.windows(marker.len()).position(|part| part == marker);
-    let Some((begin, (_, end_marker))) = PEM_LABELS
-        .iter()
-        .filter_map(|label| find(label.0).map(|position| (position, label)))
-        .min_by_key(|(position, _)| *position)
-    else {
-        return Ok(None);
-    };
-    let record = &input[begin..];
-    let end = record
-        .windows(end_marker.len())
-        .position(|part| part == *end_marker)
-        .ok_or("Unterminated certificate PEM")?
-        + end_marker.len();
-    Ok(Some((&record[..end], &record[end..])))
-}
-
 fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
     native_len(pem)?;
     let flags = Crypto32::CRYPT_STRING(
@@ -705,17 +743,24 @@ fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
 
 fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
     let info = decode::<Crypto32::CERT_PUBLIC_KEY_INFO>(spki)?;
-    let mut raw = BCRYPT_KEY_HANDLE::default();
-    unsafe {
+    into_owned(|handle| unsafe {
         Crypto32::CryptImportPublicKeyInfoEx2(
             Crypto32::X509_ASN_ENCODING,
-            info.as_ref(),
+            &*info,
             Crypto32::CRYPT_OID_INFO_PUBKEY_SIGN_KEY_FLAG,
             None,
-            &mut raw,
+            handle,
         )
-    }?;
-    Ok(unsafe { Owned::new(raw) })
+    })
+}
+
+fn into_owned<T>(initialize: impl FnOnce(&mut T) -> windows::core::Result<()>) -> Result<Owned<T>>
+where
+    T: Default + Free,
+{
+    let mut handle = T::default();
+    initialize(&mut handle)?;
+    Ok(unsafe { Owned::new(handle) })
 }
 
 fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
