@@ -310,6 +310,49 @@ mod sync_tests {
         }
     }
 
+    #[cfg(crypto_backend = "crypto_windows")]
+    #[test]
+    fn digest_matches_rustcrypto_across_lengths() {
+        use sha2::{Digest, Sha256, Sha384, Sha512};
+
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut lengths = vec![0, 1, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 1024];
+        lengths.extend((0..64).map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as usize % 4097
+        }));
+
+        for len in lengths {
+            let input = (0..len)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    state as u8
+                })
+                .collect::<Vec<_>>();
+            for algorithm in [
+                DigestAlgorithm::Sha256,
+                DigestAlgorithm::Sha384,
+                DigestAlgorithm::Sha512,
+            ] {
+                let expected = match algorithm {
+                    DigestAlgorithm::Sha256 => Sha256::digest(&input).to_vec(),
+                    DigestAlgorithm::Sha384 => Sha384::digest(&input).to_vec(),
+                    DigestAlgorithm::Sha512 => Sha512::digest(&input).to_vec(),
+                };
+                assert_eq!(
+                    <Crypto as CryptoBackend>::digest(algorithm, &input)
+                        .expect("Windows digest should work"),
+                    expected,
+                    "{algorithm:?} mismatch for {len}-byte input"
+                );
+            }
+        }
+    }
+
     #[test]
     fn full_chain_verifies() {
         <Crypto as CryptoBackend>::verify_chain(

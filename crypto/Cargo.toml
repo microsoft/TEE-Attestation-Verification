@@ -61,3 +61,6 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+sha2 = "0.10"
