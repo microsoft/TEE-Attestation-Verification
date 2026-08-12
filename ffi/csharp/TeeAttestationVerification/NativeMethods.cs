@@ -51,6 +51,12 @@ internal static partial class NativeMethods
         nuint vcekPemLength,
         out IntPtr report);
 
+    [LibraryImport(LibraryName, EntryPoint = "tav_snp_attestation_report_from_unverified_bytes")]
+    internal static partial IntPtr SnpReportFromUnverifiedBytes(
+        IntPtr reportBytes,
+        nuint reportLength,
+        out IntPtr report);
+
     [LibraryImport(LibraryName, EntryPoint = "tav_snp_attestation_report_version")]
     internal static partial uint SnpVersion(SafeSnpReportHandle report);
 

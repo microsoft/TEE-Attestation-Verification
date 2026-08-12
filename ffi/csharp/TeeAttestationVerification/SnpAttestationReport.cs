@@ -3,8 +3,11 @@
 
 namespace TeeAttestationVerification;
 
-/// <summary>An owned, cryptographically verified AMD SEV-SNP attestation report.</summary>
-/// <remarks>Byte-array methods return new managed copies on each call.</remarks>
+/// <summary>An owned AMD SEV-SNP attestation report.</summary>
+/// <remarks>
+/// Byte-array methods return new managed copies on each call. Reports returned by
+/// <see cref="FromUnverifiedBytes"/> have not been cryptographically verified.
+/// </remarks>
 public sealed class SnpAttestationReport : IDisposable
 {
     private readonly object _sync = new();
@@ -14,10 +17,34 @@ public sealed class SnpAttestationReport : IDisposable
     {
         if (handle == IntPtr.Zero)
         {
-            throw new InvalidOperationException("Native verification returned a null report.");
+            throw new InvalidOperationException("Native operation returned a null report.");
         }
 
         _handle = new SafeSnpReportHandle(handle);
+    }
+
+    /// <summary>
+    /// Parses a report without cryptographically verifying its contents.
+    /// </summary>
+    /// <param name="reportBytes">The binary SNP attestation report.</param>
+    /// <returns>An owned fixed-size decoded but unverified report.</returns>
+    /// <exception cref="VerifyException">The input does not have the SNP report size.</exception>
+    public static SnpAttestationReport FromUnverifiedBytes(
+        ReadOnlyMemory<byte> reportBytes)
+    {
+        byte[] report = NativeInput.Snapshot(reportBytes, nameof(reportBytes));
+        unsafe
+        {
+            fixed (byte* reportPointer = report)
+            {
+                IntPtr error = NativeMethods.SnpReportFromUnverifiedBytes(
+                    (IntPtr)reportPointer,
+                    (nuint)report.Length,
+                    out IntPtr unverifiedReport);
+                NativeResult.ThrowIfError(error);
+                return new SnpAttestationReport(unverifiedReport);
+            }
+        }
     }
 
     /// <summary>Gets the report format version.</summary>
@@ -114,7 +141,7 @@ public sealed class SnpAttestationReport : IDisposable
     /// <summary>Returns a copy of the report signature S component.</summary>
     public byte[] SignatureS() => GetBytes(NativeMethods.SnpSignatureS);
 
-    /// <summary>Releases the verified native report.</summary>
+    /// <summary>Releases the native report.</summary>
     public void Dispose()
     {
         lock (_sync)

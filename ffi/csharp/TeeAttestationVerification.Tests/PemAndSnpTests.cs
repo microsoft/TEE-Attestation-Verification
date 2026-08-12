@@ -120,6 +120,29 @@ public sealed class PemAndSnpTests
                 oversized.Value, input.Ark, input.Ask, input.Vcek));
     }
 
+    [Fact]
+    public void FromUnverifiedBytesExposesTamperedReportFields()
+    {
+        MilanInputs input = FixtureData.LoadMilan();
+        input.Report[0x90] ^= 0xff;
+
+        using SnpAttestationReport report =
+            SnpAttestationReport.FromUnverifiedBytes(input.Report);
+
+        Assert.Equal(3u, report.Version);
+        Assert.Equal(0xa0, report.Measurement()[0]);
+    }
+
+    [Fact]
+    public void FromUnverifiedBytesRejectsInvalidLength()
+    {
+        VerifyException error = Assert.Throws<VerifyException>(() =>
+            SnpAttestationReport.FromUnverifiedBytes(new byte[100]));
+
+        Assert.Equal(ErrorCode.InvalidArgument, error.Code);
+        Assert.Contains("expected 1184 bytes, got 100", error.Message);
+    }
+
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
 
     private sealed class OversizedMemoryManager : MemoryManager<byte>
