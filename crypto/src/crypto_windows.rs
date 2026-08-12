@@ -712,8 +712,34 @@ mod restricted_store_tests {
         intermediates
             .add(&intermediate)
             .expect("intermediate should be added");
+        let system_roots = CertStore(
+            unsafe { Crypto32::CertOpenSystemStoreW(None, windows::core::w!("ROOT")) }
+                .expect("system root store should open"),
+        );
+        let system_root_context =
+            unsafe { Crypto32::CertEnumCertificatesInStore(system_roots.0, None) };
+        let system_root_context =
+            NonNull::new(system_root_context).expect("system root store should not be empty");
+        let system_root = NativeCertificate(system_root_context);
+        let system_root_subset = CertStore::new().expect("system root subset should open");
+        let system_root_der = Certificate::from_der(
+            system_root
+                .der()
+                .expect("system root DER should be readable"),
+        )
+        .expect("system root should parse");
+        system_root_subset
+            .add(&system_root_der)
+            .expect("system root should be added to subset");
 
         let cases = [
+            ("system-root", Some(system_roots.0), None, None),
+            (
+                "memory-system-root-subset",
+                Some(system_root_subset.0),
+                None,
+                None,
+            ),
             ("root", Some(roots.0), None, None),
             ("trust", None, Some(roots.0), None),
             ("other", None, None, Some(intermediates.0)),
