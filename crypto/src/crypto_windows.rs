@@ -683,6 +683,9 @@ fn key_property(key: BCRYPT_HANDLE, property: PCWSTR) -> Result<String> {
     if len as usize > output.len() {
         return Err("CNG property length changed between calls".into());
     }
+    if len % size_of::<u16>() as u32 != 0 {
+        return Err("CNG string property has an odd byte length".into());
+    }
     let units = output[..len as usize]
         .chunks_exact(2)
         .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
