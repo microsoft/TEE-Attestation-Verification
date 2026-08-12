@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.7]
+
+[1.0.7]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.7
+
+### Added
+
+- Windows CNG crypto provider. (#100)
+
 ## [1.0.6]
 
 [1.0.6]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.6

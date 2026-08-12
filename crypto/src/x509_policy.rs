@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use std::time::Duration;
-#[cfg(all(async_crypto, not(sync_crypto)))]
 use std::{future::Future, pin::Pin};
 
 use super::CertificateBackend;
