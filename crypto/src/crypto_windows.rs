@@ -453,9 +453,8 @@ impl CryptoBackend for Crypto {
         }
         let mut config = Crypto32::CERT_CHAIN_ENGINE_CONFIG {
             cbSize: size_of::<Crypto32::CERT_CHAIN_ENGINE_CONFIG>() as u32,
-            hExclusiveRoot: roots.0,
-            hExclusiveTrustedPeople: roots.0,
-            dwExclusiveFlags: Crypto32::CERT_CHAIN_EXCLUSIVE_ENABLE_CA_FLAG,
+            hRestrictedRoot: roots.0,
+            hRestrictedOther: intermediates.0,
             ..Default::default()
         };
         let engine = into_owned(|handle| unsafe {
