@@ -57,10 +57,10 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 
 [dev-dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+rand = "0.8"
+sha2 = "0.10"
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-
-[target.'cfg(windows)'.dev-dependencies]
-sha2 = "0.10"

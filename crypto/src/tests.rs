@@ -353,49 +353,6 @@ mod sync_tests {
         }
     }
 
-    #[cfg(crypto_backend = "crypto_windows")]
-    #[test]
-    fn digest_matches_rustcrypto_across_lengths() {
-        use sha2::{Digest, Sha256, Sha384, Sha512};
-
-        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
-        let mut lengths = vec![0, 1, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 1024];
-        lengths.extend((0..64).map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as usize % 4097
-        }));
-
-        for len in lengths {
-            let input = (0..len)
-                .map(|_| {
-                    state ^= state << 13;
-                    state ^= state >> 7;
-                    state ^= state << 17;
-                    state as u8
-                })
-                .collect::<Vec<_>>();
-            for algorithm in [
-                DigestAlgorithm::Sha256,
-                DigestAlgorithm::Sha384,
-                DigestAlgorithm::Sha512,
-            ] {
-                let expected = match algorithm {
-                    DigestAlgorithm::Sha256 => Sha256::digest(&input).to_vec(),
-                    DigestAlgorithm::Sha384 => Sha384::digest(&input).to_vec(),
-                    DigestAlgorithm::Sha512 => Sha512::digest(&input).to_vec(),
-                };
-                assert_eq!(
-                    <Crypto as CryptoBackend>::digest(algorithm, &input)
-                        .expect("Windows digest should work"),
-                    expected,
-                    "{algorithm:?} mismatch for {len}-byte input"
-                );
-            }
-        }
-    }
-
     #[test]
     fn full_chain_verifies() {
         <Crypto as CryptoBackend>::verify_chain(
@@ -485,6 +442,45 @@ mod async_tests {
                     .await
                     .expect("digest should work"),
                 expected
+            );
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn digest_matches_rustcrypto_on_random_data() {
+        use rand::{rngs::OsRng, rngs::StdRng, Rng, RngCore, SeedableRng};
+        use sha2::{Digest, Sha256, Sha384, Sha512};
+
+        let seed = OsRng.next_u64();
+        eprintln!("digest random seed: {seed:#018x}");
+        let mut random = StdRng::seed_from_u64(seed);
+
+        for _ in 0..1024 {
+            let max_len = 1usize << random.gen_range(0..=13);
+            let mut data = vec![0; random.gen_range(0..=max_len)];
+            random.fill_bytes(&mut data);
+
+            assert_eq!(
+                <Crypto as AsyncCryptoBackend>::digest(DigestAlgorithm::Sha256, &data)
+                    .await
+                    .expect("SHA-256 should work"),
+                Sha256::digest(&data).to_vec(),
+                "SHA-256 mismatch with seed {seed:#018x}"
+            );
+            assert_eq!(
+                <Crypto as AsyncCryptoBackend>::digest(DigestAlgorithm::Sha384, &data)
+                    .await
+                    .expect("SHA-384 should work"),
+                Sha384::digest(&data).to_vec(),
+                "SHA-384 mismatch with seed {seed:#018x}"
+            );
+            assert_eq!(
+                <Crypto as AsyncCryptoBackend>::digest(DigestAlgorithm::Sha512, &data)
+                    .await
+                    .expect("SHA-512 should work"),
+                Sha512::digest(&data).to_vec(),
+                "SHA-512 mismatch with seed {seed:#018x}"
             );
         }
     }
