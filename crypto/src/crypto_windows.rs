@@ -221,7 +221,7 @@ impl CertificateBackend for Crypto {
 
         std::iter::once(0)
             .chain(boundaries.iter().copied())
-            .zip(boundaries)
+            .zip(boundaries.iter().copied())
             .map(|(start, end)| &pem[start..end])
             .filter(|record| record.contains(PEM_BEGIN) || record.contains(X509_PEM_BEGIN))
             .map(|record| Certificate::from_der(&decode_pem(record.as_bytes())?))
