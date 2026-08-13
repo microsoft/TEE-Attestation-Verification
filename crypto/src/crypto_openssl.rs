@@ -8,7 +8,7 @@
 //! verification. It is the native backend selected when `crypto_openssl` is
 //! enabled for a non-`wasm32` target.
 
-use foreign_types::ForeignType;
+use foreign_types_shared::ForeignType;
 use openssl::asn1::{Asn1Object, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
