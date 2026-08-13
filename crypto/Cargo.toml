@@ -27,7 +27,7 @@ crypto_pure_rust = [
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 
 [dependencies]
-foreign-types = { version = "0.3", optional = true }
+foreign-types = { version = "0.5", optional = true }
 ecdsa = { version = "0.17", features = ["der"], default-features = false, optional = true }
 p256 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
 p384 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
