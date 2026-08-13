@@ -30,6 +30,19 @@ const PEM_END: &str = "-----END CERTIFICATE-----";
 const X509_PEM_BEGIN: &str = "-----BEGIN X509 CERTIFICATE-----";
 const X509_PEM_END: &str = "-----END X509 CERTIFICATE-----";
 
+// RFC 9090 §2: https://www.rfc-editor.org/rfc/rfc9090.html#section-2
+const MAX_OID_FIRST_ARC: u32 = 2;
+const MAX_OID_SECOND_ARC_FOR_FIRST_TWO_ROOTS: u64 = 39;
+
+// https://learn.microsoft.com/windows/win32/api/minwinbase/ns-minwinbase-filetime
+const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
+const FILETIME_UNIX_EPOCH_OFFSET_TICKS: u64 = 116_444_736_000_000_000;
+
+// RFC 5280 §4.2.1.9: https://www.rfc-editor.org/rfc/rfc5280.html#section-4.2.1.9
+const BASIC_CONSTRAINTS_OID: &str = "2.5.29.19";
+// RFC 5280 §4.2.1.3: https://www.rfc-editor.org/rfc/rfc5280.html#section-4.2.1.3
+const KEY_USAGE_OID: &str = "2.5.29.15";
+
 pub struct Crypto;
 
 /// Owns Crypt32-validated DER and recreates operation-scoped contexts so handles are not shared.
@@ -117,7 +130,9 @@ impl NativeCertificate {
         }
         let first: u32 = arcs[0].parse()?;
         let second: u64 = arcs[1].parse()?;
-        if first > 2 || (first < 2 && second > 39) {
+        if first > MAX_OID_FIRST_ARC
+            || (first < MAX_OID_FIRST_ARC && second > MAX_OID_SECOND_ARC_FOR_FIRST_TWO_ROOTS)
+        {
             return Err("Invalid dotted-decimal OID".into());
         }
         let oid = CString::new(oid)?;
@@ -132,6 +147,7 @@ impl NativeCertificate {
 impl Drop for NativeCertificate {
     fn drop(&mut self) {
         // Microsoft documents this as always returning nonzero, so discard it.
+        // https://learn.microsoft.com/windows/win32/api/wincrypt/nf-wincrypt-certfreecertificatecontext#return-value
         let _ = unsafe { Crypto32::CertFreeCertificateContext(Some(self.as_ptr())) };
     }
 }
@@ -293,8 +309,8 @@ impl CertificateBackend for Crypto {
     fn is_valid_at(cert: &Certificate, unix_time: Duration) -> Result<bool> {
         let ticks = unix_time
             .as_secs()
-            .checked_mul(10_000_000)
-            .and_then(|ticks| ticks.checked_add(116_444_736_000_000_000))
+            .checked_mul(FILETIME_TICKS_PER_SECOND)
+            .and_then(|ticks| ticks.checked_add(FILETIME_UNIX_EPOCH_OFFSET_TICKS))
             .ok_or("Unix time does not fit FILETIME")?;
         let time = FILETIME {
             dwLowDateTime: ticks as u32,
@@ -311,8 +327,7 @@ impl CertificateBackend for Crypto {
 
     fn basic_constraints(cert: &Certificate) -> Result<Option<super::BasicConstraints>> {
         cert.with_context(|context| {
-            // Basic Constraints, RFC 5280 §4.2.1.9.
-            let Some(ext) = context.extension("2.5.29.19")? else {
+            let Some(ext) = context.extension(BASIC_CONSTRAINTS_OID)? else {
                 return Ok(None);
             };
             let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
@@ -330,7 +345,7 @@ impl CertificateBackend for Crypto {
 
     fn key_usage(cert: &Certificate) -> Result<Option<super::KeyUsage>> {
         cert.with_context(|context| {
-            if context.extension("2.5.29.15")?.is_none() {
+            if context.extension(KEY_USAGE_OID)?.is_none() {
                 return Ok(None);
             }
             let mut usage = [0];
