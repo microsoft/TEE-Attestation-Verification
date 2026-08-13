@@ -173,11 +173,12 @@ impl KeyBackend for Key {
             return Err("BCRYPT_ALGORITHM_NAME returned invalid utf-16".into());
         }
         let actual = String::from_utf16(
-          chunks
-            .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
-            .collect::<Vec<_>>()
-            .strip_suffix(&[0])
-            .ok_or("BCRYPT_ALGORITHM_NAME is not null-terminated")?)?;
+            chunks
+                .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
+                .collect::<Vec<_>>()
+                .strip_suffix(&[0])
+                .ok_or("BCRYPT_ALGORITHM_NAME is not null-terminated")?,
+        )?;
         let compatible = match algorithm {
             SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => actual == "ECDSA_P256",
             SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => actual == "ECDSA_P384",
