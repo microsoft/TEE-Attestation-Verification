@@ -265,6 +265,23 @@ fn certificate_parse_and_encode_wrappers_round_trip() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+fn mismatched_pem_boundaries_are_rejected() {
+    let fixture = std::str::from_utf8(MILAN_ARK).expect("certificate PEM should be UTF-8");
+
+    for (begin, end) in [
+        ("CERTIFICATE", "X509 CERTIFICATE"),
+        ("X509 CERTIFICATE", "CERTIFICATE"),
+    ] {
+        let pem = fixture
+            .replace("BEGIN CERTIFICATE", &format!("BEGIN {begin}"))
+            .replace("END CERTIFICATE", &format!("END {end}"));
+        Crypto::from_pem_chain(pem.as_bytes())
+            .expect_err("mismatched PEM boundaries must be rejected");
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 fn certificate_extension_lookup_returns_native_value_bytes() {
     let vcek = cert(MILAN_VCEK);
 
