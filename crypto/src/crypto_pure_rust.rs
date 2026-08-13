@@ -13,11 +13,11 @@ use p384::ecdsa::{Signature as EcdsaP384Signature, VerifyingKey as EcdsaP384Veri
 use p521::ecdsa::{Signature as EcdsaP521Signature, VerifyingKey as EcdsaP521VerifyingKey};
 use rsa::{
     pkcs1v15::{Signature as Pkcs1v15Signature, VerifyingKey as Pkcs1v15VerifyingKey},
-    pkcs8::DecodePublicKey,
     pss::{Signature as PssSignature, VerifyingKey as PssVerifyingKey},
     RsaPublicKey,
 };
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha2_10::{Sha256 as RsaSha256, Sha384 as RsaSha384, Sha512 as RsaSha512};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -128,26 +128,30 @@ impl KeyBackend for Key {
     fn from_spki_der(spki_der: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
         match algorithm {
             SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => {
+                use p256::pkcs8::DecodePublicKey;
+
                 let key = EcdsaP256VerifyingKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
                 Ok(Key::EcdsaP256(key))
             }
             SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => {
+                use p384::pkcs8::DecodePublicKey;
+
                 let key = EcdsaP384VerifyingKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
                 Ok(Key::EcdsaP384(key))
             }
             SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => {
-                use p521::elliptic_curve::sec1::ToEncodedPoint;
+                use p521::pkcs8::DecodePublicKey;
 
                 let public_key = p521::PublicKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
-                let key =
-                    EcdsaP521VerifyingKey::from_encoded_point(&public_key.to_encoded_point(false))
-                        .map_err(|e| format!("Failed to parse ECDSA public key: {:?}", e))?;
+                let key = EcdsaP521VerifyingKey::from(public_key);
                 Ok(Key::EcdsaP521(key))
             }
             SignatureKeyAlgorithm::RsaPss(algorithm) => {
+                use rsa::pkcs8::DecodePublicKey;
+
                 let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
                 Ok(Key::RsaPss {
@@ -156,6 +160,8 @@ impl KeyBackend for Key {
                 })
             }
             SignatureKeyAlgorithm::RsaPkcs1v15(algorithm) => {
+                use rsa::pkcs8::DecodePublicKey;
+
                 let rsa_pub = RsaPublicKey::from_public_key_der(spki_der)
                     .map_err(|e| format!("Failed to parse RSA public key: {:?}", e))?;
                 Ok(Key::RsaPkcs1v15 {
@@ -283,17 +289,17 @@ impl CryptoBackend for Crypto {
                 },
             ) => match algorithm {
                 RsaPssSignatureKeyAlgorithm::Ps256 => verify_rsa_pss_signature(
-                    &PssVerifyingKey::<Sha256>::new(key.clone()),
+                    &PssVerifyingKey::<RsaSha256>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
                 RsaPssSignatureKeyAlgorithm::Ps384 => verify_rsa_pss_signature(
-                    &PssVerifyingKey::<Sha384>::new(key.clone()),
+                    &PssVerifyingKey::<RsaSha384>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
                 RsaPssSignatureKeyAlgorithm::Ps512 => verify_rsa_pss_signature(
-                    &PssVerifyingKey::<Sha512>::new(key.clone()),
+                    &PssVerifyingKey::<RsaSha512>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
@@ -306,17 +312,17 @@ impl CryptoBackend for Crypto {
                 },
             ) => match algorithm {
                 RsaPkcs1v15SignatureKeyAlgorithm::Rs256 => verify_rsa_pkcs1v15_signature(
-                    &Pkcs1v15VerifyingKey::<Sha256>::new(key.clone()),
+                    &Pkcs1v15VerifyingKey::<RsaSha256>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
                 RsaPkcs1v15SignatureKeyAlgorithm::Rs384 => verify_rsa_pkcs1v15_signature(
-                    &Pkcs1v15VerifyingKey::<Sha384>::new(key.clone()),
+                    &Pkcs1v15VerifyingKey::<RsaSha384>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
                 RsaPkcs1v15SignatureKeyAlgorithm::Rs512 => verify_rsa_pkcs1v15_signature(
-                    &Pkcs1v15VerifyingKey::<Sha512>::new(key.clone()),
+                    &Pkcs1v15VerifyingKey::<RsaSha512>::new(key.clone()),
                     signed_bytes,
                     signature,
                 ),
@@ -409,7 +415,7 @@ fn verify_rsa_pss_signature<D>(
     signature: &PssSignature,
 ) -> Result<()>
 where
-    D: sha2::Digest,
+    D: sha2_10::Digest,
     PssVerifyingKey<D>: rsa::signature::Verifier<PssSignature>,
 {
     use rsa::signature::Verifier;
@@ -424,7 +430,7 @@ fn verify_rsa_pkcs1v15_signature<D>(
     signature: &Pkcs1v15Signature,
 ) -> Result<()>
 where
-    D: sha2::Digest,
+    D: sha2_10::Digest,
     Pkcs1v15VerifyingKey<D>: rsa::signature::Verifier<Pkcs1v15Signature>,
 {
     use rsa::signature::Verifier;
