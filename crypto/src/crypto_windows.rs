@@ -14,8 +14,8 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Security::Cryptography::{
     self as Crypto32, BCryptCreateHash, BCryptFinishHash, BCryptGetProperty, BCryptHashData,
-    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALGORITHM_NAME, BCRYPT_HANDLE,
-    BCRYPT_KEY_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS, BCRYPT_PAD_PKCS1, BCRYPT_PAD_PSS,
+    BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_KEY_HANDLE,
+    BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS, BCRYPT_PAD_PKCS1, BCRYPT_PAD_PSS,
     BCRYPT_PKCS1_PADDING_INFO, BCRYPT_PSS_PADDING_INFO, BCRYPT_SHA256_ALGORITHM,
     BCRYPT_SHA384_ALGORITHM, BCRYPT_SHA512_ALGORITHM, BCRYPT_SIGNATURE_LENGTH,
 };
@@ -107,6 +107,19 @@ impl NativeCertificate {
     }
 
     fn extension(&self, oid: &str) -> Result<Option<&Crypto32::CERT_EXTENSION>> {
+        let arcs = oid.split('.').collect::<Vec<_>>();
+        if arcs.len() < 2
+            || arcs
+                .iter()
+                .any(|arc| arc.is_empty() || !arc.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Err("Invalid dotted-decimal OID".into());
+        }
+        let first: u32 = arcs[0].parse()?;
+        let second: u64 = arcs[1].parse()?;
+        if first > 2 || (first < 2 && second > 39) {
+            return Err("Invalid dotted-decimal OID".into());
+        }
         let oid = CString::new(oid)?;
         let extensions = self.extensions()?;
         if extensions.is_empty() {
@@ -125,7 +138,7 @@ impl Drop for NativeCertificate {
 
 impl KeyBackend for Key {
     fn from_spki_der(spki: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
-        let key = import_key(spki)?;
+        import_key(spki)?;
         Ok(Self {
             spki: spki.to_vec(),
             algorithm,
