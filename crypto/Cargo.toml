@@ -15,7 +15,6 @@ default = ["crypto_openssl", "crypto_webcrypto"]
 crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = [
     "dep:ecdsa",
-    "dep:getrandom_04",
     "dep:p256",
     "dep:p384",
     "dep:p521",
@@ -29,10 +28,10 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 
 [dependencies]
 foreign-types = { version = "0.3", optional = true }
-ecdsa = { version = "0.17", features = ["der"], optional = true }
-p256 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
-p384 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
-p521 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
+ecdsa = { version = "0.17", features = ["der"], default-features = false, optional = true }
+p256 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
+p384 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
+p521 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
 pkcs1 = { version = "0.7", optional = true }
 rsa = { version = "0.9", default-features = false, optional = true }
 sha2 = { version = "0.11", features = ["oid"], optional = true }
@@ -44,7 +43,6 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"], optional = true }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
