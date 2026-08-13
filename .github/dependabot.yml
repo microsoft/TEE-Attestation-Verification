@@ -6,6 +6,14 @@ updates:
       interval: "daily"
     cooldown:
       default-days: 5
+    groups:
+      rustcrypto:
+        patterns:
+          - "ecdsa"
+          - "p256"
+          - "p384"
+          - "p521"
+          - "sha2"
 
   - package-ecosystem: "github-actions"
     directory: "/"
