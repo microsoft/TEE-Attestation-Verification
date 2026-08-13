@@ -154,7 +154,45 @@ impl Drop for NativeCertificate {
 
 impl KeyBackend for Key {
     fn from_spki_der(spki: &[u8], algorithm: SignatureKeyAlgorithm) -> Result<Self> {
-        import_key(spki)?;
+        let key = import_key(spki)?;
+        let actual = query_buffer(|output, len| {
+            unsafe {
+                BCryptGetProperty(
+                    (*key).into(),
+                    Crypto32::BCRYPT_ALGORITHM_NAME,
+                    output,
+                    len,
+                    0,
+                )
+            }
+            .ok()?;
+            Ok(())
+        })?;
+        let chunks = actual.chunks_exact(size_of::<u16>());
+        if !chunks.remainder().is_empty() {
+            return Err("BCRYPT_ALGORITHM_NAME returned invalid utf-16".into());
+        }
+        let actual = String::from_utf16(
+          chunks
+            .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
+            .collect::<Vec<_>>()
+            .strip_suffix(&[0])
+            .ok_or("BCRYPT_ALGORITHM_NAME is not null-terminated")?)?;
+        let compatible = match algorithm {
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256) => actual == "ECDSA_P256",
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P384) => actual == "ECDSA_P384",
+            SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P521) => actual == "ECDSA_P521",
+            SignatureKeyAlgorithm::RsaPss(_) | SignatureKeyAlgorithm::RsaPkcs1v15(_) => {
+                matches!(actual.as_str(), "RSA" | "RSA_SIGN")
+            }
+        };
+        if !compatible {
+            return Err(format!(
+                "Public key algorithm {actual} does not match requested algorithm {algorithm:?}"
+            )
+            .into());
+        }
+
         Ok(Self {
             spki: spki.to_vec(),
             algorithm,
@@ -246,32 +284,17 @@ impl CertificateBackend for Crypto {
 
     fn to_pem(cert: &Certificate) -> Result<String> {
         native_len(cert.der())?;
-        let mut len = 0;
         let flags = Crypto32::CRYPT_STRING(
             Crypto32::CRYPT_STRING_BASE64HEADER.0 | Crypto32::CRYPT_STRING_NOCR,
         );
-        // discovers length to allocate the buffer
-        if !unsafe { Crypto32::CryptBinaryToStringA(cert.der(), flags, None, &mut len) }.as_bool() {
-            return Err(windows::core::Error::from_win32().into());
-        }
-        let mut output = vec![0; len as usize];
-        if !unsafe {
-            Crypto32::CryptBinaryToStringA(
-                cert.der(),
-                flags,
-                Some(PSTR(output.as_mut_ptr())),
-                &mut len,
-            )
-        }
-        .as_bool()
-        {
-            return Err(windows::core::Error::from_win32().into());
-        }
-        if len as usize > output.len() {
-            return Err("CryptBinaryToStringA output length increased between calls".into());
-        }
-        // The second call reports the written length.
-        output.truncate(len as usize);
+        let mut output = query_buffer(|output, len| {
+            let output = output.map(|output| PSTR(output.as_mut_ptr()));
+            if !unsafe { Crypto32::CryptBinaryToStringA(cert.der(), flags, output, len) }.as_bool()
+            {
+                return Err(windows::core::Error::from_win32().into());
+            }
+            Ok(())
+        })?;
         if output.last() == Some(&0) {
             output.pop();
         }
@@ -613,14 +636,11 @@ fn decode_pem(pem: &[u8]) -> Result<Vec<u8>> {
     let flags = Crypto32::CRYPT_STRING(
         Crypto32::CRYPT_STRING_BASE64HEADER.0 | Crypto32::CRYPT_STRING_STRICT.0,
     );
-    let mut len = 0;
-    unsafe { Crypto32::CryptStringToBinaryA(pem, flags, None, &mut len, None, None) }?;
-    let mut output = vec![0; len as usize];
-    unsafe {
-        Crypto32::CryptStringToBinaryA(pem, flags, Some(output.as_mut_ptr()), &mut len, None, None)
-    }?;
-    output.truncate(len as usize);
-    Ok(output)
+    query_buffer(|output, len| {
+        let output = output.map(|output| output.as_mut_ptr());
+        unsafe { Crypto32::CryptStringToBinaryA(pem, flags, output, len, None, None) }?;
+        Ok(())
+    })
 }
 
 fn import_key(spki: &[u8]) -> Result<Owned<BCRYPT_KEY_HANDLE>> {
@@ -655,30 +675,39 @@ fn pad_component(input: &[u8], output: &mut [u8]) -> Result<()> {
 }
 
 fn name(value: &Crypto32::CRYPT_INTEGER_BLOB) -> Result<String> {
-    let len = unsafe {
-        Crypto32::CertNameToStrW(
-            Crypto32::X509_ASN_ENCODING,
-            value,
-            Crypto32::CERT_X500_NAME_STR,
-            None,
-        )
-    };
-    if len == 0 {
-        return Err(windows::core::Error::from_win32().into());
+    let output = query_buffer(|output, len| {
+        *len = unsafe {
+            Crypto32::CertNameToStrW(
+                Crypto32::X509_ASN_ENCODING,
+                value,
+                Crypto32::CERT_X500_NAME_STR,
+                output,
+            )
+        };
+        if *len == 0 {
+            Err(windows::core::Error::from_win32().into())
+        } else {
+            Ok(())
+        }
+    })?;
+    let output = output
+        .strip_suffix(&[0])
+        .ok_or("Certificate name is not null-terminated")?;
+    Ok(String::from_utf16(output)?)
+}
+
+fn query_buffer<T: Default + Clone>(
+    mut query: impl FnMut(Option<&mut [T]>, &mut u32) -> Result<()>,
+) -> Result<Vec<T>> {
+    let mut len = 0;
+    query(None, &mut len)?;
+    let mut output = vec![T::default(); len as usize];
+    query(Some(&mut output), &mut len)?;
+    if len as usize > output.len() {
+        return Err("Windows output likely overflowed the output buffer".into());
     }
-    let mut output = vec![0; len as usize];
-    let len = unsafe {
-        Crypto32::CertNameToStrW(
-            Crypto32::X509_ASN_ENCODING,
-            value,
-            Crypto32::CERT_X500_NAME_STR,
-            Some(&mut output),
-        )
-    } as usize;
-    if len == 0 || len > output.len() {
-        return Err(windows::core::Error::from_win32().into());
-    }
-    Ok(String::from_utf16(&output[..len - 1])?)
+    output.truncate(len as usize);
+    Ok(output)
 }
 
 fn hash_id(algorithm: DigestAlgorithm) -> PCWSTR {
