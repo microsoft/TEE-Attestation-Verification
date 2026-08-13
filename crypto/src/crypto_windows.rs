@@ -226,9 +226,9 @@ impl CertificateBackend for Crypto {
             .filter(|record| record.contains(PEM_BEGIN) || record.contains(X509_PEM_BEGIN))
             .map(|record| {
                 if record.contains(PEM_BEGIN) && !record.ends_with(PEM_END) {
-                    Err("Mismatched certificate PEM boundaries".into());
+                    Err("Mismatched certificate PEM boundaries".into())
                 } else if record.contains(X509_PEM_BEGIN) && !record.ends_with(X509_PEM_END) {
-                    Err("Mismatched certificate PEM boundaries".into());
+                    Err("Mismatched certificate PEM boundaries".into())
                 } else {
                     Certificate::from_der(&decode_pem(record.as_bytes())?)
                 }
