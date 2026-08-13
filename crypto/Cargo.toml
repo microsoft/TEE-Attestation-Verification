@@ -2,7 +2,7 @@
 name = "tee-attestation-verification-crypto"
 version = "1.0.7"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.85"
 repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["confidentiality", "sev-snp", "tpm"]
 description = "Cryptographic backends for TEE attestation verification"
@@ -16,12 +16,14 @@ crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = [
     "dep:ecdsa",
     "dep:getrandom",
+    "dep:getrandom_04",
     "dep:p256",
     "dep:p384",
     "dep:p521",
     "dep:pkcs1",
     "dep:rsa",
     "dep:sha2",
+    "dep:sha2_10",
     "dep:x509-cert",
     "getrandom/js",
 ]
@@ -29,13 +31,14 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 
 [dependencies]
 foreign-types = { version = "0.3", optional = true }
-ecdsa = { version = "0.16", features = ["der", "verifying"], optional = true }
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
-p384 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
-p521 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
+ecdsa = { version = "0.17", features = ["der"], optional = true }
+p256 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
+p384 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
+p521 = { version = "0.14", features = ["ecdsa", "pkcs8"], optional = true }
 pkcs1 = { version = "0.7", optional = true }
 rsa = { version = "0.9", optional = true }
-sha2 = { version = "0.10", features = ["oid"], optional = true }
+sha2 = { version = "0.11", features = ["oid"], optional = true }
+sha2_10 = { package = "sha2", version = "0.10", features = ["oid"], optional = true }
 x509-cert = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -44,6 +47,7 @@ openssl-sys = { version = "0.9", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", optional = true }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"], optional = true }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
