@@ -15,7 +15,7 @@ At least one target-compatible backend must be enabled.
 | `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for signature verification. |
-| `crypto_windows` | Windows 10 / Server 2016 or newer | yes | yes | Native CNG and Crypt32-backed verification. |
+| `crypto_windows` | Windows | yes | yes | Native CNG and Crypt32-backed verification. |
 
 Windows targets prefer the Windows backend when enabled. Other native targets
 prefer OpenSSL. WASM targets prefer WebCrypto.

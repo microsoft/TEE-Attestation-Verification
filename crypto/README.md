@@ -14,7 +14,7 @@ backend features are enabled, `build.rs` selects the target-preferred backend.
 | `crypto_openssl` | Native | yes | yes | Uses OpenSSL for native certificate-chain verification and primitive verification. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for primitive verification and the shared X.509 path validator. |
 | `crypto_pure_rust` | Native, WASM | yes | yes | Uses RustCrypto crates and the shared X.509 path validator. |
-| `crypto_windows` | Windows 10 / Server 2016 or newer | yes | yes | Uses Windows CNG for primitive verification and Crypt32 for certificate-chain verification. |
+| `crypto_windows` | Windows | yes | yes | Uses Windows CNG for primitive verification and Crypt32 for certificate-chain verification. |
 
 Windows targets prefer `crypto_windows` whenever it is enabled, including when
 `crypto_openssl` is also enabled. Other native targets prefer `crypto_openssl`

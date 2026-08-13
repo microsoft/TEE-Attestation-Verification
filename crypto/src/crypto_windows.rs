@@ -206,17 +206,25 @@ impl CertificateBackend for Crypto {
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Certificate>> {
-        let pem = std::str::from_utf8(pem)?
-            .replace(X509_PEM_BEGIN, PEM_BEGIN)
-            .replace(X509_PEM_END, PEM_END);
-        pem.split_inclusive(PEM_END)
-            .filter(|record| record.contains(PEM_BEGIN))
-            .map(|record| {
-                if !record.ends_with(PEM_END) {
-                    return Err("Unterminated certificate PEM".into());
-                }
-                Certificate::from_der(&decode_pem(record.as_bytes())?)
-            })
+        let pem = std::str::from_utf8(pem)?;
+        let mut boundaries = pem
+            .match_indices(PEM_END)
+            .chain(pem.match_indices(X509_PEM_END))
+            .map(|(start, boundary)| start + boundary.len())
+            .collect::<Vec<_>>();
+        boundaries.sort_unstable();
+
+        let remaining = &pem[boundaries.last().copied().unwrap_or_default()..];
+        if remaining.contains(PEM_BEGIN) || remaining.contains(X509_PEM_BEGIN) {
+            return Err("Unterminated certificate PEM".into());
+        }
+
+        std::iter::once(0)
+            .chain(boundaries.iter().copied())
+            .zip(boundaries)
+            .map(|(start, end)| &pem[start..end])
+            .filter(|record| record.contains(PEM_BEGIN) || record.contains(X509_PEM_BEGIN))
+            .map(|record| Certificate::from_der(&decode_pem(record.as_bytes())?))
             .collect()
     }
 
