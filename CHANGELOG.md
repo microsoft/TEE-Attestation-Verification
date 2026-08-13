@@ -8,6 +8,10 @@
 
 - C and .NET FFI constructors for decoding SNP reports without verification. (#101)
 
+### Changed
+
+- Raised the minimum supported Rust version to 1.85 while updating Rust dependencies. (#112)
+
 ## [1.0.6]
 
 [1.0.6]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.6
