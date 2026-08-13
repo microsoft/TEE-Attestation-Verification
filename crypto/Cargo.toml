@@ -12,7 +12,7 @@ links = "tav_crypto"
 
 [features]
 default = ["crypto_openssl", "crypto_webcrypto"]
-crypto_openssl = ["dep:foreign-types", "dep:openssl", "dep:openssl-sys"]
+crypto_openssl = ["dep:foreign-types-shared", "dep:openssl", "dep:openssl-sys"]
 crypto_pure_rust = [
     "dep:ecdsa",
     "dep:p256",
@@ -28,7 +28,7 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]
 
 [dependencies]
-foreign-types = { version = "0.3", optional = true }
+foreign-types-shared = { version = "0.1", optional = true }
 ecdsa = { version = "0.17", features = ["der"], default-features = false, optional = true }
 p256 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
 p384 = { version = "0.14", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
