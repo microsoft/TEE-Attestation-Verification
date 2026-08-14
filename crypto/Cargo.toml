@@ -57,7 +57,7 @@ wasm-bindgen-futures = "0.4"
 
 [dev-dependencies]
 getrandom = { version = "0.2", features = ["js"] }
-rand = "0.8"
+rand = "0.10"
 sha2 = { version = "0.11", features = ["oid"] }
 wasm-bindgen-test = "0.3"
 
