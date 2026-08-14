@@ -37,7 +37,7 @@ pkcs1 = { version = "0.7", optional = true }
 rsa = { version = "0.9", default-features = false, optional = true }
 sha2 = { version = "0.11", features = ["oid"], optional = true }
 sha2_10 = { package = "sha2", version = "0.10", features = ["oid"], optional = true }
-x509-cert = { version = "0.2", optional = true }
+x509-cert = { version = "0.3", optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 openssl = { version = "0.10", optional = true }
