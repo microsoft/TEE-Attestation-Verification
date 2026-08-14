@@ -60,7 +60,7 @@ At least one target-compatible backend must be enabled:
 | `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 | `crypto_windows` | Windows | yes | yes | Windows CNG and Crypt32-backed verification. |
 
-These features are forwarded by the domain crates and the `tee-attestation-verification-ffi` crate to the crypto sub-crate.
+These features are available on all crates and propagate to the crypto crate.
 
 ## Quick start
 
