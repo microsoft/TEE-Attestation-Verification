@@ -45,7 +45,7 @@ openssl-sys = { version = "0.9", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # 0.61 supports the workspace MSRV while exposing the required Crypt32 and CNG APIs.
-windows = { version = "0.61.3", optional = true, features = [
+windows = { version = "0.62.2", optional = true, features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
 ] }
