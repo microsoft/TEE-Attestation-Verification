@@ -28,7 +28,7 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]
 
 [dependencies]
-foreign-types-shared = { version = ">=0.1, <0.2", optional = true }
+foreign-types-shared = { version = ">=0.1, <0.4", optional = true }
 ecdsa = { version = ">=0.17, <0.18", features = ["der"], default-features = false, optional = true }
 p256 = { version = ">=0.14, <0.15", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
 p384 = { version = ">=0.14, <0.15", features = ["ecdsa", "pkcs8"], default-features = false, optional = true }
