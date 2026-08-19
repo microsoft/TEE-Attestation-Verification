@@ -20,6 +20,11 @@ crypto_openssl = [
     "attestation/crypto_openssl",
     "cose/crypto_openssl",
 ]
+crypto_pure_rust = [
+    "crypto/crypto_pure_rust",
+    "attestation/crypto_pure_rust",
+    "cose/crypto_pure_rust",
+]
 crypto_webcrypto = [
     "crypto/crypto_webcrypto",
     "attestation/crypto_webcrypto",

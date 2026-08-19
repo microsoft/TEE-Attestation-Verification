@@ -12,7 +12,7 @@ From the repository root:
 
 ```sh
 cd ffi
-wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features crypto_webcrypto
+wasm-pack build --target nodejs --out-dir ../target/wasm-consumer-tests/pkg --no-default-features --features crypto_pure_rust
 cd ..
 node --test ffi/tests/wasm-consumer/*.test.cjs
 ```

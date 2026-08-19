@@ -55,13 +55,14 @@ flowchart LR
 
 ## Crypto backend selection
 
-To support multiple environments, we provide OpenSSL, WebCrypto, and Windows backends.
+To be compliant in multiple environments, we provide backends using openssl and webcrypto, as well as a pure rust backend.
 At least one target-compatible backend must be enabled:
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
 | `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
+| `crypto_pure_rust` | Native, WASM | yes | yes | Portable RustCrypto-backed verification. |
 | `crypto_windows` | Windows | yes | yes | Windows CNG and Crypt32-backed verification. |
 
 These features are available on all crates and propagate to the crypto crate.

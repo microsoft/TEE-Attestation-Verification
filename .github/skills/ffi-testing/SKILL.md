@@ -45,8 +45,8 @@ When constants change:
 
 Use half-machine concurrency for builds.
 
-- Native Rust: `crypto_openssl`
-- C consumer: shared and static
-- WASM consumer: `crypto_webcrypto`
+- Native Rust: both `crypto_openssl` and `crypto_pure_rust`
+- C consumer: shared and static, both native backends
+- WASM consumer: `crypto_webcrypto` and `crypto_pure_rust`
 - C#: `python3 ffi/csharp/run_tests.py --configuration Release`
 - Repository: formatting, version sync, license headers, and `git diff --check`

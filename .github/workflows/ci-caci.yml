@@ -15,8 +15,16 @@ permissions:
 
 jobs:
   native:
-    name: Native OpenSSL backend
+    name: Native ${{ matrix.backend.name }} backend
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: OpenSSL
+            features: crypto_openssl
+          - name: pure-Rust
+            features: crypto_pure_rust
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,8 +33,8 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build with OpenSSL backend
-        run: cargo build --manifest-path caci/Cargo.toml --no-default-features --features crypto_openssl
+      - name: Build with ${{ matrix.backend.name }} backend
+        run: cargo build --manifest-path caci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}"
 
-      - name: Test with OpenSSL backend
-        run: cargo test --manifest-path caci/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture
+      - name: Test with ${{ matrix.backend.name }} backend
+        run: cargo test --manifest-path caci/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture

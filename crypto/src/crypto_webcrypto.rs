@@ -6,7 +6,7 @@
 //! This backend uses the host runtime's `globalThis.crypto.subtle` API for
 //! asynchronous certificate-chain and SEV-SNP attestation report signature
 //! verification. Certificate parsing, encoding, and extension inspection use
-//! the shared Rust X.509 parser. The runtime must provide WebCrypto with
+//! the shared pure-Rust X.509 parser. The runtime must provide WebCrypto with
 //! RSA-PSS/SHA-384 and ECDSA P-256/P-384/P-521 verification support.
 
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};

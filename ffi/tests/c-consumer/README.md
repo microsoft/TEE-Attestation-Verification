@@ -22,5 +22,6 @@ cmake --build target/c-consumer-tests
 ctest --test-dir target/c-consumer-tests --output-on-failure
 ```
 
-Select the crypto backend with `-DTAV_BACKEND_FEATURES=crypto_openssl`
-(the default), or link the static library with `-DTAV_LINK_STATIC=ON`.
+Select the crypto backend with `-DTAV_BACKEND_FEATURES=crypto_pure_rust`
+(default `crypto_openssl`), or link the static library with
+`-DTAV_LINK_STATIC=ON`.

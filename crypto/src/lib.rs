@@ -5,6 +5,7 @@
 //!
 //! Supports crypto backends via feature flags:
 //! - `crypto_openssl` - OpenSSL-based (not available on WASM)
+//! - `crypto_pure_rust` - Pure Rust
 //! - `crypto_webcrypto` - WebCrypto-based async verification for WASM
 //! - `crypto_windows` - Windows CNG and Crypt32
 
@@ -213,15 +214,22 @@ where
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub(crate) mod crypto_openssl;
+#[cfg(crypto_backend = "crypto_pure_rust")]
+pub(crate) mod crypto_pure_rust;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub(crate) mod crypto_webcrypto;
 #[cfg(crypto_backend = "crypto_windows")]
 pub(crate) mod crypto_windows;
-#[cfg(crypto_backend = "crypto_webcrypto")]
+#[cfg(any(
+    crypto_backend = "crypto_pure_rust",
+    crypto_backend = "crypto_webcrypto"
+))]
 mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;
+#[cfg(crypto_backend = "crypto_pure_rust")]
+pub type Crypto = crypto_pure_rust::Crypto;
 #[cfg(crypto_backend = "crypto_webcrypto")]
 pub type Crypto = crypto_webcrypto::Crypto;
 #[cfg(crypto_backend = "crypto_windows")]

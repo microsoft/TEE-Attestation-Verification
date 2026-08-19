@@ -30,7 +30,7 @@ jobs:
           cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build WASM with KDS
-        run: cargo build --manifest-path attestation/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "crypto_webcrypto,kds"
+        run: cargo build --manifest-path attestation/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "crypto_pure_rust,kds"
 
   native:
     name: Native build and test
@@ -43,13 +43,13 @@ jobs:
           rustup update stable && rustup default stable
 
       - name: Build native
-        run: cargo build --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_openssl"
+        run: cargo build --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_pure_rust"
 
       - name: Test native
-        run: cargo test --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_openssl" -- --nocapture
+        run: cargo test --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_pure_rust" -- --nocapture
 
       - name: Build native with KDS
-        run: cargo build --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_openssl,kds"
+        run: cargo build --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_pure_rust,kds"
 
       - name: Test native with KDS
-        run: cargo test --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_openssl,kds" -- --nocapture
+        run: cargo test --manifest-path attestation/Cargo.toml --no-default-features --features "crypto_pure_rust,kds" -- --nocapture

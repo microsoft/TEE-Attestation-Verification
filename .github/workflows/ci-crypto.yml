@@ -15,8 +15,16 @@ permissions:
 
 jobs:
   native:
-    name: Native OpenSSL backend
+    name: Native ${{ matrix.backend.name }} backend
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: OpenSSL
+            features: crypto_openssl
+          - name: pure-Rust
+            features: crypto_pure_rust
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,11 +32,11 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build with OpenSSL backend
-        run: cargo build --manifest-path crypto/Cargo.toml --no-default-features --features crypto_openssl
+      - name: Build with ${{ matrix.backend.name }} backend
+        run: cargo build --manifest-path crypto/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}"
 
-      - name: Test with OpenSSL backend
-        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture
+      - name: Test with ${{ matrix.backend.name }} backend
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features "${{ matrix.backend.features }}" -- --nocapture
 
   windows:
     name: Windows CNG backend
@@ -45,8 +53,16 @@ jobs:
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows -- --nocapture
 
   wasm:
-    name: WASM WebCrypto backend
+    name: WASM ${{ matrix.backend.name }} backend
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: WebCrypto
+            features: crypto_webcrypto
+          - name: pure-Rust
+            features: crypto_pure_rust
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,9 +75,9 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Check WebCrypto backend
-        run: cargo check --manifest-path crypto/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features crypto_webcrypto
+      - name: Check ${{ matrix.backend.name }} backend
+        run: cargo check --manifest-path crypto/Cargo.toml --target wasm32-unknown-unknown --no-default-features --features "${{ matrix.backend.features }}"
 
-      - name: Test WebCrypto backend
+      - name: Test ${{ matrix.backend.name }} backend
         working-directory: crypto
-        run: wasm-pack test --node --no-default-features --features crypto_webcrypto
+        run: wasm-pack test --node --no-default-features --features "${{ matrix.backend.features }}"

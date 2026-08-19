@@ -18,6 +18,7 @@ native targets prefer `crypto_openssl`, and WASM prefers `crypto_webcrypto`.
 |---|---|---|---|---|
 | `crypto_openssl` | Native | ✓ | ✓ | OpenSSL |
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
+| `crypto_pure_rust` | Native, WASM | ✓ | ✓ | Pure Rust (`p384`, `rsa`, `sha2`); selected when enabled and no target-preferred backend is enabled |
 | `crypto_windows` | Windows | ✓ | ✓ | Windows CNG and Crypt32 |
 
 ## Optional Features
