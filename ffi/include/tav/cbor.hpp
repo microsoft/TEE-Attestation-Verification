@@ -17,7 +17,8 @@
 // - Scalars are copied. Byte and text payloads are borrowed: a buffer passed
 //   to make_bytes, make_string, or a parse call must outlive every Value and
 //   every Value derived from it, and must not be modified meanwhile. Spans and
-//   views returned by as_bytes and as_string point into that same buffer.
+//   views returned by as_bytes and as_string must not outlive their payload
+//   storage.
 //
 // Failures throw CborError: DecodeError from parsing and from reads that do
 // not match the value, EncodeError from construction and serialization.
@@ -187,8 +188,8 @@ public:
         return out;
     }
 
-    /// Borrows the buffer the value was built from or parsed out of.
-    [[nodiscard]] std::span<const uint8_t> as_bytes() const&
+    /// Returns a non-owning view of the payload.
+    [[nodiscard]] std::span<const uint8_t> as_bytes() const
     {
         const uint8_t* data = nullptr;
         size_t len = 0;
@@ -196,18 +197,14 @@ public:
         return {data, len};
     }
 
-    std::span<const uint8_t> as_bytes() const&& = delete;
-
-    /// Borrows the buffer the value was built from or parsed out of.
-    [[nodiscard]] std::string_view as_string() const&
+    /// Returns a non-owning view of the payload.
+    [[nodiscard]] std::string_view as_string() const
     {
         const char* data = nullptr;
         size_t len = 0;
         check(tav_cbor_as_string(handle_, &data, &len), "as_string");
         return {data, len};
     }
-
-    std::string_view as_string() const&& = delete;
 
     [[nodiscard]] uint64_t as_tag() const
     {

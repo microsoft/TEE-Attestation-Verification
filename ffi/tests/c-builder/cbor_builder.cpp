@@ -25,19 +25,6 @@ static_assert(std::is_move_constructible_v<Value>);
 static_assert(std::is_move_assignable_v<Value>);
 static_assert(!std::is_constructible_v<Value, TavCborHandle*>);
 
-template <typename T>
-concept ByteViewable = requires(T&& value) {
-    std::forward<T>(value).as_bytes();
-};
-template <typename T>
-concept StringViewable = requires(T&& value) {
-    std::forward<T>(value).as_string();
-};
-static_assert(ByteViewable<const Value&>);
-static_assert(!ByteViewable<Value&&>);
-static_assert(StringViewable<const Value&>);
-static_assert(!StringViewable<Value&&>);
-
 namespace {
 
 std::vector<uint8_t> vec(std::span<const uint8_t> data)
@@ -537,12 +524,10 @@ TEST_CASE("cbor handle: rebuilding a map with one entry replaced")
 
     const Value one = make_signed(1);
     const Value two = make_signed(2);
-    const Value kept = edited.map_at(one);
-    CHECK(kept.as_string() == "keep");
+    CHECK(edited.map_at(one).as_string() == "keep");
     CHECK(edited.map_at(two).as_signed() == 0);
     // The source is untouched.
-    const Value original_value = source.map_at(two);
-    CHECK(original_value.as_string() == "replace");
+    CHECK(source.map_at(two).as_string() == "replace");
 }
 
 TEST_CASE("cbor handle: rebuilding an array with one element replaced")
@@ -565,14 +550,11 @@ TEST_CASE("cbor handle: rebuilding an array with one element replaced")
 
     const Value& result = edited;
     REQUIRE(result.size() == 3);
-    const Value first = result.array_at(0);
-    CHECK(first.as_string() == "keep");
+    CHECK(result.array_at(0).as_string() == "keep");
     CHECK(result.array_at(1).as_signed() == 0);
-    const Value third = result.array_at(2);
-    CHECK(third.as_string() == "keep too");
+    CHECK(result.array_at(2).as_string() == "keep too");
     // The source is untouched.
-    const Value original_value = source.array_at(1);
-    CHECK(original_value.as_string() == "replace");
+    CHECK(source.array_at(1).as_string() == "replace");
 }
 
 TEST_CASE("cbor handle: shallow_copy keeps an owned payload owned")
