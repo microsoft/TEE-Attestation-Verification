@@ -81,16 +81,8 @@ fn into_view_handle(view: CborView) -> *mut TavCborHandle {
 ///
 /// # Safety
 /// `handle` must be null or a live handle.
-pub(crate) unsafe fn as_handle<'a>(handle: *const TavCborHandle) -> Option<&'a TavCborHandle> {
+unsafe fn as_handle<'a>(handle: *const TavCborHandle) -> Option<&'a TavCborHandle> {
     unsafe { handle.as_ref() }
-}
-
-/// Read a handle without taking ownership.
-///
-/// # Safety
-/// `handle` must be null or a live handle.
-pub(crate) unsafe fn as_value<'a>(handle: *const TavCborHandle) -> Option<&'a CborValue<'static>> {
-    unsafe { as_handle(handle) }.map(CborView::as_native)
 }
 
 /// View caller memory as a slice that outlives this call.
@@ -381,9 +373,10 @@ pub unsafe extern "C" fn tav_cbor_make_map(
         // Checked before anything is consumed, so a rejected batch leaves the
         // caller's handles intact.
         for i in (0..total).step_by(2) {
-            match unsafe { as_value(*pairs.add(i)) } {
-                Some(key) if !usable_as_key(key) => return std::ptr::null_mut(),
-                _ => {}
+            if let Some(key) = unsafe { as_handle(*pairs.add(i)) } {
+                if !usable_as_key(key.as_native()) {
+                    return std::ptr::null_mut();
+                }
             }
         }
         let Some(values) = (unsafe { take_all(pairs, total) }) else {
@@ -425,8 +418,8 @@ pub unsafe extern "C" fn tav_cbor_make_tagged(
 /// `value` must be null or a live handle.
 #[no_mangle]
 pub unsafe extern "C" fn tav_cbor_shallow_copy(value: *const TavCborHandle) -> *mut TavCborHandle {
-    guard_handle(|| match unsafe { as_value(value) } {
-        Some(value) => into_handle(value.clone()),
+    guard_handle(|| match unsafe { as_handle(value) } {
+        Some(value) => into_handle(value.as_native().clone()),
         None => std::ptr::null_mut(),
     })
 }
@@ -440,8 +433,8 @@ pub unsafe extern "C" fn tav_cbor_shallow_copy(value: *const TavCborHandle) -> *
 /// `value` must be null or a live handle.
 #[no_mangle]
 pub unsafe extern "C" fn tav_cbor_deep_copy(value: *const TavCborHandle) -> *mut TavCborHandle {
-    guard_handle(|| match unsafe { as_value(value) } {
-        Some(value) => into_handle(value.clone().into_owned()),
+    guard_handle(|| match unsafe { as_handle(value) } {
+        Some(value) => into_handle(value.as_native().clone().into_owned()),
         None => std::ptr::null_mut(),
     })
 }
@@ -472,7 +465,7 @@ unsafe fn serialize<M: Mode>(
     unsafe { reset_error(err_ptr, err_len) };
     let out_ok = unsafe { reset_owned_out(out_ptr) };
     let len_ok = unsafe { reset_scalar_out(out_len) };
-    let Some(value) = (unsafe { as_value(value) }) else {
+    let Some(handle) = (unsafe { as_handle(value) }) else {
         unsafe { set_error("Null CBOR handle", err_ptr, err_len) };
         return STATUS_ENCODE_FAILED;
     };
@@ -480,7 +473,10 @@ unsafe fn serialize<M: Mode>(
         unsafe { set_error("Null output pointer", err_ptr, err_len) };
         return STATUS_ENCODE_FAILED;
     }
-    match value.to_bytes_with_depth::<M>(capped(max_depth)) {
+    match handle
+        .as_native()
+        .to_bytes_with_depth::<M>(capped(max_depth))
+    {
         Ok(bytes) => {
             let bytes = bytes.into_boxed_slice();
             let len = bytes.len();
@@ -643,8 +639,8 @@ pub unsafe extern "C" fn tav_cbor_buffer_free(ptr: *mut u8, len: usize) {
 /// `value` must be null or a live handle.
 #[no_mangle]
 pub unsafe extern "C" fn tav_cbor_kind(value: *const TavCborHandle) -> i32 {
-    guard_status(KIND_INVALID, || match unsafe { as_value(value) } {
-        Some(value) => kind_of(value),
+    guard_status(KIND_INVALID, || match unsafe { as_handle(value) } {
+        Some(value) => kind_of(value.as_native()),
         None => KIND_INVALID,
     })
 }
@@ -659,7 +655,7 @@ pub unsafe extern "C" fn tav_cbor_as_signed(value: *const TavCborHandle, out: *m
         if out.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        match unsafe { as_value(value) } {
+        match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::Int(v)) => {
                 unsafe { *out = *v };
                 STATUS_OK
@@ -679,7 +675,7 @@ pub unsafe extern "C" fn tav_cbor_as_simple(value: *const TavCborHandle, out: *m
         if out.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        match unsafe { as_value(value) } {
+        match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::Simple(v)) => {
                 unsafe { *out = *v };
                 STATUS_OK
@@ -703,7 +699,7 @@ pub unsafe extern "C" fn tav_cbor_as_bytes(
         if out.is_null() || out_len.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        match unsafe { as_value(value) } {
+        match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::ByteString(payload)) => {
                 unsafe {
                     *out = payload.as_ptr();
@@ -730,7 +726,7 @@ pub unsafe extern "C" fn tav_cbor_as_string(
         if out.is_null() || out_len.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        match unsafe { as_value(value) } {
+        match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::TextString(payload)) => {
                 unsafe {
                     *out = payload.as_ptr().cast();
@@ -753,7 +749,7 @@ pub unsafe extern "C" fn tav_cbor_as_tag(value: *const TavCborHandle, out: *mut 
         if out.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        match unsafe { as_value(value) } {
+        match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::Tagged { tag, .. }) => {
                 unsafe { *out = *tag };
                 STATUS_OK
@@ -773,7 +769,7 @@ pub unsafe extern "C" fn tav_cbor_size(value: *const TavCborHandle, out: *mut us
         if out.is_null() {
             return STATUS_TYPE_MISMATCH;
         }
-        let count = match unsafe { as_value(value) } {
+        let count = match unsafe { as_handle(value) }.map(CborView::as_native) {
             Some(CborValue::Array(items)) => items.len(),
             Some(CborValue::Map(entries)) => entries.len(),
             _ => return STATUS_TYPE_MISMATCH,
@@ -846,9 +842,10 @@ pub unsafe extern "C" fn tav_cbor_map_at(
         let Some(handle) = (unsafe { as_handle(value) }) else {
             return STATUS_TYPE_MISMATCH;
         };
-        let Some(key) = (unsafe { as_value(key) }) else {
+        let Some(key) = (unsafe { as_handle(key) }) else {
             return STATUS_TYPE_MISMATCH;
         };
+        let key = key.as_native();
         if !usable_as_key(key) {
             return STATUS_TYPE_MISMATCH;
         }
