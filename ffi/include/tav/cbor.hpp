@@ -515,6 +515,9 @@ inline Value shallow_copy(const Value& value)
 }
 
 /// Copy a value, copying every payload, so the result borrows nothing.
+///
+/// Do not keep a view obtained from a temporary result:
+/// `auto text = deep_copy(value).as_string();` leaves `text` dangling.
 inline Value deep_copy(const Value& value)
 {
     return Value::adopt(tav_cbor_deep_copy(value.handle_), "deep_copy");
