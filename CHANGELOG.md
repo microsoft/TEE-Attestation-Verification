@@ -6,7 +6,7 @@
 
 ### Added
 
-- Handle-based CBOR C ABI in the `tee-attestation-verification-ffi` crate, for building, parsing, serializing and inspecting CBOR, with a C++ wrapper in `ffi/include/tav/cbor.hpp`. (#128)
+- Handle-based CBOR C ABI in the `tee-attestation-verification-ffi` crate, with independently owned navigation handles and a C++ wrapper for building, parsing, serializing and inspecting CBOR. (#133)
 
 ### Removed
 

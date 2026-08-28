@@ -7,19 +7,17 @@
 // in <tav/internal/cbor_abi.h> is internal to this header.
 //
 // Handle ownership:
-// - Value owns a CBOR value and every child below it, and releases it on
-//   destruction. Value cannot be copied, so one value is never named twice
-//   and cannot be consumed twice.
+// - Every Value is independently owned and releases its handle on destruction.
+//   Navigation returns another Value that keeps the same immutable document
+//   alive. Value cannot be copied, so one handle is never consumed twice.
 // - Container builders consume the values passed to them, leaving each source
 //   empty(). A consumed Value must not be used again.
-// - Ref borrows, and stays valid only while the owning Value lives. Only a
-//   named Value can be borrowed: ref() is rejected on a temporary.
 //
 // Payload ownership:
 // - Scalars are copied. Byte and text payloads are borrowed: a buffer passed
 //   to make_bytes, make_string, or a parse call must outlive every Value and
-//   Ref derived from it, and must not be modified meanwhile. Spans and views
-//   returned by as_bytes and as_string point into that same buffer.
+//   every Value derived from it, and must not be modified meanwhile. Spans and
+//   views returned by as_bytes and as_string point into that same buffer.
 //
 // Failures throw CborError: DecodeError from parsing and from reads that do
 // not match the value, EncodeError from construction and serialization.
@@ -124,7 +122,6 @@ inline SimpleValue boolean_to_simple(bool value)
     return value ? SimpleValue::True : SimpleValue::False;
 }
 
-class Ref;
 class Value;
 using MapItem = std::pair<Value, Value>;
 
@@ -135,118 +132,10 @@ Value make_string(std::string_view data);
 Value make_array(std::vector<Value>&& items);
 Value make_map(std::vector<MapItem>&& entries);
 Value make_tagged(uint64_t tag, Value&& payload);
-Value shallow_copy(const Ref& ref);
-Value deep_copy(const Ref& ref);
+Value shallow_copy(const Value& value);
+Value deep_copy(const Value& value);
 Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth);
 Value det_parse(std::span<const uint8_t> raw, size_t max_depth);
-
-/// A borrowed value, valid until the owning Value is destroyed.
-class Ref
-{
-public:
-    explicit Ref(const TavCborHandle* handle) : handle_(handle) {}
-
-    [[nodiscard]] Kind kind() const
-    {
-        return static_cast<Kind>(tav_cbor_kind(handle_));
-    }
-
-    [[nodiscard]] int64_t as_signed() const
-    {
-        int64_t out = 0;
-        check(tav_cbor_as_signed(handle_, &out), "as_signed");
-        return out;
-    }
-
-    [[nodiscard]] uint8_t as_simple() const
-    {
-        uint8_t out = 0;
-        check(tav_cbor_as_simple(handle_, &out), "as_simple");
-        return out;
-    }
-
-    /// Borrows the buffer the value was built from or parsed out of.
-    [[nodiscard]] std::span<const uint8_t> as_bytes() const
-    {
-        const uint8_t* data = nullptr;
-        size_t len = 0;
-        check(tav_cbor_as_bytes(handle_, &data, &len), "as_bytes");
-        return {data, len};
-    }
-
-    /// Borrows the buffer the value was built from or parsed out of.
-    [[nodiscard]] std::string_view as_string() const
-    {
-        const char* data = nullptr;
-        size_t len = 0;
-        check(tav_cbor_as_string(handle_, &data, &len), "as_string");
-        return {data, len};
-    }
-
-    [[nodiscard]] uint64_t as_tag() const
-    {
-        uint64_t out = 0;
-        check(tav_cbor_as_tag(handle_, &out), "as_tag");
-        return out;
-    }
-
-    /// Array or map entry count.
-    [[nodiscard]] size_t size() const
-    {
-        size_t out = 0;
-        check(tav_cbor_size(handle_, &out), "size");
-        return out;
-    }
-
-    [[nodiscard]] Ref array_at(size_t index) const
-    {
-        const TavCborHandle* out = nullptr;
-        check(tav_cbor_array_at(handle_, index, &out), "array_at");
-        return Ref(out);
-    }
-
-    [[nodiscard]] Ref map_at(const Ref& key) const
-    {
-        const TavCborHandle* out = nullptr;
-        check(tav_cbor_map_at(handle_, key.handle_, &out), "map_at");
-        return Ref(out);
-    }
-
-    [[nodiscard]] Ref tag_at(uint64_t tag) const
-    {
-        const TavCborHandle* out = nullptr;
-        check(tav_cbor_tag_at(handle_, tag, &out), "tag_at");
-        return Ref(out);
-    }
-
-    [[nodiscard]] Ref map_key_at(size_t index) const
-    {
-        const TavCborHandle* out = nullptr;
-        check(tav_cbor_map_key_at(handle_, index, &out), "map_key_at");
-        return Ref(out);
-    }
-
-    [[nodiscard]] Ref map_value_at(size_t index) const
-    {
-        const TavCborHandle* out = nullptr;
-        check(tav_cbor_map_value_at(handle_, index, &out), "map_value_at");
-        return Ref(out);
-    }
-
-private:
-    friend Value shallow_copy(const Ref& ref);
-    friend Value deep_copy(const Ref& ref);
-
-    static void check(int status, const char* what)
-    {
-        if (status != TAV_CBOR_OK)
-        {
-            throw DecodeError(static_cast<Error>(status), what);
-        }
-    }
-
-    const TavCborHandle* handle_;
-};
 
 /// An owning value. Moving transfers the handle and empties the source.
 class Value
@@ -279,14 +168,96 @@ public:
         return handle_ == nullptr;
     }
 
-    /// Only an lvalue can be borrowed: a temporary would free the handle at
-    /// the end of the full expression, leaving the Ref pointing at nothing.
-    [[nodiscard]] Ref ref() const&
+    [[nodiscard]] Kind kind() const
     {
-        return Ref(handle_);
+        return static_cast<Kind>(tav_cbor_kind(handle_));
     }
 
-    Ref ref() const&& = delete;
+    [[nodiscard]] int64_t as_signed() const
+    {
+        int64_t out = 0;
+        check(tav_cbor_as_signed(handle_, &out), "as_signed");
+        return out;
+    }
+
+    [[nodiscard]] uint8_t as_simple() const
+    {
+        uint8_t out = 0;
+        check(tav_cbor_as_simple(handle_, &out), "as_simple");
+        return out;
+    }
+
+    /// Borrows the buffer the value was built from or parsed out of.
+    [[nodiscard]] std::span<const uint8_t> as_bytes() const&
+    {
+        const uint8_t* data = nullptr;
+        size_t len = 0;
+        check(tav_cbor_as_bytes(handle_, &data, &len), "as_bytes");
+        return {data, len};
+    }
+
+    std::span<const uint8_t> as_bytes() const&& = delete;
+
+    /// Borrows the buffer the value was built from or parsed out of.
+    [[nodiscard]] std::string_view as_string() const&
+    {
+        const char* data = nullptr;
+        size_t len = 0;
+        check(tav_cbor_as_string(handle_, &data, &len), "as_string");
+        return {data, len};
+    }
+
+    std::string_view as_string() const&& = delete;
+
+    [[nodiscard]] uint64_t as_tag() const
+    {
+        uint64_t out = 0;
+        check(tav_cbor_as_tag(handle_, &out), "as_tag");
+        return out;
+    }
+
+    /// Array or map entry count.
+    [[nodiscard]] size_t size() const
+    {
+        size_t out = 0;
+        check(tav_cbor_size(handle_, &out), "size");
+        return out;
+    }
+
+    [[nodiscard]] Value array_at(size_t index) const
+    {
+        TavCborHandle* out = nullptr;
+        check(tav_cbor_array_at(handle_, index, &out), "array_at");
+        return adopt(out, "array_at");
+    }
+
+    [[nodiscard]] Value map_at(const Value& key) const
+    {
+        TavCborHandle* out = nullptr;
+        check(tav_cbor_map_at(handle_, key.handle_, &out), "map_at");
+        return adopt(out, "map_at");
+    }
+
+    [[nodiscard]] Value tag_at(uint64_t tag) const
+    {
+        TavCborHandle* out = nullptr;
+        check(tav_cbor_tag_at(handle_, tag, &out), "tag_at");
+        return adopt(out, "tag_at");
+    }
+
+    [[nodiscard]] Value map_key_at(size_t index) const
+    {
+        TavCborHandle* out = nullptr;
+        check(tav_cbor_map_key_at(handle_, index, &out), "map_key_at");
+        return adopt(out, "map_key_at");
+    }
+
+    [[nodiscard]] Value map_value_at(size_t index) const
+    {
+        TavCborHandle* out = nullptr;
+        check(tav_cbor_map_value_at(handle_, index, &out), "map_value_at");
+        return adopt(out, "map_value_at");
+    }
 
     [[nodiscard]] std::vector<uint8_t> nondet_serialize(
       size_t max_depth = MAX_DEPTH) const
@@ -310,8 +281,8 @@ private:
     friend Value make_array(std::vector<Value>&&);
     friend Value make_map(std::vector<MapItem>&&);
     friend Value make_tagged(uint64_t, Value&&);
-    friend Value shallow_copy(const Ref&);
-    friend Value deep_copy(const Ref&);
+    friend Value shallow_copy(const Value&);
+    friend Value deep_copy(const Value&);
     friend Value nondet_parse(std::span<const uint8_t>, size_t);
     friend Value det_parse(std::span<const uint8_t>, size_t);
 
@@ -411,6 +382,14 @@ private:
             throw EncodeError(Error::ENCODE_FAILED, what);
         }
         return Value(handle);
+    }
+
+    static void check(int status, const char* what)
+    {
+        if (status != TAV_CBOR_OK)
+        {
+            throw DecodeError(static_cast<Error>(status), what);
+        }
     }
 
     using Encoder =
@@ -533,15 +512,15 @@ inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPT
 /// again from the same buffer, so that buffer must outlive the result; a
 /// payload the source owns is copied. The source value itself need not
 /// outlive the result.
-inline Value shallow_copy(const Ref& ref)
+inline Value shallow_copy(const Value& value)
 {
-    return Value::adopt(tav_cbor_shallow_copy(ref.handle_), "shallow_copy");
+    return Value::adopt(tav_cbor_shallow_copy(value.handle_), "shallow_copy");
 }
 
 /// Copy a value, copying every payload, so the result borrows nothing.
-inline Value deep_copy(const Ref& ref)
+inline Value deep_copy(const Value& value)
 {
-    return Value::adopt(tav_cbor_deep_copy(ref.handle_), "deep_copy");
+    return Value::adopt(tav_cbor_deep_copy(value.handle_), "deep_copy");
 }
 
 /// Run f, prefixing msg onto any DecodeError it raises.

@@ -307,6 +307,17 @@ fn container_constructors_consume_their_children() {
 }
 
 #[test]
+fn a_repeated_handle_is_rejected_without_consuming_the_batch() {
+    let handle = tav_cbor_make_signed(1);
+    let mut items = [handle, handle];
+
+    assert!(unsafe { tav_cbor_make_array(items.as_mut_ptr(), items.len()) }.is_null());
+    assert_eq!(items, [handle, handle]);
+
+    unsafe { tav_cbor_free(handle) };
+}
+
+#[test]
 fn a_container_cannot_be_a_map_key() {
     // Every key a map holds must be one tav_cbor_map_at can compare.
     for key in [
@@ -580,13 +591,15 @@ fn a_tagged_value_has_no_size() {
 fn array_indexing_reports_out_of_bounds_separately_from_type() {
     let document = [0x81, 0x01];
     let handle = parse_nondet(&document).unwrap();
-    let mut out: *const TavCborHandle = ptr::null();
+    let mut out: *mut TavCborHandle = ptr::null_mut();
 
     assert_eq!(unsafe { tav_cbor_array_at(handle, 0, &mut out) }, STATUS_OK);
+    unsafe { tav_cbor_free(out) };
     assert_eq!(
         unsafe { tav_cbor_array_at(handle, 1, &mut out) },
         STATUS_OUT_OF_BOUND
     );
+    assert!(out.is_null());
     unsafe { tav_cbor_free(handle) };
 
     let scalar = tav_cbor_make_signed(1);
@@ -602,7 +615,7 @@ fn map_lookup_matches_by_value() {
     // {1: 2, "a": 3}
     let document = [0xa2, 0x01, 0x02, 0x61, 0x61, 0x03];
     let handle = parse_nondet(&document).unwrap();
-    let mut out: *const TavCborHandle = ptr::null();
+    let mut out: *mut TavCborHandle = ptr::null_mut();
 
     let int_key = tav_cbor_make_signed(1);
     assert_eq!(
@@ -612,6 +625,7 @@ fn map_lookup_matches_by_value() {
     let mut found = 0i64;
     assert_eq!(unsafe { tav_cbor_as_signed(out, &mut found) }, STATUS_OK);
     assert_eq!(found, 2);
+    unsafe { tav_cbor_free(out) };
     unsafe { tav_cbor_free(int_key) };
 
     let text = b"a";
@@ -620,6 +634,7 @@ fn map_lookup_matches_by_value() {
         unsafe { tav_cbor_map_at(handle, text_key, &mut out) },
         STATUS_OK
     );
+    unsafe { tav_cbor_free(out) };
     unsafe { tav_cbor_free(text_key) };
 
     let absent = tav_cbor_make_signed(9);
@@ -627,6 +642,7 @@ fn map_lookup_matches_by_value() {
         unsafe { tav_cbor_map_at(handle, absent, &mut out) },
         STATUS_KEY_NOT_FOUND
     );
+    assert!(out.is_null());
     unsafe { tav_cbor_free(absent) };
 
     unsafe { tav_cbor_free(handle) };
@@ -657,7 +673,7 @@ fn parsing_rejects_a_container_used_as_a_map_key() {
 fn containers_are_not_usable_as_map_keys() {
     let document = [0xa1, 0x01, 0x02];
     let handle = parse_nondet(&document).unwrap();
-    let mut out: *const TavCborHandle = ptr::null();
+    let mut out: *mut TavCborHandle = ptr::null_mut();
 
     let container_key = unsafe { tav_cbor_make_array(ptr::null_mut(), 0) };
     assert_eq!(
@@ -672,13 +688,15 @@ fn containers_are_not_usable_as_map_keys() {
 fn tag_lookup_distinguishes_a_wrong_tag_from_a_wrong_kind() {
     let document = [0xd2, 0x01];
     let handle = parse_nondet(&document).unwrap();
-    let mut out: *const TavCborHandle = ptr::null();
+    let mut out: *mut TavCborHandle = ptr::null_mut();
 
     assert_eq!(unsafe { tav_cbor_tag_at(handle, 18, &mut out) }, STATUS_OK);
+    unsafe { tav_cbor_free(out) };
     assert_eq!(
         unsafe { tav_cbor_tag_at(handle, 19, &mut out) },
         STATUS_KEY_NOT_FOUND
     );
+    assert!(out.is_null());
     unsafe { tav_cbor_free(handle) };
 
     let scalar = tav_cbor_make_signed(1);
@@ -711,7 +729,7 @@ fn a_tag_can_be_read_before_it_is_known() {
 fn map_enumeration_walks_entries_in_order() {
     let document = [0xa2, 0x01, 0x02, 0x03, 0x04];
     let handle = parse_nondet(&document).unwrap();
-    let mut out: *const TavCborHandle = ptr::null();
+    let mut out: *mut TavCborHandle = ptr::null_mut();
 
     for (index, (key, value)) in [(1i64, 2i64), (3, 4)].iter().enumerate() {
         assert_eq!(
@@ -721,6 +739,7 @@ fn map_enumeration_walks_entries_in_order() {
         let mut found = 0i64;
         assert_eq!(unsafe { tav_cbor_as_signed(out, &mut found) }, STATUS_OK);
         assert_eq!(found, *key);
+        unsafe { tav_cbor_free(out) };
 
         assert_eq!(
             unsafe { tav_cbor_map_value_at(handle, index, &mut out) },
@@ -728,24 +747,27 @@ fn map_enumeration_walks_entries_in_order() {
         );
         assert_eq!(unsafe { tav_cbor_as_signed(out, &mut found) }, STATUS_OK);
         assert_eq!(found, *value);
+        unsafe { tav_cbor_free(out) };
     }
 
     assert_eq!(
         unsafe { tav_cbor_map_key_at(handle, 2, &mut out) },
         STATUS_OUT_OF_BOUND
     );
+    assert!(out.is_null());
     unsafe { tav_cbor_free(handle) };
 }
 
 #[test]
-fn a_borrowed_child_stays_valid_while_the_root_lives() {
+fn an_owned_child_stays_valid_after_the_root_is_freed() {
     let document = [0x82, 0x42, 0xaa, 0xbb, 0x01];
     let handle = parse_nondet(&document).unwrap();
-    let mut child: *const TavCborHandle = ptr::null();
+    let mut child: *mut TavCborHandle = ptr::null_mut();
     assert_eq!(
         unsafe { tav_cbor_array_at(handle, 0, &mut child) },
         STATUS_OK
     );
+    unsafe { tav_cbor_free(handle) };
 
     let (mut out, mut out_len) = (ptr::null(), 0usize);
     assert_eq!(
@@ -756,7 +778,53 @@ fn a_borrowed_child_stays_valid_while_the_root_lives() {
         unsafe { std::slice::from_raw_parts(out, out_len) },
         [0xaa, 0xbb]
     );
+    unsafe { tav_cbor_free(child) };
+}
+
+#[test]
+fn a_projected_child_can_be_consumed_by_a_builder() {
+    let document = [0x81, 0x01];
+    let handle = parse_nondet(&document).unwrap();
+    let mut child: *mut TavCborHandle = ptr::null_mut();
+    assert_eq!(
+        unsafe { tav_cbor_array_at(handle, 0, &mut child) },
+        STATUS_OK
+    );
     unsafe { tav_cbor_free(handle) };
+
+    let mut items = [child];
+    let rebuilt = unsafe { tav_cbor_make_array(items.as_mut_ptr(), items.len()) };
+    assert!(!rebuilt.is_null());
+    assert!(items[0].is_null());
+    assert_eq!(encode_det(rebuilt).unwrap(), document);
+    unsafe { tav_cbor_free(rebuilt) };
+}
+
+#[test]
+fn a_root_and_its_projection_can_be_consumed_in_either_order() {
+    for root_first in [true, false] {
+        let document = [0x81, 0x01];
+        let root = parse_nondet(&document).unwrap();
+        let mut child: *mut TavCborHandle = ptr::null_mut();
+        assert_eq!(unsafe { tav_cbor_array_at(root, 0, &mut child) }, STATUS_OK);
+
+        let mut items = if root_first {
+            [root, child]
+        } else {
+            [child, root]
+        };
+        let rebuilt = unsafe { tav_cbor_make_array(items.as_mut_ptr(), items.len()) };
+
+        assert!(!rebuilt.is_null());
+        assert_eq!(items, [ptr::null_mut(), ptr::null_mut()]);
+        let expected = if root_first {
+            vec![0x82, 0x81, 0x01, 0x01] // [[1], 1]
+        } else {
+            vec![0x82, 0x01, 0x81, 0x01] // [1, [1]]
+        };
+        assert_eq!(encode_det(rebuilt).unwrap(), expected);
+        unsafe { tav_cbor_free(rebuilt) };
+    }
 }
 
 // --- The C contract ---

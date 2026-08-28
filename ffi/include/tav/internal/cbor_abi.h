@@ -17,15 +17,14 @@ extern "C" {
  * contract. Not a supported interface on its own.
  *
  * Handles:
- * - A handle owns one CBOR value and every child below it, and is released
- *   with tav_cbor_free. tav_cbor_free(NULL) is a no-op.
+ * - Every handle is independently owned and keeps its complete immutable CBOR
+ *   document alive. Every handle is released with tav_cbor_free;
+ *   tav_cbor_free(NULL) is a no-op.
  * - Container constructors consume every handle passed to them and set each
- *   caller variable to NULL. Handles in a batch must be distinct; a repeated
- *   handle is consumed twice and so freed twice.
- * - A batch containing NULL is rejected, and any handle already consumed from
- *   it is returned to the caller's variables, possibly at a different address.
- * - Accessors return a borrowed handle, valid until its owning root is freed.
- *   A borrowed handle must not be freed or consumed.
+ *   caller variable to NULL. A batch containing NULL or the same handle more
+ *   than once is rejected without consuming any handles.
+ * - Navigation returns a new owning handle projected into the same immutable
+ *   document. It remains valid after the source handle is freed.
  *
  * Payloads:
  * - Scalars are copied. tav_cbor_make_bytes and tav_cbor_make_string borrow:
@@ -180,7 +179,9 @@ int tav_cbor_as_tag(const TavCborHandle* value, uint64_t* out);
 int tav_cbor_size(const TavCborHandle* value, size_t* out);
 
 /*
- * Navigation. Each writes a borrowed child through out.
+ * Navigation. Each writes a new owning handle through out. The output is
+ * cleared before any work, and must be released with tav_cbor_free or passed
+ * to a consuming container constructor.
  *
  * array_at: TYPE_MISMATCH if not an array, OUT_OF_BOUND past the end.
  * map_at:   TYPE_MISMATCH if not a map or if the key is a container, which a
@@ -188,13 +189,13 @@ int tav_cbor_size(const TavCborHandle* value, size_t* out);
  *           KEY_NOT_FOUND if absent.
  * tag_at:   TYPE_MISMATCH if not tagged, KEY_NOT_FOUND if the tag differs.
  */
-int tav_cbor_array_at(const TavCborHandle* value, size_t index, const TavCborHandle** out);
-int tav_cbor_map_at(const TavCborHandle* value, const TavCborHandle* key, const TavCborHandle** out);
-int tav_cbor_tag_at(const TavCborHandle* value, uint64_t tag, const TavCborHandle** out);
+int tav_cbor_array_at(const TavCborHandle* value, size_t index, TavCborHandle** out);
+int tav_cbor_map_at(const TavCborHandle* value, const TavCborHandle* key, TavCborHandle** out);
+int tav_cbor_tag_at(const TavCborHandle* value, uint64_t tag, TavCborHandle** out);
 
 /* Map enumeration, for callers that walk rather than look up. */
-int tav_cbor_map_key_at(const TavCborHandle* value, size_t index, const TavCborHandle** out);
-int tav_cbor_map_value_at(const TavCborHandle* value, size_t index, const TavCborHandle** out);
+int tav_cbor_map_key_at(const TavCborHandle* value, size_t index, TavCborHandle** out);
+int tav_cbor_map_value_at(const TavCborHandle* value, size_t index, TavCborHandle** out);
 
 #ifdef __cplusplus
 }
