@@ -22,6 +22,11 @@
 //
 // Failures throw CborError: DecodeError from parsing and from reads that do
 // not match the value, EncodeError from construction and serialization.
+//
+// Nesting:
+// - MAX_DEPTH limits parsing and serialization, not builders. Callers must
+//   bound the depth they build. Copying, materializing, or destroying an
+//   extremely deep Value can exhaust the process stack and abort.
 
 #include <tav/internal/cbor_abi.h>
 
@@ -36,8 +41,7 @@
 
 namespace tav::cbor
 {
-/// Ceiling on nesting depth. Parse and serialize calls clamp the depth asked
-/// for to this value, so deeper documents are always rejected.
+/// Ceiling on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
 
 /// Failure statuses of the C ABI.
@@ -466,7 +470,8 @@ inline Value make_array(std::vector<Value>&& items)
 }
 
 /// Keys must be unique and must not be arrays, maps or tagged values, so that
-/// every key a map holds can also be passed to map_at.
+/// every key a map holds can also be passed to map_at. Duplicate keys are
+/// unsupported: construction may succeed, but serialization throws EncodeError.
 inline Value make_map(std::vector<MapItem>&& entries)
 {
     const size_t pair_count = entries.size();

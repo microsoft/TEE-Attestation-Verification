@@ -26,7 +26,9 @@
 //! # Limits
 //!
 //! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
-//! whatever depth the caller asks for.
+//! whatever depth the caller asks for. Builders do not enforce this limit.
+//! Callers must bound the depth they build. Copying, materializing, or dropping
+//! an extremely deep value can exhaust the process stack and abort.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -353,9 +355,9 @@ pub unsafe extern "C" fn tav_cbor_make_array(
 
 /// Build a map, consuming `2 * pair_count` handles ordered key, value, key, value.
 ///
-/// Keys must be unique and must not be arrays, maps or tagged values, matching
-/// the lookup [`tav_cbor_map_at`] offers. Invalid or duplicate keys are rejected
-/// without consuming any handles.
+/// Keys must not be arrays, maps or tagged values, matching the lookup
+/// [`tav_cbor_map_at`] offers. Invalid keys are rejected without consuming any
+/// handles. Duplicate keys are unsupported and fail during serialization.
 ///
 /// # Safety
 /// `pairs` must be valid for `2 * pair_count` handle variables.
@@ -376,18 +378,14 @@ pub unsafe extern "C" fn tav_cbor_make_map(
         } else {
             unsafe { std::slice::from_raw_parts(pairs, total) }
         };
-        let mut keys = Vec::with_capacity(pair_count);
         for pair in pairs_slice.chunks_exact(2) {
             let Some(key) = (unsafe { as_handle(pair[0]) }) else {
                 return std::ptr::null_mut();
             };
-            let key = key.as_native();
-            if !usable_as_key(key) || keys.iter().any(|existing| *existing == key) {
+            if !usable_as_key(key.as_native()) {
                 return std::ptr::null_mut();
             }
-            keys.push(key);
         }
-        drop(keys);
 
         let Some(values) = (unsafe { take_all(pairs, total) }) else {
             return std::ptr::null_mut();

@@ -341,71 +341,21 @@ fn a_container_cannot_be_a_map_key() {
     }
 }
 
-fn assert_duplicate_keys_are_rejected(mut pairs: Vec<*mut TavCborHandle>) {
-    let original = pairs.clone();
-    let map = unsafe { tav_cbor_make_map(pairs.as_mut_ptr(), pairs.len() / 2) };
-    if !map.is_null() {
-        unsafe { tav_cbor_free(map) };
-    }
-
-    assert!(map.is_null());
-    assert_eq!(pairs, original);
-    for handle in pairs {
-        unsafe { tav_cbor_free(handle) };
-    }
-}
-
 #[test]
-fn duplicate_map_keys_are_rejected_without_consuming_the_batch() {
-    assert_duplicate_keys_are_rejected(vec![
+fn duplicate_map_keys_build_but_cannot_be_serialized() {
+    let mut pairs = vec![
         tav_cbor_make_signed(1),
         tav_cbor_make_signed(10),
         tav_cbor_make_signed(1),
         tav_cbor_make_signed(20),
-    ]);
-    assert_duplicate_keys_are_rejected(vec![
-        tav_cbor_make_simple(22),
-        tav_cbor_make_signed(10),
-        tav_cbor_make_simple(22),
-        tav_cbor_make_signed(20),
-    ]);
+    ];
+    let map = unsafe { tav_cbor_make_map(pairs.as_mut_ptr(), 2) };
 
-    let bytes_a = [0xaau8];
-    let bytes_b = [0xaau8];
-    assert_ne!(bytes_a.as_ptr(), bytes_b.as_ptr());
-    assert_duplicate_keys_are_rejected(vec![
-        unsafe { tav_cbor_make_bytes(bytes_a.as_ptr(), bytes_a.len()) },
-        tav_cbor_make_signed(10),
-        unsafe { tav_cbor_make_bytes(bytes_b.as_ptr(), bytes_b.len()) },
-        tav_cbor_make_signed(20),
-    ]);
-
-    let text_a = [b'k'];
-    let text_b = [b'k'];
-    assert_ne!(text_a.as_ptr(), text_b.as_ptr());
-    assert_duplicate_keys_are_rejected(vec![
-        unsafe { tav_cbor_make_string(text_a.as_ptr().cast(), text_a.len()) },
-        tav_cbor_make_signed(10),
-        unsafe { tav_cbor_make_string(text_b.as_ptr().cast(), text_b.len()) },
-        tav_cbor_make_signed(20),
-    ]);
-
-    let document = [0x82, 0x01, 0x01];
-    let root = parse_nondet(&document).unwrap();
-    let mut first = ptr::null_mut();
-    let mut second = ptr::null_mut();
-    assert_eq!(unsafe { tav_cbor_array_at(root, 0, &mut first) }, STATUS_OK);
-    assert_eq!(
-        unsafe { tav_cbor_array_at(root, 1, &mut second) },
-        STATUS_OK
-    );
-    assert_duplicate_keys_are_rejected(vec![
-        first,
-        tav_cbor_make_signed(10),
-        second,
-        tav_cbor_make_signed(20),
-    ]);
-    unsafe { tav_cbor_free(root) };
+    assert!(!map.is_null());
+    assert!(pairs.iter().all(|handle| handle.is_null()));
+    assert!(encode_nondet(map).is_err());
+    assert!(encode_det(map).is_err());
+    unsafe { tav_cbor_free(map) };
 }
 
 #[test]

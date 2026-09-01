@@ -23,7 +23,7 @@ extern "C" {
  * - Container constructors consume every handle passed to them and set each
  *   caller variable to NULL. A batch containing NULL or the same handle more
  *   than once is rejected without consuming any handles. A map with an invalid
- *   or duplicate key is also rejected without consuming any handles.
+ *   key is also rejected without consuming any handles.
  * - Navigation returns a new owning handle projected into the same immutable
  *   document. It remains valid after the source handle is freed.
  *
@@ -49,8 +49,10 @@ extern "C" {
 typedef struct TavCborHandle TavCborHandle;
 
 /*
- * Ceiling on nesting depth. Parse and serialize calls clamp the depth the
- * caller asks for to this value, so deeper documents are always rejected.
+ * Ceiling on nesting depth for parsing and serialization. Builders do not
+ * enforce this limit. Callers must bound the depth they build. Copying,
+ * materializing, or dropping an extremely deep value can exhaust the process
+ * stack and abort.
  */
 #define TAV_CBOR_MAX_DEPTH 256
 
@@ -98,7 +100,8 @@ TavCborHandle* tav_cbor_make_string(const char* data, size_t len);
 TavCborHandle* tav_cbor_make_array(TavCborHandle** items, size_t count);
 /*
  * pairs holds key, value, key, value, ... so it has 2 * pair_count entries.
- * Keys must be unique and must not be arrays, maps or tagged values.
+ * Keys must be unique and must not be arrays, maps or tagged values. Duplicate
+ * keys are unsupported: construction may succeed, but serialization fails.
  */
 TavCborHandle* tav_cbor_make_map(TavCborHandle** pairs, size_t pair_count);
 TavCborHandle* tav_cbor_make_tagged(uint64_t tag, TavCborHandle** payload);
