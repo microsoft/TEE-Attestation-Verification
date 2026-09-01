@@ -16,7 +16,7 @@ malformed input), the panic is caught at the FFI boundary and reported as a
 ## Building and linking
 
 ```sh
-cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_openssl
+cargo build --manifest-path ffi/Cargo.toml
 ```
 
 That produces `libtee_attestation_verification_ffi.{a,so}` under

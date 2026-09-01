@@ -69,6 +69,6 @@
           BeforeTargets="PrepareForBuild"
           Condition="'$(DesignTimeBuild)' != 'true' and '$(TavNativeAssetsRoot)' == ''">
     <Exec WorkingDirectory="$(TavRepoRoot)"
-          Command="cargo build --locked --manifest-path &quot;$(TavRepoRoot)ffi/Cargo.toml&quot; --no-default-features --features crypto_openssl $(TavCargoProfileFlag)" />
+          Command="cargo build --locked --manifest-path &quot;$(TavRepoRoot)ffi/Cargo.toml&quot; $(TavCargoProfileFlag)" />
   </Target>
 </Project>

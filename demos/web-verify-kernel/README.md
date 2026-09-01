@@ -33,7 +33,7 @@ Open <http://localhost:8000/> in a browser.
 
    ```sh
    cd ffi
-   wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
+   wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg
    ```
 
 2. Serve **this directory** over HTTP.

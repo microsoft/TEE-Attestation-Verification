@@ -141,9 +141,7 @@ jobs:
           wasm-pack build \
             --target web \
             --release \
-            --out-dir ../dist/tav-wasm \
-            --no-default-features \
-            --features "crypto_webcrypto"
+            --out-dir ../dist/tav-wasm
 
           tar -C ../dist -czf "../release-artifacts/tav-wasm-${VERSION}.tar.gz" tav-wasm
 

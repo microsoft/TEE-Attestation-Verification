@@ -31,8 +31,6 @@ add_custom_target(tav_c_abi ALL
     COMMAND
         cargo build
         --manifest-path "${TAV_REPO_ROOT}/ffi/Cargo.toml"
-        --no-default-features
-        --features crypto_openssl
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${TAV_RUST_LIBRARY}"
         "${TAV_DEMO_LIBRARY}"

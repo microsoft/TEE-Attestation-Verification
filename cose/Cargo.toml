@@ -10,7 +10,8 @@ authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
 [features]
-default = ["crypto/default"]
+default = ["crypto_compliant"]
+crypto_compliant = ["crypto/crypto_compliant"]
 crypto_openssl = ["crypto/crypto_openssl"]
 crypto_webcrypto = ["crypto/crypto_webcrypto"]
 crypto_windows = ["crypto/crypto_windows"]

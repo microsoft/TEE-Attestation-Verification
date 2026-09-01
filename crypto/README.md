@@ -5,20 +5,21 @@ It narrowly exposes a unified surface for signature verification and certificate
 
 ## Backends
 
-At least one target-compatible backend feature must be enabled. If multiple
-backend features are enabled, `build.rs` selects the target-preferred backend.
+The default `crypto_compliant` feature selects a target-compatible backend and
+activates only that target's backend dependencies.
+The feature selects an implementation. Deployment configuration determines
+whether that implementation meets a specific compliance standard.
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
-| `crypto_openssl` | Native | yes | yes | Uses OpenSSL for native certificate-chain verification and primitive verification. |
+| `crypto_compliant` | Native and WASM | target-dependent | yes | Selects Windows CNG on Windows, WebCrypto on WASM, and OpenSSL on other native targets. |
+| `crypto_openssl` | Native non-Windows | yes | yes | Uses OpenSSL for native certificate-chain verification and primitive verification. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for primitive verification and the shared X.509 path validator. |
 | `crypto_windows` | Windows | yes | yes | Uses Windows CNG for primitive verification and Crypt32 for certificate-chain verification. |
 
-Windows targets prefer `crypto_windows` whenever it is enabled, including when
-`crypto_openssl` is also enabled. Other native targets use `crypto_openssl`.
-WASM targets use `crypto_webcrypto`.
-Use `--no-default-features --features crypto_windows` to select only the
-Windows backend.
+Use `--no-default-features` with an explicit backend feature to override the
+default. Windows targets require `crypto_windows`. Other native targets use
+`crypto_openssl`, and WASM targets use `crypto_webcrypto`.
 
 ## Scope
 

@@ -11,17 +11,21 @@ license = "MIT"
 links = "tav_crypto"
 
 [features]
-default = ["crypto_openssl", "crypto_webcrypto"]
+default = ["crypto_compliant"]
+crypto_compliant = [
+    "dep:foreign-types-shared",
+    "dep:openssl",
+    "dep:openssl-sys",
+    "dep:pkcs1",
+    "dep:windows",
+    "dep:x509-cert",
+]
 crypto_openssl = ["dep:foreign-types-shared", "dep:openssl", "dep:openssl-sys"]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]
 
-[dependencies]
+[target.'cfg(all(not(target_family = "wasm"), not(windows)))'.dependencies]
 foreign-types-shared = { version = ">=0.1, <0.4", optional = true }
-pkcs1 = { version = ">=0.8.0-rc.4, <0.9", optional = true }
-x509-cert = { version = ">=0.3.0, <0.4", optional = true }
-
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
 openssl = { version = ">=0.10, <0.11", optional = true }
 openssl-sys = { version = ">=0.9, <0.10", optional = true }
 
@@ -34,8 +38,10 @@ windows = { version = ">=0.62.2, <0.63", optional = true, features = [
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = ">=0.3, <0.4"
+pkcs1 = { version = ">=0.8.0-rc.4, <0.9", optional = true }
 wasm-bindgen = ">=0.2, <0.3"
 wasm-bindgen-futures = ">=0.4, <0.5"
+x509-cert = { version = ">=0.3.0, <0.4", optional = true }
 
 [dev-dependencies]
 getrandom = { version = ">=0.4, <0.5", features = ["wasm_js"] }

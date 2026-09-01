@@ -39,9 +39,7 @@ cargo install wasm-pack --version 0.13.1 --locked
   cd ffi
   wasm-pack build \
     --target web \
-    --out-dir ../demos/caci-attestation-verify/caci_pkg \
-    --no-default-features \
-    --features "crypto_webcrypto"
+    --out-dir ../demos/caci-attestation-verify/caci_pkg
 )
 ```
 

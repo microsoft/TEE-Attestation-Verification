@@ -43,7 +43,7 @@ await init();
 
 ```bash
 cd ffi
-wasm-pack build --target web --no-default-features --features crypto_webcrypto
+wasm-pack build --target web
 ```
 
 For Node consumers, use `--target nodejs` instead; see

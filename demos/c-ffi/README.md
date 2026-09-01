@@ -31,7 +31,7 @@ cmake --build build-static
 The CMake build invokes:
 
 ```sh
-cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_openssl
+cargo build --manifest-path ffi/Cargo.toml
 ```
 
 ## Tests

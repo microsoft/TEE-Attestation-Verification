@@ -12,26 +12,38 @@ fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let is_wasm = target_family == "wasm";
     let is_windows = target_os == "windows";
+    let has_compliant = std::env::var_os("CARGO_FEATURE_CRYPTO_COMPLIANT").is_some();
     let has_openssl = std::env::var_os("CARGO_FEATURE_CRYPTO_OPENSSL").is_some();
     let has_webcrypto = std::env::var_os("CARGO_FEATURE_CRYPTO_WEBCRYPTO").is_some();
     let has_windows = std::env::var_os("CARGO_FEATURE_CRYPTO_WINDOWS").is_some();
 
-    // Allow multiple backends and choose the target-preferred implementation.
-    let crypto_backend = if !is_wasm {
-        if is_windows && has_windows {
+    let crypto_backend = if has_compliant {
+        if is_wasm {
+            "crypto_webcrypto"
+        } else if is_windows {
             "crypto_windows"
+        } else {
+            "crypto_openssl"
+        }
+    } else if !is_wasm {
+        if is_windows {
+            if has_windows {
+                "crypto_windows"
+            } else {
+                panic!(
+                    "On Windows targets, `crypto_compliant` or `crypto_windows` must be enabled."
+                );
+            }
         } else if has_openssl {
             "crypto_openssl"
         } else {
-            panic!(
-              "On native targets, `crypto_openssl` or the Windows-only `crypto_windows` must be enabled."
-            );
+            panic!("On native targets, `crypto_compliant` or `crypto_openssl` must be enabled.");
         }
     } else {
         if has_webcrypto {
             "crypto_webcrypto"
         } else {
-            panic!("On WASM targets, `crypto_webcrypto` must be enabled.");
+            panic!("On WASM targets, `crypto_compliant` or `crypto_webcrypto` must be enabled.");
         }
     };
 

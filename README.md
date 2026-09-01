@@ -55,22 +55,22 @@ flowchart LR
 
 ## Crypto backend selection
 
-To support multiple environments, we provide OpenSSL, WebCrypto, and Windows backends.
-At least one target-compatible backend must be enabled:
+The default `crypto_compliant` feature selects a target-compatible backend:
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
-| `crypto_openssl` | Native | yes | yes | Native OpenSSL-backed verification. |
+| `crypto_compliant` | Native and WASM | target-dependent | yes | Selects Windows CNG on Windows, WebCrypto on WASM, and OpenSSL on other native targets. |
+| `crypto_openssl` | Native non-Windows | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_windows` | Windows | yes | yes | Windows CNG and Crypt32-backed verification. |
 
-These features are available on all crates and propagate to the crypto crate.
+Explicit backend features remain available for overrides and backend-specific testing.
 
 ## Quick start
 
 ```toml
 [dependencies]
-tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-X.X.X", features = ["crypto_openssl"] }
+tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-X.X.X" }
 ```
 
 ```rust

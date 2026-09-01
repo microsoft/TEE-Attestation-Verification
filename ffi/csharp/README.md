@@ -146,7 +146,7 @@ feed, restores the public xUnit consumer suite against that exact package, and
 tests the complete NuGet → C# → C ABI → Rust path.
 
 Source builds require Rust, the OpenSSL development headers, and `pkg-config`.
-The MSBuild project invokes Cargo with `crypto_openssl` for every build.
+The MSBuild project uses the target-selected default crypto backend.
 
 To create a local Linux development package:
 

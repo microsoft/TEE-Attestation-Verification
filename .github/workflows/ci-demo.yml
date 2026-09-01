@@ -32,7 +32,7 @@ jobs:
 
       - name: Build FFI WASM for the demo
         working-directory: ffi
-        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --out-dir ../demos/web-verify-kernel/pkg
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build FFI WASM for the demo
         working-directory: ffi
-        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg --no-default-features --features "crypto_webcrypto"
+        run: wasm-pack build --target web --out-dir ../demos/caci-attestation-verify/caci_pkg
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

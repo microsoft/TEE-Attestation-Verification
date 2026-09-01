@@ -13,6 +13,13 @@ license = "MIT"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
+default = ["crypto_compliant"]
+crypto_compliant = [
+    "crypto/crypto_compliant",
+    "attestation/crypto_compliant",
+    "cose/crypto_compliant",
+    "caci/crypto_compliant",
+]
 crypto_openssl = [
     "crypto/crypto_openssl",
     "attestation/crypto_openssl",

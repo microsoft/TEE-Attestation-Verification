@@ -16,15 +16,12 @@ jobs:
         include:
           - rid: linux-x64
             runner: ubuntu-22.04
-            feature: crypto_openssl
             library: libtee_attestation_verification_ffi.so
           - rid: osx-x64
             runner: macos-15-intel
-            feature: crypto_openssl
             library: libtee_attestation_verification_ffi.dylib
           - rid: win-x64
             runner: windows-2022
-            feature: crypto_windows
             library: tee_attestation_verification_ffi.dll
 
     steps:
@@ -43,9 +40,7 @@ jobs:
 
       - name: Build native library
         shell: bash
-        run: >
-          cargo build --locked --release --manifest-path ffi/Cargo.toml
-          --no-default-features --features "${{ matrix.feature }}"
+        run: cargo build --locked --release --manifest-path ffi/Cargo.toml
 
       - name: Stage native library
         shell: bash
