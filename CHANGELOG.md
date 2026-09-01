@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Select the platform crypto backend through the default `crypto_compliant` feature without resolving dependencies for other platforms. Explicit OpenSSL selection is now limited to non-Windows targets. (#136)
+- By default all crypto backends are enabled. This selects the platform's crypto backend automatically, however OpenSSL is now disabled on Windows. (#136)
 
 ### Removed
 

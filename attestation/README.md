@@ -10,11 +10,11 @@ A minimal-external-dependencies, portable and safe library for verifying a TEE a
 
 ## Crypto Backends
 
-The default `crypto_compliant` feature selects the target-compatible backend.
+The default feature set enables every backend selector. The build selects the
+target-compatible backend.
 
 | Feature | Platforms | sync | async | Dependencies |
 |---|---|---|---|---|
-| `crypto_compliant` | Native and WASM | target-dependent | ✓ | Target-selected |
 | `crypto_openssl` | Native non-Windows | ✓ | ✓ | OpenSSL |
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
 | `crypto_windows` | Windows | ✓ | ✓ | Windows CNG and Crypt32 |

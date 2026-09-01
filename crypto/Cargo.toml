@@ -11,15 +11,7 @@ license = "MIT"
 links = "tav_crypto"
 
 [features]
-default = ["crypto_compliant"]
-crypto_compliant = [
-    "dep:foreign-types-shared",
-    "dep:openssl",
-    "dep:openssl-sys",
-    "dep:pkcs1",
-    "dep:windows",
-    "dep:x509-cert",
-]
+default = ["crypto_openssl", "crypto_webcrypto", "crypto_windows"]
 crypto_openssl = ["dep:foreign-types-shared", "dep:openssl", "dep:openssl-sys"]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]

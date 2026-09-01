@@ -55,16 +55,17 @@ flowchart LR
 
 ## Crypto backend selection
 
-The default `crypto_compliant` feature selects a target-compatible backend:
+The default feature set enables every backend selector. The build selects the
+target-compatible backend:
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
-| `crypto_compliant` | Native and WASM | target-dependent | yes | Selects Windows CNG on Windows, WebCrypto on WASM, and OpenSSL on other native targets. |
 | `crypto_openssl` | Native non-Windows | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Browser/Node WebCrypto-backed verification. |
 | `crypto_windows` | Windows | yes | yes | Windows CNG and Crypt32-backed verification. |
 
-Explicit backend features remain available for overrides and backend-specific testing.
+Use explicit backend features with `--no-default-features` for backend-specific
+testing.
 
 ## Quick start
 

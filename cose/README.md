@@ -8,11 +8,11 @@ or encryption APIs.
 
 ## Crypto backends
 
-The default `crypto_compliant` feature selects a target-compatible backend.
+The default feature set enables every backend selector. The build selects the
+target-compatible backend.
 
 | Feature | Platforms | sync | async | Notes |
 |---|---|---:|---:|---|
-| `crypto_compliant` | Native and WASM | target-dependent | yes | Selects the backend for the compilation target. |
 | `crypto_openssl` | Native non-Windows | yes | yes | Native OpenSSL-backed verification. |
 | `crypto_webcrypto` | WASM | no | yes | Uses `globalThis.crypto.subtle` for signature verification. |
 | `crypto_windows` | Windows | yes | yes | Native CNG and Crypt32-backed verification. |
