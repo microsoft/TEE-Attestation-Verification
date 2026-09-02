@@ -56,6 +56,10 @@ jobs:
             exit 1
           fi
 
+          python3 scripts/extract-release-notes.py \
+            --version "${normalized_version}" \
+            > /dev/null
+
           echo "tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${normalized_version}" >> "${GITHUB_OUTPUT}"
           echo "commit_sha=${commit_sha}" >> "${GITHUB_OUTPUT}"
@@ -210,6 +214,16 @@ jobs:
           )
           mv "${RUNNER_TEMP}/SHA256SUMS" dist/SHA256SUMS
 
+      - name: Extract release notes from changelog
+        env:
+          RELEASE_VERSION: ${{ needs.prepare_release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/extract-release-notes.py \
+            --version "${RELEASE_VERSION}" \
+            --output "${RUNNER_TEMP}/release-notes.md"
+
       - name: Create draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,4 +231,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create --verify-tag --draft --generate-notes "${RELEASE_TAG}" dist/*
+          gh release create \
+            --verify-tag \
+            --draft \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            "${RELEASE_TAG}" \
+            dist/*
