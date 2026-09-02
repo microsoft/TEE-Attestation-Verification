@@ -12,6 +12,10 @@
 
 - By default all crypto backends are enabled. This selects the platform's crypto backend automatically, however OpenSSL is now disabled on Windows. (#136)
 
+### Fixed
+
+- Reject duplicate CPUID entries in minimum-TCB policies, including case aliases supplied through WASM JSON. (#83)
+
 ### Removed
 
 - Removed the `crypto_pure_rust` backend and feature from all crates. (#131)

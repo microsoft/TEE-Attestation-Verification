@@ -25,6 +25,7 @@ use crypto::CertificateBackend;
 use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
 #[cfg(sync_crypto)]
 use crypto::{CryptoBackend, KeyBackend};
+use std::collections::BTreeSet;
 
 #[cfg(sync_crypto)]
 use didx509::verify_didx509_root;
@@ -517,6 +518,16 @@ fn verify_caci_attestation_impl(
     uvm_feed: &str,
     minimum_svn: u64,
 ) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
+    let mut minimum_tcb_cpuids = BTreeSet::new();
+    for (cpuid, _) in &minimum_tcb {
+        if !minimum_tcb_cpuids.insert(cpuid.0) {
+            return Err(AciError::Policy(format!(
+                "duplicate minimum TCB CPUID 0x{}",
+                cpuid.hex_str()
+            )));
+        }
+    }
+
     if attestation.policy().debug() {
         return Err(AciError::Policy(
             "SNP guest policy allows debug mode".to_string(),

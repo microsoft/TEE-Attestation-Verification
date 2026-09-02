@@ -266,6 +266,27 @@ mod synchronous {
             minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
             match crate::synchronous::verify_caci_attestation(
                 report,
+                vec![
+                    (matching_cpuid, report.reported_tcb),
+                    (matching_cpuid, report.reported_tcb),
+                ],
+                vec![report.host_data],
+                &uvm,
+                ACI_FEED,
+                ACI_SVN,
+            ) {
+                Err(AciError::Policy(actual)) => assert_eq!(
+                    actual,
+                    format!("duplicate minimum TCB CPUID 0x{:08x}", fixture.cpuid)
+                ),
+                other => panic!(
+                    "expected duplicate minimum TCB Policy error for {}, got {other:?}",
+                    fixture.name
+                ),
+            }
+
+            match crate::synchronous::verify_caci_attestation(
+                report,
                 vec![(matching_cpuid, minimum_tcb)],
                 vec![report.host_data],
                 &uvm,

@@ -3,7 +3,9 @@
 
 use crate::wasm_ffi::cose::CborValue as WasmCborValue;
 use js_sys::{Array, Uint8Array};
-use std::collections::BTreeMap;
+use serde::de::{MapAccess, Visitor};
+use serde::Deserializer;
+use std::fmt;
 use wasm_bindgen::{prelude::*, JsCast};
 
 use crate::wasm_ffi::snp::SnpAttestationReport;
@@ -114,12 +116,43 @@ fn byte_array_values(values: Array, name: &str) -> Result<Vec<Vec<u8>>, String> 
 }
 
 fn parse_minimum_tcb_json(json: &str) -> Result<Vec<(Cpuid, TcbVersionRaw)>, String> {
+    // To detect and preserve duplicate entries such that the caci validator will not break, we use
+    // the following Visitor struct to construct it during parsing
+    struct MinimumTcbVisitor;
+
+    impl<'de> Visitor<'de> for MinimumTcbVisitor {
+        type Value = Vec<(String, String)>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("an object mapping CPUID hex strings to TCB hex strings")
+        }
+
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut entries = Vec::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some(entry) = map.next_entry()? {
+                entries.push(entry);
+            }
+            Ok(entries)
+        }
+    }
+
     if json.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let map: BTreeMap<String, String> =
-        serde_json::from_str(json).map_err(|e| format!("failed to parse minimum TCB JSON: {e}"))?;
-    map.into_iter()
+
+    let mut deserializer = serde_json::Deserializer::from_str(json);
+    let entries = (&mut deserializer)
+        .deserialize_map(MinimumTcbVisitor)
+        .map_err(|error| format!("failed to parse minimum TCB JSON: {error}"))?;
+    deserializer
+        .end()
+        .map_err(|error| format!("failed to parse minimum TCB JSON: {error}"))?;
+
+    entries
+        .into_iter()
         .map(|(cpuid, tcb)| Ok((parse_cpuid_hex(&cpuid)?, parse_tcb_hex(&tcb)?)))
         .collect()
 }

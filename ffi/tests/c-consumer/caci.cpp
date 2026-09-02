@@ -166,6 +166,40 @@ TEST_CASE("caci: an untrusted policy digest is rejected") {
     tav_error_free(error);
 }
 
+TEST_CASE("caci: duplicate minimum TCB CPUIDs are rejected") {
+    CaciInputs in = load_caci_inputs();
+    VerifiedArtifacts artifacts;
+    verify_staged_artifacts(in, artifacts);
+
+    const std::array<uint32_t, 2> cpuids = {
+        kMinimumTcbCpuid,
+        kMinimumTcbCpuid,
+    };
+    const std::array<uint8_t, 16> values = {
+        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xdb,
+        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xdb,
+    };
+    TavByteBuffer *report_data = reinterpret_cast<TavByteBuffer *>(0x1);
+    TavError *error = tav_verify_caci_attestation(
+        artifacts.attestation,
+        cpuids.data(),
+        values.data(),
+        cpuids.size(),
+        in.policy.data(),
+        1,
+        artifacts.uvm_endorsement,
+        kUvmFeed, std::strlen(kUvmFeed),
+        kMinimumSvn,
+        &report_data);
+
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_CACI_POLICY);
+    CHECK(std::string(tav_error_message(error)).find("duplicate minimum TCB CPUID") !=
+          std::string::npos);
+    CHECK(report_data == nullptr);
+    tav_error_free(error);
+}
+
 TEST_CASE("caci: uvm-endorsement handle out-parameter is write-only on failure") {
     // A non-null sentinel must be overwritten with NULL before any fallible work.
     TavCborValue *uvm = reinterpret_cast<TavCborValue *>(0x1);

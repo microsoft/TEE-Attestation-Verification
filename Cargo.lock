@@ -814,6 +814,7 @@ name = "tee-attestation-verification-ffi"
 version = "1.0.8"
 dependencies = [
  "js-sys",
+ "serde",
  "serde_json",
  "tee-attestation-verification-caci",
  "tee-attestation-verification-cbor",
