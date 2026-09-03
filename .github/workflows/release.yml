@@ -214,7 +214,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare_release.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create --verify-tag --draft --generate-notes "${RELEASE_TAG}" dist/*
+          awk -v heading="## [${RELEASE_VERSION}]" '
+            $0 == heading { found = 1; next }
+            found && /^## / { exit }
+            found && /^\[[^]]+\]: / { next }
+            found { print }
+          ' CHANGELOG.md |
+            sed -e '/./,$!d' -e '${/^$/d;}' \
+              > "${RUNNER_TEMP}/release-notes.md"
+          test -s "${RUNNER_TEMP}/release-notes.md"
+
+          gh release create \
+            --verify-tag \
+            --draft \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            "${RELEASE_TAG}" \
+            dist/*
