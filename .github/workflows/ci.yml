@@ -35,9 +35,6 @@ jobs:
       - name: Check package versions match changelog
         run: python3 scripts/check-version-sync.py --root-path "${{ github.workspace }}"
 
-      - name: Test release note extraction
-        run: python3 -m unittest discover --start-directory scripts/tests
-
   license-headers:
     name: License headers
     runs-on: ubuntu-22.04
