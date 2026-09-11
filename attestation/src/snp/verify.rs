@@ -17,6 +17,24 @@
 //! but callers should compare `report_data` to their expected nonce, challenge,
 //! public-key digest, or other application-specific context.
 //!
+//! # Guarantees and limitations
+//!
+//! `Ok(())` means the report bytes were signed by the VCEK of a Milan, Genoa,
+//! or Turin processor whose `chip_id` and `reported_tcb` match that VCEK, and,
+//! unless [`ChainVerification::Skip`] was selected, that the VCEK chains to the
+//! AMD root key compiled into this crate. Nothing more.
+//!
+//! - Certificate validity periods are evaluated at the machine's current
+//!   clock. No verification time can be supplied through these APIs.
+//! - Certificate revocation is not checked. There is no CRL or OCSP lookup and
+//!   no hook for one.
+//! - `report_data`, `measurement`, `policy`, `vmpl`, `host_data`, the key
+//!   digests, the report `version`, and every TCB field other than
+//!   `reported_tcb` are not compared to any expected value. Check them after
+//!   this call returns.
+//!
+//! The crate README lists each check and each caller responsibility.
+//!
 //! The `sync` and `asynchronous` modules provide separate APIs for synchronous and asynchronous crypto backends.
 //!
 //! # Example
