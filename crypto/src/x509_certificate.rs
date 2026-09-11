@@ -163,7 +163,8 @@ impl Certificate {
             .map(Vec::as_slice)
             .unwrap_or(&[])
             .iter()
-            .filter_map(|extension| extension.critical.then(|| extension.extn_id.to_string()))
+            .filter(|&extension| extension.critical)
+            .map(|extension| extension.extn_id.to_string())
             .collect()
     }
 }

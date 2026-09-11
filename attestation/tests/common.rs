@@ -292,7 +292,7 @@ pub fn test_verify_attestation_suite() {
                 err
             );
         } else {
-            result.expect(&format!("{}: Expected verification to succeed", tag))
+            result.unwrap_or_else(|err| panic!("{tag}: Expected verification to succeed: {err:?}"))
         };
     }
 }
@@ -353,7 +353,7 @@ pub async fn test_verify_attestation_suite_async() {
                 err
             );
         } else {
-            result.expect(&format!("{}: Expected verification to succeed", tag))
+            result.unwrap_or_else(|err| panic!("{tag}: Expected verification to succeed: {err:?}"))
         };
     }
 }

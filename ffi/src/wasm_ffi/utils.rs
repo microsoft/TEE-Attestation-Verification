@@ -85,3 +85,16 @@ impl From<VerificationError> for VerifyError {
         Self::new(code, e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_error_preserves_code_and_message() {
+        let error = VerifyError::new(TavErrorCode::InvalidArgument, "invalid report");
+        assert_eq!(error.code(), TavErrorCode::InvalidArgument);
+        assert_eq!(error.message(), "invalid report");
+        assert_eq!(error.to_string(), "invalid report");
+    }
+}

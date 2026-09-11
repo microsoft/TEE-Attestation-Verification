@@ -554,7 +554,10 @@ fn verify_caci_attestation_impl(
             }
             let minimum_tcb = TcbVersionForGeneration::new(*minimum_tcb, generation);
             let reported_tcb = TcbVersionForGeneration::new(attestation.reported_tcb, generation);
-            if !(minimum_tcb <= reported_tcb) {
+            if !matches!(
+                minimum_tcb.partial_cmp(&reported_tcb),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            ) {
                 return Err(AciError::Policy(format!(
                     "SNP reported TCB {:?} for generation {} is below trusted minimum {:?}",
                     attestation.reported_tcb, generation, minimum_tcb.tcb

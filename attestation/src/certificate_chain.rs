@@ -4,15 +4,15 @@
 #[cfg(not(feature = "kds"))]
 compile_error!("certificate_chain module requires the 'kds' feature");
 
-#[cfg(async_crypto)]
-use crate::crypto::AsyncCryptoBackend;
-#[cfg(sync_crypto)]
-use crate::crypto::CryptoBackend;
-use crate::crypto::{Certificate, Crypto as ActiveCrypto};
 use crate::kds::KdsFetcher;
 #[cfg(sync_crypto)]
 use crate::pinned_arks;
 use crate::{snp, AttestationReport};
+#[cfg(async_crypto)]
+use crypto::AsyncCryptoBackend;
+#[cfg(sync_crypto)]
+use crypto::CryptoBackend;
+use crypto::{Certificate, Crypto as ActiveCrypto};
 use log::info;
 use std::collections::HashMap;
 use std::mem::discriminant;

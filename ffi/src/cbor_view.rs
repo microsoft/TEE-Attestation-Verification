@@ -58,6 +58,7 @@ impl CborView {
     ///
     /// An unshared root moves without cloning. Shared roots and projections
     /// clone the selected subtree while preserving borrowed payloads.
+    #[cfg(any(test, not(target_family = "wasm")))]
     pub(crate) fn into_native(self) -> NativeCborValue {
         let Self { document, node } = self;
         if node == Arc::as_ptr(&document) {

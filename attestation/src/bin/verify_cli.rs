@@ -7,7 +7,7 @@ use std::env;
 use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn verify(hex_input: &String) -> Result<(), String> {
+async fn verify(hex_input: &str) -> Result<(), String> {
     use zerocopy::FromBytes;
 
     let bytes =

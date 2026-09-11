@@ -858,9 +858,9 @@ fn freeing_null_is_a_no_op() {
 #[test]
 fn output_parameters_are_cleared_on_failure() {
     let document = [0xff];
-    let sentinel = 0x1 as *mut TavCborHandle;
+    let sentinel = std::ptr::dangling_mut::<TavCborHandle>();
     let mut value = sentinel;
-    let (mut err, mut err_len) = (0x1 as *mut u8, 12345usize);
+    let (mut err, mut err_len) = (std::ptr::dangling_mut::<u8>(), 12345usize);
 
     assert_eq!(
         unsafe {
@@ -885,7 +885,7 @@ fn output_parameters_are_cleared_on_failure() {
     let mut outer = vec![nested];
     let nested = unsafe { tav_cbor_make_array(outer.as_mut_ptr(), 1) };
 
-    let mut out = 0x1 as *mut u8;
+    let mut out = std::ptr::dangling_mut::<u8>();
     let mut out_len = 12345usize;
     assert_eq!(
         unsafe {

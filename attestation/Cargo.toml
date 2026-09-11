@@ -44,6 +44,10 @@ env_logger = ">=0.11, <0.12"
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tokio = { version = ">=1, <2", features = ["rt-multi-thread", "macros"] }
 
+[target.'cfg(target_family = "wasm")'.dev-dependencies]
+console_error_panic_hook = ">=0.1, <0.2"
+wasm-logger = ">=0.2, <0.3"
+
 [dependencies]
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.8", path = "../crypto", default-features = false }
 zerocopy = { version = ">=0.8, <0.9", features = ["derive"] }
