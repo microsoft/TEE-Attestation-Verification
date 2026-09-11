@@ -19,19 +19,24 @@
 //!
 //! # Guarantees and limitations
 //!
-//! `Ok(())` means the report bytes were signed by the VCEK of a Milan, Genoa,
-//! or Turin processor whose `chip_id` and `reported_tcb` match that VCEK, and,
-//! unless [`ChainVerification::Skip`] was selected, that the VCEK chains to the
-//! AMD root key compiled into this crate. Nothing more.
+//! `Ok(())` means the report bytes were signed by the key in the supplied
+//! VCEK, the report identifies a Milan, Genoa, or Turin processor, and its
+//! `chip_id` and `reported_tcb` match that VCEK's extensions. With
+//! [`ChainVerification::WithPinnedArk`] or
+//! [`ChainVerification::WithProvidedArk`] it also means the VCEK chains to
+//! the AMD root key compiled into this crate. With
+//! [`ChainVerification::Skip`] the result rests only on the caller's trust
+//! in the supplied VCEK. Nothing more.
 //!
-//! - Certificate validity periods are evaluated at the machine's current
-//!   clock. No verification time can be supplied through these APIs.
+//! - Certificate validity periods are evaluated only when chain verification
+//!   runs, and then at the machine's current clock. No verification time can
+//!   be supplied through these APIs.
 //! - Certificate revocation is not checked. There is no CRL or OCSP lookup and
 //!   no hook for one.
 //! - `report_data`, `measurement`, `policy`, `vmpl`, `host_data`, the key
-//!   digests, the report `version`, and every TCB field other than
-//!   `reported_tcb` are not compared to any expected value. Check them after
-//!   this call returns.
+//!   digests, and the report `version` are not compared to any expected
+//!   value. No TCB field is checked against a minimum; `reported_tcb` is only
+//!   checked for equality with the VCEK. Check these after this call returns.
 //!
 //! The crate README lists each check and each caller responsibility.
 //!
