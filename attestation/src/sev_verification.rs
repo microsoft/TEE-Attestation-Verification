@@ -52,6 +52,8 @@ impl SevVerifier {
         &mut self,
         attestation_report: &AttestationReport,
     ) -> Result<(), snp::verify::VerificationError> {
+        snp::verify::check_report_version(attestation_report)?;
+
         // Step 1: Identify processor model
         let processor_model = snp::model::Generation::from_family_and_model(
             attestation_report.cpuid_fam_id,

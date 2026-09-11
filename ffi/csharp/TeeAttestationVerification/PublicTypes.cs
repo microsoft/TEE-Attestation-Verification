@@ -24,6 +24,8 @@ public enum ErrorCode
     SignatureVerificationError = 104,
     /// <summary>The SNP report TCB values failed verification.</summary>
     TcbVerificationError = 105,
+    /// <summary>The SNP report version is not supported.</summary>
+    UnsupportedReportVersion = 106,
     /// <summary>CBOR processing failed during COSE handling.</summary>
     CoseCbor = 201,
     /// <summary>A COSE or CBOR value had an unexpected type.</summary>

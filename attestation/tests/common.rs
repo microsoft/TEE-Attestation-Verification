@@ -27,6 +27,7 @@ pub const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 pub const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 pub const TURIN_VCEK: &[u8] = include_bytes!("test_data/turin_vcek.pem");
 
+const VERSION_OFFSET: usize = 0x000;
 const SIGNATURE_ALGO_OFFSET: usize = 0x034;
 const CPUID_FAM_ID_OFFSET: usize = 0x188;
 const CPUID_MOD_ID_OFFSET: usize = 0x189;
@@ -35,6 +36,13 @@ fn report_with_signature_algo(signature_algo: u32) -> Vec<u8> {
     let mut report = MILAN_ATTESTATION.to_vec();
     report[SIGNATURE_ALGO_OFFSET..SIGNATURE_ALGO_OFFSET + std::mem::size_of::<u32>()]
         .copy_from_slice(&signature_algo.to_le_bytes());
+    report
+}
+
+fn report_with_version(version: u32) -> Vec<u8> {
+    let mut report = MILAN_ATTESTATION.to_vec();
+    report[VERSION_OFFSET..VERSION_OFFSET + std::mem::size_of::<u32>()]
+        .copy_from_slice(&version.to_le_bytes());
     report
 }
 
@@ -57,7 +65,9 @@ macro_rules! attestation_tests {
         $unsupported_signature_algo_attestation:expr,
         $unsupported_milan_genoa_model_attestation:expr,
         $unsupported_turin_model_attestation:expr,
-        $unsupported_family_attestation:expr
+        $unsupported_family_attestation:expr,
+        $version_2_attestation:expr,
+        $version_6_attestation:expr
     ) => {
         [
             (
@@ -173,6 +183,20 @@ macro_rules! attestation_tests {
                 ChainVerification::Skip,
                 Err("Unsupported processor"),
             ),
+            (
+                "report_version_2",
+                &$version_2_attestation,
+                MILAN_VCEK,
+                ChainVerification::Skip,
+                Err("Unsupported report version: 2"),
+            ),
+            (
+                "report_version_6",
+                &$version_6_attestation,
+                MILAN_VCEK,
+                ChainVerification::Skip,
+                Err("Unsupported report version: 6"),
+            ),
         ]
     };
 }
@@ -189,6 +213,8 @@ pub fn test_verify_attestation_suite() {
     let unsupported_milan_genoa_model_attestation = report_with_cpuid(0x19, 0x20);
     let unsupported_turin_model_attestation = report_with_cpuid(0x1A, 0x12);
     let unsupported_family_attestation = report_with_cpuid(0x1B, 0x00);
+    let version_2_attestation = report_with_version(2);
+    let version_6_attestation = report_with_version(6);
 
     let milan_ark = certificate_from_pem(MILAN_ARK).unwrap();
     let genoa_ark = certificate_from_pem(GENOA_ARK).unwrap();
@@ -208,7 +234,9 @@ pub fn test_verify_attestation_suite() {
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
         unsupported_turin_model_attestation,
-        unsupported_family_attestation
+        unsupported_family_attestation,
+        version_2_attestation,
+        version_6_attestation
     ) {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();
@@ -242,6 +270,8 @@ pub async fn test_verify_attestation_suite_async() {
     let unsupported_milan_genoa_model_attestation = report_with_cpuid(0x19, 0x20);
     let unsupported_turin_model_attestation = report_with_cpuid(0x1A, 0x12);
     let unsupported_family_attestation = report_with_cpuid(0x1B, 0x00);
+    let version_2_attestation = report_with_version(2);
+    let version_6_attestation = report_with_version(6);
 
     let milan_ark = certificate_from_pem(MILAN_ARK).unwrap();
     let genoa_ark = certificate_from_pem(GENOA_ARK).unwrap();
@@ -261,7 +291,9 @@ pub async fn test_verify_attestation_suite_async() {
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
         unsupported_turin_model_attestation,
-        unsupported_family_attestation
+        unsupported_family_attestation,
+        version_2_attestation,
+        version_6_attestation
     ) {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();

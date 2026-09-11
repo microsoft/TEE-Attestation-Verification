@@ -21,6 +21,7 @@ public sealed class PublicApiTests
                 ("TAV_ERROR_SNP_CERTIFICATE_CHAIN_ERROR", nameof(ErrorCode.CertificateChainError)),
                 ("TAV_ERROR_SNP_SIGNATURE_VERIFICATION_ERROR", nameof(ErrorCode.SignatureVerificationError)),
                 ("TAV_ERROR_SNP_TCB_VERIFICATION_ERROR", nameof(ErrorCode.TcbVerificationError)),
+                ("TAV_ERROR_SNP_UNSUPPORTED_REPORT_VERSION", nameof(ErrorCode.UnsupportedReportVersion)),
                 ("TAV_ERROR_COSE_CBOR", nameof(ErrorCode.CoseCbor)),
                 ("TAV_ERROR_COSE_UNEXPECTED_TYPE", nameof(ErrorCode.CoseUnexpectedType)),
                 ("TAV_ERROR_COSE_UNSUPPORTED_ALGORITHM", nameof(ErrorCode.CoseUnsupportedAlgorithm)),

@@ -148,4 +148,13 @@ test('snp verify attestation returns a report and rejects an invalid root', asyn
     pkg.verify_attestation_async(corrupted, ark, ask, vcek),
     pkg.ErrorCode.SignatureVerificationError,
   );
+
+  // A version 2 report is rejected before its fields are interpreted.
+  const version2 = Uint8Array.from(report);
+  version2[0] = 0x02;
+  await assertRejectsVerifyError(
+    pkg.verify_attestation_async(version2, ark, ask, vcek),
+    pkg.ErrorCode.UnsupportedReportVersion,
+    /Unsupported report version: 2/,
+  );
 });

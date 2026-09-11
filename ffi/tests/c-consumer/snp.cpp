@@ -157,6 +157,21 @@ TEST_CASE("snp: a tampered report fails verification and leaves the handle null"
     tav_error_free(error);
 }
 
+TEST_CASE("snp: an unsupported report version is rejected before verification") {
+    MilanInputs in = load_milan_inputs();
+    // Version 2 reports predate the CPUID fields and are not interpreted.
+    in.report.at(0x00) = 0x02;
+
+    TavSnpAttestationReport *report = nullptr;
+    TavError *error = verify_milan(in, &report);
+
+    REQUIRE(error != nullptr);
+    CHECK(report == nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_SNP_UNSUPPORTED_REPORT_VERSION);
+    CHECK(std::string(tav_error_message(error)).rfind("Unsupported report version: 2", 0) == 0);
+    tav_error_free(error);
+}
+
 TEST_CASE("snp: unverified bytes expose report fields without authenticating them") {
     MilanInputs in = load_milan_inputs();
     in.report.at(0x90) ^= 0xff;

@@ -416,7 +416,10 @@ fn snp_ecdsa_p384_scalar_to_fixed(
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct AttestationReport {
-    /// Version number of this attestation report. Set to 0x03 for this specification.
+    /// Version number of this attestation report.
+    ///
+    /// Verification accepts versions 3, 4, and 5, which share this layout. See
+    /// [`crate::snp::verify::SUPPORTED_REPORT_VERSIONS`].
     pub version: le::U32, // 0x000
 
     /// The guest SVN (Security Version Number).

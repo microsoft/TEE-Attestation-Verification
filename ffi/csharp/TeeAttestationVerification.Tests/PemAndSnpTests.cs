@@ -110,6 +110,14 @@ public sealed class PemAndSnpTests
         Assert.Equal(ErrorCode.InvalidRootCertificate, invalidRoot.Code);
         Assert.NotEmpty(invalidRoot.Message);
 
+        MilanInputs version2 = FixtureData.LoadMilan();
+        version2.Report[0x00] = 0x02;
+        VerifyException unsupportedVersion = Assert.Throws<VerifyException>(() =>
+            AttestationVerifier.VerifySnpAttestation(
+                version2.Report, version2.Ark, version2.Ask, version2.Vcek));
+        Assert.Equal(ErrorCode.UnsupportedReportVersion, unsupportedVersion.Code);
+        Assert.StartsWith("Unsupported report version: 2", unsupportedVersion.Message);
+
         Assert.Throws<ArgumentNullException>(() =>
             AttestationVerifier.VerifySnpAttestation(
                 input.Report, null!, input.Ask, input.Vcek));

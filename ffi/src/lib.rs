@@ -48,6 +48,7 @@ pub enum TavErrorCode {
     CertificateChainError = 103,
     SignatureVerificationError = 104,
     TcbVerificationError = 105,
+    UnsupportedReportVersion = 106,
 
     CoseCbor = 201,
     CoseUnexpectedType = 202,
@@ -73,6 +74,9 @@ impl From<&VerificationError> for TavErrorCode {
                 TavErrorCode::SignatureVerificationError
             }
             VerificationError::TcbVerificationError(_) => TavErrorCode::TcbVerificationError,
+            VerificationError::UnsupportedReportVersion(_) => {
+                TavErrorCode::UnsupportedReportVersion
+            }
         }
     }
 }
@@ -219,6 +223,10 @@ mod tests {
                 "TAV_ERROR_SNP_TCB_VERIFICATION_ERROR",
                 TavErrorCode::TcbVerificationError as i32,
             ),
+            (
+                "TAV_ERROR_SNP_UNSUPPORTED_REPORT_VERSION",
+                TavErrorCode::UnsupportedReportVersion as i32,
+            ),
             ("TAV_ERROR_COSE_CBOR", TavErrorCode::CoseCbor as i32),
             (
                 "TAV_ERROR_COSE_UNEXPECTED_TYPE",
@@ -328,6 +336,10 @@ mod tests {
             (
                 VerificationError::TcbVerificationError("bad tcb".into()),
                 TavErrorCode::TcbVerificationError,
+            ),
+            (
+                VerificationError::UnsupportedReportVersion("2".into()),
+                TavErrorCode::UnsupportedReportVersion,
             ),
         ];
 

@@ -3,7 +3,8 @@
 
 //! SEV-SNP attestation verification with caller-provided certificates.
 //!
-//! The verification APIs identify the processor generation from the report,
+//! The verification APIs check that the report `version` is supported,
+//! identify the processor generation from the report,
 //! optionally verify the ARK → ASK → VCEK certificate chain, verify the report
 //! signature with the VCEK, and compare report TCB values against VCEK
 //! certificate extensions.
@@ -52,6 +53,8 @@ use crate::{snp, snp::utils::Oid, AttestationReport};
 pub enum VerificationError {
     /// The report's processor family/model is not supported by this crate.
     UnsupportedProcessor(String),
+    /// The report `version` field is not one of [`SUPPORTED_REPORT_VERSIONS`].
+    UnsupportedReportVersion(String),
     /// The selected or provided ARK certificate is not a valid trusted root.
     InvalidRootCertificate(String),
     /// The ARK → ASK → VCEK certificate chain could not be verified.
@@ -66,6 +69,7 @@ impl std::fmt::Display for VerificationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsupportedProcessor(e) => write!(f, "Unsupported processor: {}", e),
+            Self::UnsupportedReportVersion(e) => write!(f, "Unsupported report version: {}", e),
             Self::InvalidRootCertificate(e) => write!(f, "Invalid root certificate: {}", e),
             Self::CertificateChainError(e) => write!(f, "Certificate chain error: {}", e),
             Self::SignatureVerificationError(e) => write!(f, "Signature verification error: {}", e),
@@ -75,6 +79,29 @@ impl std::fmt::Display for VerificationError {
 }
 
 impl std::error::Error for VerificationError {}
+
+/// Attestation report `version` values whose layout this crate interprets.
+///
+/// Versions 3, 4, and 5 share the field layout that
+/// [`AttestationReport`] decodes. Version 2 reports predate the CPUID fields
+/// at 0x188 and are rejected rather than parsed with the wrong layout.
+pub const SUPPORTED_REPORT_VERSIONS: [u32; 3] = [3, 4, 5];
+
+/// Rejects reports whose `version` is not in [`SUPPORTED_REPORT_VERSIONS`].
+///
+/// Callers run this before reading any version-dependent field such as the
+/// CPUID family and model.
+pub fn check_report_version(report: &AttestationReport) -> Result<(), VerificationError> {
+    let version = report.version.get();
+    if SUPPORTED_REPORT_VERSIONS.contains(&version) {
+        Ok(())
+    } else {
+        Err(VerificationError::UnsupportedReportVersion(format!(
+            "{} (supported: {:?})",
+            version, SUPPORTED_REPORT_VERSIONS
+        )))
+    }
+}
 
 /// Certificate-chain verification mode for caller-provided certificates.
 pub enum ChainVerification<'a> {
@@ -103,7 +130,10 @@ pub mod sync {
     use crate::crypto::{Certificate, Crypto, CryptoBackend};
     use crate::{snp, AttestationReport};
 
-    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
+    use super::{
+        ark_matches_pinned, check_report_version, verify_tcb_values, ChainVerification,
+        VerificationError,
+    };
 
     /// Verifies an SEV-SNP attestation report using caller-provided certificates.
     ///
@@ -117,6 +147,8 @@ pub mod sync {
         vcek: &Certificate,
         chain_verification: &ChainVerification<'_>,
     ) -> Result<(), VerificationError> {
+        check_report_version(attestation_report)?;
+
         let generation = snp::model::Generation::from_family_and_model(
             attestation_report.cpuid_fam_id,
             attestation_report.cpuid_mod_id,
@@ -156,7 +188,10 @@ pub mod asynchronous {
     use crate::crypto::{AsyncCryptoBackend, Certificate, Crypto};
     use crate::{snp, AttestationReport};
 
-    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
+    use super::{
+        ark_matches_pinned, check_report_version, verify_tcb_values, ChainVerification,
+        VerificationError,
+    };
 
     /// Verifies an SEV-SNP attestation report using caller-provided certificates.
     ///
@@ -170,6 +205,8 @@ pub mod asynchronous {
         vcek: &Certificate,
         chain_verification: &ChainVerification<'_>,
     ) -> Result<(), VerificationError> {
+        check_report_version(attestation_report)?;
+
         let generation = snp::model::Generation::from_family_and_model(
             attestation_report.cpuid_fam_id,
             attestation_report.cpuid_mod_id,
@@ -342,7 +379,9 @@ mod tests {
     use crate::crypto::{Certificate, CertificateBackend, Crypto};
     use crate::AttestationReport;
 
-    use super::{extension_value_matches, verify_tcb_values};
+    use super::{
+        check_report_version, extension_value_matches, verify_tcb_values, VerificationError,
+    };
 
     const MILAN_ASK: &[u8] = include_bytes!("../../tests/test_data/milan_ask.pem");
     const MILAN_VCEK: &[u8] = include_bytes!("../../tests/test_data/milan_vcek.pem");
@@ -387,6 +426,25 @@ mod tests {
     fn turin_kds_chain_fixtures_parse() {
         Crypto::from_pem(TURIN_KDS_ASK).expect("Turin KDS ASK should parse");
         Crypto::from_pem(TURIN_KDS_ARK).expect("Turin KDS ARK should parse");
+    }
+
+    #[test]
+    fn report_version_check_accepts_only_supported_versions() {
+        let mut report = milan_report();
+        for version in [3u32, 4, 5] {
+            report.version.set(version);
+            check_report_version(&report)
+                .unwrap_or_else(|e| panic!("version {version} should be accepted: {e}"));
+        }
+        for version in [0u32, 1, 2, 6, u32::MAX] {
+            report.version.set(version);
+            match check_report_version(&report) {
+                Err(VerificationError::UnsupportedReportVersion(msg)) => {
+                    assert!(msg.starts_with(&version.to_string()), "{msg}")
+                }
+                other => panic!("version {version} should be rejected, got {other:?}"),
+            }
+        }
     }
 
     #[test]
