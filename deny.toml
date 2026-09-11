@@ -1,0 +1,31 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[graph]
+# Include optional KDS dependencies and every platform in Cargo.lock.
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+include-dev = true
+# The locked graph uses MIT or Apache-2.0, plus unicode-ident's Unicode license.
+allow = ["MIT", "Apache-2.0", "Unicode-3.0"]
+confidence-threshold = 0.93
+
+# These pinned EverParse crates omit license metadata. Both use the repository's
+# Apache-2.0 license: https://github.com/project-everest/everparse/blob/950bc93838ac2faae51126d8acd0637cf8c8a569/LICENSE
+[[licenses.clarify]]
+crate = "cborrs@0.1.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../../../../LICENSE", hash = 0x0a6d4ed6 }]
+
+[[licenses.clarify]]
+crate = "cborrs-nondet@0.1.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../../../../LICENSE", hash = 0x0a6d4ed6 }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
