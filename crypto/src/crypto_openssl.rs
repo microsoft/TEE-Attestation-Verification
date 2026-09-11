@@ -7,6 +7,12 @@
 //! certificate-chain verification, and SEV-SNP attestation report signature
 //! verification. It is the native backend selected when `crypto_openssl` is
 //! enabled for a non-`wasm32` target.
+//!
+//! Chain verification checks self-signed root signatures while allowing a
+//! non-root certificate as the trust anchor. `X509_STRICT` is not enabled:
+//! AMD VCEKs omit the Authority Key Identifier that strict mode requires.
+//! Certificate validity is always checked: `None` uses the current time and
+//! `Some(unix_time)` uses the supplied time. Neither disables time checks.
 
 use foreign_types_shared::ForeignType;
 use openssl::asn1::{Asn1Object, Asn1Time};
@@ -349,7 +355,8 @@ impl CryptoBackend for Crypto {
     ) -> Result<()> {
         let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
         store_builder.add_cert(trusted_cert.to_owned())?;
-        store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+        store_builder
+            .set_flags(X509VerifyFlags::PARTIAL_CHAIN | X509VerifyFlags::CHECK_SS_SIGNATURE)?;
         if let Some(unix_time) = unix_time {
             let mut params = X509VerifyParam::new()?;
             let unix_time = unix_time
@@ -365,14 +372,273 @@ impl CryptoBackend for Crypto {
         for cert in untrusted_chain {
             chain.push((*cert).to_owned())?;
         }
-        match ctx.init(&store, leaf, &chain, |c| c.verify_cert()) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err("Certificate verification failed".into()),
-            Err(e) => Err(Box::new(e)),
+        let (verified, error, depth) = ctx.init(&store, leaf, &chain, |c| {
+            let verified = c.verify_cert()?;
+            Ok((verified, c.error(), c.error_depth()))
+        })?;
+        if verified {
+            Ok(())
+        } else {
+            Err(format!(
+                "Certificate verification failed: {} (code {}, depth {})",
+                error.error_string(),
+                error.as_raw(),
+                depth
+            )
+            .into())
         }
     }
 }
 
+#[cfg(test)]
+mod chain_tests {
+    use super::*;
+    use openssl::ec::{EcGroup, EcKey};
+    use openssl::pkey::Private;
+    use openssl::x509::extension::{
+        AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
+    };
+    use openssl::x509::{X509NameBuilder, X509VerifyResult, X509};
+    use std::time::Duration;
+
+    const VALID_TIME: u64 = 1_700_000_000;
+
+    fn key() -> PKey<Private> {
+        let group = EcGroup::from_curve_name(Nid::SECP384R1).unwrap();
+        PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap()
+    }
+
+    fn certificate(
+        key: &PKey<Private>,
+        issuer: Option<(&Certificate, &PKey<Private>)>,
+        ca: bool,
+        critical_ca: bool,
+    ) -> Certificate {
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", if ca { "Test CA" } else { "Test leaf" })
+            .unwrap();
+        let name = name.build();
+        let mut cert = X509::builder().unwrap();
+        cert.set_version(2).unwrap();
+        cert.set_serial_number(
+            &BigNum::from_u32(if ca { 1 } else { 2 })
+                .unwrap()
+                .to_asn1_integer()
+                .unwrap(),
+        )
+        .unwrap();
+        cert.set_subject_name(&name).unwrap();
+        cert.set_issuer_name(issuer.map_or(&*name, |(cert, _)| cert.subject_name()))
+            .unwrap();
+        cert.set_pubkey(key).unwrap();
+        cert.set_not_before(&Asn1Time::from_unix(VALID_TIME as i64 - 100).unwrap())
+            .unwrap();
+        cert.set_not_after(
+            &Asn1Time::from_unix(VALID_TIME as i64 + if ca { 1000 } else { 100 }).unwrap(),
+        )
+        .unwrap();
+        let mut constraints = BasicConstraints::new();
+        if ca {
+            constraints.ca();
+        }
+        if critical_ca {
+            constraints.critical();
+        }
+        cert.append_extension(constraints.build().unwrap()).unwrap();
+        let mut usage = KeyUsage::new();
+        usage.critical();
+        if ca {
+            usage.key_cert_sign().crl_sign();
+        } else {
+            usage.digital_signature();
+        }
+        cert.append_extension(usage.build().unwrap()).unwrap();
+        let ski = SubjectKeyIdentifier::new()
+            .build(&cert.x509v3_context(None, None))
+            .unwrap();
+        cert.append_extension(ski).unwrap();
+        if let Some((issuer, _)) = issuer {
+            let aki = AuthorityKeyIdentifier::new()
+                .keyid(true)
+                .build(&cert.x509v3_context(Some(issuer), None))
+                .unwrap();
+            cert.append_extension(aki).unwrap();
+        }
+        cert.sign(issuer.map_or(key, |(_, key)| key), MessageDigest::sha384())
+            .unwrap();
+        cert.build()
+    }
+
+    fn verify_with_flags(
+        root: &Certificate,
+        chain: &[&Certificate],
+        leaf: &Certificate,
+        flags: X509VerifyFlags,
+        time: u64,
+    ) -> (bool, X509VerifyResult, u32) {
+        let mut store = openssl::x509::store::X509StoreBuilder::new().unwrap();
+        store.add_cert(root.clone()).unwrap();
+        store.set_flags(flags).unwrap();
+        let mut params = X509VerifyParam::new().unwrap();
+        params.set_time(time.try_into().unwrap());
+        store.set_param(&params).unwrap();
+        let mut untrusted = Stack::new().unwrap();
+        for cert in chain {
+            untrusted.push((*cert).clone()).unwrap();
+        }
+        openssl::x509::X509StoreContext::new()
+            .unwrap()
+            .init(&store.build(), leaf, &untrusted, |ctx| {
+                Ok((ctx.verify_cert()?, ctx.error(), ctx.error_depth()))
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn corrupted_root_self_signature_with_partial_chain() {
+        let root = X509::from_pem(include_bytes!("test_data/milan_ark.pem")).unwrap();
+        let intermediate = X509::from_pem(include_bytes!("test_data/milan_ask.pem")).unwrap();
+        let leaf = X509::from_pem(include_bytes!("test_data/milan_vcek.pem")).unwrap();
+        Crypto::verify_chain(
+            &intermediate,
+            &[],
+            &leaf,
+            Some(Duration::from_secs(1_789_142_400)),
+        )
+        .unwrap();
+        let mut der = root.to_der().unwrap();
+        *der.last_mut().unwrap() ^= 1;
+        let corrupt = X509::from_der(&der).unwrap();
+        assert!(!corrupt.verify(&root.public_key().unwrap()).unwrap());
+        for (chain, target, depth) in [(vec![], &corrupt, 0), (vec![&intermediate], &leaf, 2)] {
+            assert!(
+                verify_with_flags(
+                    &corrupt,
+                    &chain,
+                    target,
+                    X509VerifyFlags::PARTIAL_CHAIN,
+                    1_789_142_400
+                )
+                .0
+            );
+            let error = Crypto::verify_chain(
+                &corrupt,
+                &chain,
+                target,
+                Some(Duration::from_secs(1_789_142_400)),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("certificate signature failure"), "{error}");
+            assert!(error.contains(&format!("code 7, depth {depth}")), "{error}");
+        }
+    }
+
+    #[test]
+    fn strict_rejects_noncritical_ca_constraints() {
+        let root_key = key();
+        let leaf_key = key();
+        for critical in [true, false] {
+            let root = certificate(&root_key, None, true, critical);
+            let leaf = certificate(&leaf_key, Some((&root, &root_key)), false, false);
+            assert!(
+                verify_with_flags(
+                    &root,
+                    &[],
+                    &leaf,
+                    X509VerifyFlags::PARTIAL_CHAIN,
+                    VALID_TIME
+                )
+                .0
+            );
+            let (ok, error, depth) = verify_with_flags(
+                &root,
+                &[],
+                &leaf,
+                X509VerifyFlags::PARTIAL_CHAIN | X509VerifyFlags::X509_STRICT,
+                VALID_TIME,
+            );
+            assert_eq!(ok, critical);
+            if !critical {
+                assert_eq!(error.as_raw(), 89);
+                assert_eq!(depth, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn strict_is_incompatible_with_real_amd_vceks() {
+        for (ark, ask, vcek) in [
+            (
+                &include_bytes!("test_data/milan_ark.pem")[..],
+                &include_bytes!("test_data/milan_ask.pem")[..],
+                &include_bytes!("test_data/milan_vcek.pem")[..],
+            ),
+            (
+                &include_bytes!("test_data/genoa_ark.pem")[..],
+                &include_bytes!("test_data/genoa_ask.pem")[..],
+                &include_bytes!("test_data/genoa_vcek.pem")[..],
+            ),
+        ] {
+            let root = X509::from_pem(ark).unwrap();
+            let intermediate = X509::from_pem(ask).unwrap();
+            let leaf = X509::from_pem(vcek).unwrap();
+            Crypto::verify_chain(
+                &root,
+                &[&intermediate],
+                &leaf,
+                Some(Duration::from_secs(1_789_142_400)),
+            )
+            .unwrap();
+            let (ok, error, depth) = verify_with_flags(
+                &root,
+                &[&intermediate],
+                &leaf,
+                X509VerifyFlags::PARTIAL_CHAIN
+                    | X509VerifyFlags::X509_STRICT
+                    | X509VerifyFlags::CHECK_SS_SIGNATURE,
+                1_789_142_400,
+            );
+            assert!(!ok);
+            assert_eq!(error.as_raw(), 85);
+            assert_eq!(depth, 0);
+        }
+    }
+
+    #[test]
+    fn validity_uses_provided_time_or_now_without_optout() {
+        let root_key = key();
+        let leaf_key = key();
+        let root = certificate(&root_key, None, true, true);
+        let leaf = certificate(&leaf_key, Some((&root, &root_key)), false, false);
+        Crypto::verify_chain(&root, &[], &leaf, Some(Duration::from_secs(VALID_TIME))).unwrap();
+        for (time, depth) in [
+            (None, 1),
+            (Some(Duration::from_secs(VALID_TIME + 101)), 0),
+            (Some(Duration::from_secs(VALID_TIME + 1001)), 1),
+        ] {
+            let error = Crypto::verify_chain(&root, &[], &leaf, time)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(&format!("certificate has expired (code 10, depth {depth})")),
+                "{error}"
+            );
+        }
+        let error = Crypto::verify_chain(
+            &root,
+            &[],
+            &leaf,
+            Some(Duration::from_secs(VALID_TIME - 101)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("certificate is not yet valid"), "{error}");
+        assert!(error.contains("(code 9, depth 1)"), "{error}");
+        // A non-self-signed leaf remains a valid explicitly trusted anchor.
+        Crypto::verify_chain(&leaf, &[], &leaf, Some(Duration::from_secs(VALID_TIME))).unwrap();
+    }
+}
 impl Key {
     pub fn algorithm(&self) -> SignatureKeyAlgorithm {
         self.verification.algorithm()
