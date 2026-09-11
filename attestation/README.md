@@ -84,8 +84,7 @@ Verification authenticates the report. It does not authorize the guest. After `O
 - `report_data` against your nonce, challenge, or public-key digest.
 - `measurement`, `host_data`, key digests, `policy()`, `vmpl`, and other identity and configuration fields.
 - Every TCB field against your minimum. The library checks `reported_tcb` for equality with the VCEK only. Equality is not a minimum security baseline.
-
-`SevVerifier` (`kds` feature) trusts the ARK it downloads from `https://kdsintf.amd.com` over TLS instead of the pinned root, and serves cached certificates without re-checking them.
+- 
 
 ## Docs
 Docs are available locally by running:
