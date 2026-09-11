@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `ChainVerification::WithProvidedArk` verifies the provided ARK's self-signature against the pinned ARK and rejects a corrupted ARK with `InvalidRootCertificate`. (#145)
+
 ## [1.0.8]
 
 [1.0.8]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.8
