@@ -30,6 +30,7 @@ pub const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 pub const TURIN_VCEK: &[u8] = include_bytes!("test_data/turin_vcek.pem");
 
 const SIGNATURE_ALGO_OFFSET: usize = 0x034;
+const FLAGS_OFFSET: usize = 0x048;
 const CPUID_FAM_ID_OFFSET: usize = 0x188;
 const CPUID_MOD_ID_OFFSET: usize = 0x189;
 
@@ -37,6 +38,20 @@ fn report_with_signature_algo(signature_algo: u32) -> Vec<u8> {
     let mut report = MILAN_ATTESTATION.to_vec();
     report[SIGNATURE_ALGO_OFFSET..SIGNATURE_ALGO_OFFSET + std::mem::size_of::<u32>()]
         .copy_from_slice(&signature_algo.to_le_bytes());
+    report
+}
+
+fn report_with_signing_key(signing_key: u32) -> Vec<u8> {
+    let mut report = MILAN_ATTESTATION.to_vec();
+    let flags = u32::from_le_bytes(
+        report[FLAGS_OFFSET..FLAGS_OFFSET + std::mem::size_of::<u32>()]
+            .try_into()
+            .unwrap(),
+    );
+    // SIGNING_KEY occupies flags bits 4:2.
+    let flags = (flags & !(0b111 << 2)) | (signing_key << 2);
+    report[FLAGS_OFFSET..FLAGS_OFFSET + std::mem::size_of::<u32>()]
+        .copy_from_slice(&flags.to_le_bytes());
     report
 }
 
@@ -76,7 +91,9 @@ macro_rules! attestation_tests {
         $unsupported_signature_algo_attestation:expr,
         $unsupported_milan_genoa_model_attestation:expr,
         $unsupported_turin_model_attestation:expr,
-        $unsupported_family_attestation:expr
+        $unsupported_family_attestation:expr,
+        $vlek_signed_attestation:expr,
+        $no_signing_key_attestation:expr
     ) => {
         [
             (
@@ -202,6 +219,20 @@ macro_rules! attestation_tests {
                 ChainVerification::Skip,
                 Err("Unsupported processor"),
             ),
+            (
+                "vlek_signing_key",
+                &$vlek_signed_attestation,
+                MILAN_VCEK,
+                ChainVerification::WithPinnedArk { ask: &$milan_ask },
+                Err("Unsupported signing key Vlek"),
+            ),
+            (
+                "no_signing_key",
+                &$no_signing_key_attestation,
+                MILAN_VCEK,
+                ChainVerification::WithPinnedArk { ask: &$milan_ask },
+                Err("Unsupported signing key None"),
+            ),
         ]
     };
 }
@@ -218,6 +249,8 @@ pub fn test_verify_attestation_suite() {
     let unsupported_milan_genoa_model_attestation = report_with_cpuid(0x19, 0x20);
     let unsupported_turin_model_attestation = report_with_cpuid(0x1A, 0x12);
     let unsupported_family_attestation = report_with_cpuid(0x1B, 0x00);
+    let vlek_signed_attestation = report_with_signing_key(1);
+    let no_signing_key_attestation = report_with_signing_key(7);
 
     let milan_ark = certificate_from_pem(MILAN_ARK).unwrap();
     let genoa_ark = certificate_from_pem(GENOA_ARK).unwrap();
@@ -239,7 +272,9 @@ pub fn test_verify_attestation_suite() {
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
         unsupported_turin_model_attestation,
-        unsupported_family_attestation
+        unsupported_family_attestation,
+        vlek_signed_attestation,
+        no_signing_key_attestation
     ) {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();
@@ -273,6 +308,8 @@ pub async fn test_verify_attestation_suite_async() {
     let unsupported_milan_genoa_model_attestation = report_with_cpuid(0x19, 0x20);
     let unsupported_turin_model_attestation = report_with_cpuid(0x1A, 0x12);
     let unsupported_family_attestation = report_with_cpuid(0x1B, 0x00);
+    let vlek_signed_attestation = report_with_signing_key(1);
+    let no_signing_key_attestation = report_with_signing_key(7);
 
     let milan_ark = certificate_from_pem(MILAN_ARK).unwrap();
     let genoa_ark = certificate_from_pem(GENOA_ARK).unwrap();
@@ -294,7 +331,9 @@ pub async fn test_verify_attestation_suite_async() {
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
         unsupported_turin_model_attestation,
-        unsupported_family_attestation
+        unsupported_family_attestation,
+        vlek_signed_attestation,
+        no_signing_key_attestation
     ) {
         let report = AttestationReport::read_from_bytes(att).unwrap();
         let vcek = certificate_from_pem(vcek).unwrap();
