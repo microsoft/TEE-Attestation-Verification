@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! COSE_Sign1 verification backed by `tee-attestation-verification-crypto`.
 //!
 //! This crate is intentionally verification-only. It exposes:

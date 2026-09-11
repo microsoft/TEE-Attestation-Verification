@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![forbid(unsafe_code)]
+
 //! ACI/UVM endorsement verification.
 //!
 //! This crate verifies an ACI COSE_Sign1 endorsement against a verified

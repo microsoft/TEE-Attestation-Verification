@@ -63,6 +63,7 @@ macro_rules! scalar_accessor {
     ($name:ident, $return_ty:ty, |$report:ident| $value:expr) => {
         #[no_mangle]
         pub unsafe extern "C" fn $name(report: *const TavSnpAttestationReport) -> $return_ty {
+            // SAFETY: The caller supplies a live report handle returned by this library.
             let report = unsafe { &*report };
             let $report = report.report();
             $value
@@ -78,9 +79,11 @@ macro_rules! bytes_accessor {
             data: *mut *const u8,
             len: *mut usize,
         ) {
+            // SAFETY: The caller keeps the report handle alive while reading its bytes.
             let report = unsafe { &*report };
             let $report = report.report();
             let bytes = $value;
+            // SAFETY: The caller supplies writable pointer/length slots, disjoint from the report.
             unsafe {
                 *data = bytes.as_ptr();
                 *len = bytes.len();
@@ -102,22 +105,27 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
     out_report: *mut *mut TavSnpAttestationReport,
 ) -> *mut TavError {
     into_result(|| {
+        // SAFETY: The caller supplies a writable report slot or null, which the helper rejects.
         unsafe { owned_out_ptr(out_report, "out_report") }?;
 
+        // SAFETY: The caller keeps report_bytes readable for report_len bytes during this call.
         let report_bytes =
             unsafe { input_bytes(report_bytes, report_len, "attestation report", false) }?;
         let report = parse_report(report_bytes)?;
 
+        // SAFETY: The caller keeps each PEM buffer readable for its supplied length during this call.
         let ark_pem = unsafe { input_bytes(ark_pem, ark_pem_len, "ARK", false) }?;
         let ark = certificate_from_pem(ark_pem).map_err(|error| {
             TavError::invalid_argument(format!("Failed to parse ARK PEM: {error}"))
         })?;
 
+        // SAFETY: ask_pem points to the caller's readable ASK buffer.
         let ask_pem = unsafe { input_bytes(ask_pem, ask_pem_len, "ASK", false) }?;
         let ask = certificate_from_pem(ask_pem).map_err(|error| {
             TavError::invalid_argument(format!("Failed to parse ASK PEM: {error}"))
         })?;
 
+        // SAFETY: vcek_pem points to the caller's readable VCEK buffer.
         let vcek_pem = unsafe { input_bytes(vcek_pem, vcek_pem_len, "VCEK", false) }?;
         let vcek = certificate_from_pem(vcek_pem).map_err(|error| {
             TavError::invalid_argument(format!("Failed to parse VCEK PEM: {error}"))
@@ -136,6 +144,7 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
         let report = TavSnpAttestationReport {
             bytes: report_bytes.to_vec(),
         };
+        // SAFETY: out_report was checked above and remains writable until this call returns.
         unsafe {
             *out_report = Box::into_raw(Box::new(report));
         }
@@ -150,8 +159,10 @@ pub unsafe extern "C" fn tav_snp_attestation_report_from_unverified_bytes(
     out_report: *mut *mut TavSnpAttestationReport,
 ) -> *mut TavError {
     into_result(|| {
+        // SAFETY: The caller supplies a writable report slot or null, which the helper rejects.
         unsafe { owned_out_ptr(out_report, "out_report") }?;
 
+        // SAFETY: The caller keeps report_bytes readable for report_len bytes during this call.
         let report_bytes =
             unsafe { input_bytes(report_bytes, report_len, "attestation report", false) }?;
         parse_report(report_bytes)?;
@@ -159,6 +170,7 @@ pub unsafe extern "C" fn tav_snp_attestation_report_from_unverified_bytes(
         let report = TavSnpAttestationReport {
             bytes: report_bytes.to_vec(),
         };
+        // SAFETY: out_report was checked above and remains writable until this call returns.
         unsafe {
             *out_report = Box::into_raw(Box::new(report));
         }
@@ -312,6 +324,7 @@ bytes_accessor!(tav_snp_attestation_report_signature_s, |report| &report
 #[no_mangle]
 pub unsafe extern "C" fn tav_snp_attestation_report_free(report: *mut TavSnpAttestationReport) {
     if !report.is_null() {
+        // SAFETY: The caller transfers a live Box-allocated report handle back exactly once.
         unsafe {
             drop(Box::from_raw(report));
         }

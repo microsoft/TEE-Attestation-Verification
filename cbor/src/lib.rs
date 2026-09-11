@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
 //! CBOR values backed by EverCBOR, in both deterministic and
 //! non-deterministic modes.
 //!
