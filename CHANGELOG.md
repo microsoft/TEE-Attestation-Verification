@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- SNP verification accepts only attestation report versions 3, 4, and 5 and rejects other versions with the new `UnsupportedReportVersion` error (`TAV_ERROR_SNP_UNSUPPORTED_REPORT_VERSION = 106`). (#146)
+
 ## [1.0.8]
 
 [1.0.8]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-1.0.8
