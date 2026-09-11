@@ -88,7 +88,8 @@ pub enum ChainVerification<'a> {
         ask: &'a Certificate,
     },
     /// Verify the chain using caller-provided ASK and ARK certificates after
-    /// confirming that the provided ARK public key matches the pinned ARK.
+    /// confirming that the provided ARK has the pinned ARK's issuer and public
+    /// key and carries a valid self-signature.
     WithProvidedArk {
         /// AMD SEV Key (ASK) certificate.
         ask: &'a Certificate,
@@ -103,7 +104,7 @@ pub mod sync {
     use crate::crypto::{Certificate, Crypto, CryptoBackend};
     use crate::{snp, AttestationReport};
 
-    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
+    use super::{pinned_ark_matching, verify_tcb_values, ChainVerification, VerificationError};
 
     /// Verifies an SEV-SNP attestation report using caller-provided certificates.
     ///
@@ -125,8 +126,14 @@ pub mod sync {
 
         match chain_verification {
             ChainVerification::WithProvidedArk { ask, ark } => {
-                ark_matches_pinned(generation, ark)
+                let pinned_ark = pinned_ark_matching(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+                Crypto::verify_chain(&pinned_ark, &[], ark, None).map_err(|e| {
+                    VerificationError::InvalidRootCertificate(format!(
+                        "Provided ARK self-signature is invalid: {:?}",
+                        e
+                    ))
+                })?;
 
                 Crypto::verify_chain(ark, &[ask], vcek, None)
                     .map_err(|e| VerificationError::CertificateChainError(format!("{:?}", e)))?;
@@ -156,7 +163,7 @@ pub mod asynchronous {
     use crate::crypto::{AsyncCryptoBackend, Certificate, Crypto};
     use crate::{snp, AttestationReport};
 
-    use super::{ark_matches_pinned, verify_tcb_values, ChainVerification, VerificationError};
+    use super::{pinned_ark_matching, verify_tcb_values, ChainVerification, VerificationError};
 
     /// Verifies an SEV-SNP attestation report using caller-provided certificates.
     ///
@@ -178,8 +185,16 @@ pub mod asynchronous {
 
         match chain_verification {
             ChainVerification::WithProvidedArk { ask, ark } => {
-                ark_matches_pinned(generation, ark)
+                let pinned_ark = pinned_ark_matching(generation, ark)
                     .map_err(|e| VerificationError::InvalidRootCertificate(format!("{:?}", e)))?;
+                Crypto::verify_chain(&pinned_ark, &[], ark, None)
+                    .await
+                    .map_err(|e| {
+                        VerificationError::InvalidRootCertificate(format!(
+                            "Provided ARK self-signature is invalid: {:?}",
+                            e
+                        ))
+                    })?;
 
                 Crypto::verify_chain(ark, &[ask], vcek, None)
                     .await
@@ -206,10 +221,16 @@ pub mod asynchronous {
     }
 }
 
-pub(crate) fn ark_matches_pinned(
+/// Returns the pinned ARK for `generation` after checking that `ark` has the
+/// same issuer name and public key.
+///
+/// The caller must still verify `ark` against the returned pinned ARK with
+/// `Crypto::verify_chain`, so that a provided ARK with a corrupted
+/// self-signature is rejected.
+pub(crate) fn pinned_ark_matching(
     generation: snp::model::Generation,
     ark: &Certificate,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Certificate, Box<dyn std::error::Error>> {
     let pinned_ark = crate::pinned_arks::get_ark(generation)?;
 
     let pinned_issuer = Crypto::issuer_name_der(&pinned_ark)?;
@@ -227,7 +248,7 @@ pub(crate) fn ark_matches_pinned(
     if pinned_key != provided_key {
         return Err(format!("Provided ARK does not match pinned ARK for {}", generation).into());
     }
-    Ok(())
+    Ok(pinned_ark)
 }
 
 fn extension_value_matches(ext_value: &[u8], expected: &[u8]) -> bool {
