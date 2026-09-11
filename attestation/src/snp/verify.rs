@@ -8,6 +8,10 @@
 //! signature with the VCEK, and compare report TCB values against VCEK
 //! certificate extensions.
 //!
+//! Only VCEK-signed reports are supported. Reports whose `SIGNING_KEY` flag
+//! selects VLEK, `None`, or a reserved value are rejected, and the VCEK must
+//! carry the AMD hardware ID extension.
+//!
 //! Successful verification authenticates the signed report, including
 //! [`AttestationReport::report_data`](crate::AttestationReport::report_data),
 //! but callers should compare `report_data` to their expected nonce, challenge,
@@ -140,6 +144,7 @@ pub mod sync {
             ChainVerification::Skip => {}
         };
 
+        super::check_signing_key(attestation_report)?;
         snp::report::verify_report_signature(vcek, attestation_report)
             .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
 
@@ -195,6 +200,7 @@ pub mod asynchronous {
             ChainVerification::Skip => {}
         };
 
+        super::check_signing_key(attestation_report)?;
         snp::report::verify_report_signature_async(vcek, attestation_report)
             .await
             .map_err(|e| VerificationError::SignatureVerificationError(format!("{:?}", e)))?;
@@ -230,31 +236,68 @@ pub(crate) fn ark_matches_pinned(
     Ok(())
 }
 
-fn extension_value_matches(ext_value: &[u8], expected: &[u8]) -> bool {
-    // Try direct match
-    if ext_value == expected {
-        return true;
+/// Rejects reports that are not signed with a VCEK.
+///
+/// Only VCEK-signed reports are supported. VLEK, `None`, and reserved
+/// signing-key encodings are rejected because their signers cannot be
+/// verified with the VCEK chain and hardware ID checks in this module.
+pub(crate) fn check_signing_key(report: &AttestationReport) -> Result<(), VerificationError> {
+    match report.flags().signing_key() {
+        snp::report::SigningKey::Vcek => Ok(()),
+        other => Err(VerificationError::SignatureVerificationError(format!(
+            "Unsupported signing key {:?}: only VCEK-signed reports are supported",
+            other
+        ))),
     }
-    // prefix match
-    if ext_value.len() < expected.len()
-        && ext_value == &expected[..ext_value.len()]
-        && expected[ext_value.len()..].iter().all(|e| *e == 0)
-    {
-        return true;
+}
+
+/// Matches a TCB component extension value against the report's byte.
+///
+/// AMD encodes these extensions as a DER INTEGER: `02 01 xx` for values below
+/// 0x80 and `02 02 00 xx` for values from 0x80 to 0xFF. A bare single byte is
+/// also accepted. Every other length, tag, or non-canonical INTEGER is
+/// rejected.
+fn tcb_extension_matches(ext_value: &[u8], expected: u8) -> bool {
+    match ext_value {
+        [value] => *value == expected,
+        [0x02, 0x01, value] => *value < 0x80 && *value == expected,
+        [0x02, 0x02, 0x00, value] => *value >= 0x80 && *value == expected,
+        _ => false,
     }
-    // Try with INTEGER tag (0x02) wrapper
-    if ext_value.len() >= 2 && ext_value[0] == 0x02 {
-        if let Some(&last) = ext_value.last() {
-            if expected.len() == 1 && last == expected[0] {
-                return true;
-            }
-        }
+}
+
+/// Length of the hardware ID carried in the VCEK for each generation.
+///
+/// Milan and Genoa VCEKs carry the full 64-byte chip ID. Turin VCEKs carry
+/// an 8-byte ID that matches the first 8 bytes of the report's `chip_id`; the
+/// remaining 56 report bytes must be zero.
+fn hwid_len(generation: snp::model::Generation) -> usize {
+    match generation {
+        snp::model::Generation::Milan | snp::model::Generation::Genoa => 64,
+        snp::model::Generation::Turin => 8,
     }
-    // Try with OCTET STRING tag (0x04) wrapper
-    if ext_value.len() >= 2 && ext_value[0] == 0x04 && ext_value.len() >= 2 {
-        return &ext_value[2..] == expected;
-    }
-    false
+}
+
+/// Matches the VCEK hardware ID extension against the report's `chip_id`.
+///
+/// The extension value must be exactly `hwid_len(generation)` raw bytes, or
+/// that same value wrapped in a DER OCTET STRING with an exact length byte.
+/// The raw length is checked first so that an ID starting with 0x04 is not
+/// mistaken for a DER wrapper.
+fn hwid_extension_matches(
+    ext_value: &[u8],
+    chip_id: &[u8; 64],
+    generation: snp::model::Generation,
+) -> bool {
+    let len = hwid_len(generation);
+    let hwid = if ext_value.len() == len {
+        ext_value
+    } else if ext_value.len() == len + 2 && ext_value[0] == 0x04 && ext_value[1] as usize == len {
+        &ext_value[2..]
+    } else {
+        return false;
+    };
+    hwid == &chip_id[..len] && chip_id[len..].iter().all(|b| *b == 0)
 }
 
 pub(crate) fn verify_tcb_values(
@@ -263,15 +306,14 @@ pub(crate) fn verify_tcb_values(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let check_u8_ext = |oid: &str, expected: u8| -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ext_value) = Crypto::get_extension_value_by_oid(vcek, oid)? {
-            let expected = [expected];
-            if extension_value_matches(&ext_value, &expected) {
+            if tcb_extension_matches(&ext_value, expected) {
                 return Ok(());
             }
             return Err(format!(
-                "Mismatched value OID {} : {} != {}",
+                "Mismatched value OID {} : {} != {:02x}",
                 oid,
                 crypto::hex::to_hex(&ext_value),
-                crypto::hex::to_hex(&expected)
+                expected
             )
             .into());
         }
@@ -326,10 +368,10 @@ pub(crate) fn verify_tcb_values(
     }
 
     let hwid_oid = Oid::HwId.as_str();
-    if let Some(cert_hwid) = Crypto::get_extension_value_by_oid(vcek, hwid_oid)? {
-        if !extension_value_matches(&cert_hwid, attestation_report.chip_id.as_slice()) {
-            return Err("Report TCB ID and Certificate ID mismatch".into());
-        }
+    let cert_hwid = Crypto::get_extension_value_by_oid(vcek, hwid_oid)?
+        .ok_or_else(|| format!("Extension OID {} not found in VCEK", hwid_oid))?;
+    if !hwid_extension_matches(&cert_hwid, &attestation_report.chip_id, gen) {
+        return Err("Report TCB ID and Certificate ID mismatch".into());
     }
 
     Ok(())
@@ -342,16 +384,29 @@ mod tests {
     use crate::crypto::{Certificate, CertificateBackend, Crypto};
     use crate::AttestationReport;
 
-    use super::{extension_value_matches, verify_tcb_values};
+    use super::{
+        check_signing_key, hwid_extension_matches, tcb_extension_matches, verify_tcb_values,
+        VerificationError,
+    };
+    use crate::snp::model::Generation;
 
     const MILAN_ASK: &[u8] = include_bytes!("../../tests/test_data/milan_ask.pem");
     const MILAN_VCEK: &[u8] = include_bytes!("../../tests/test_data/milan_vcek.pem");
+    const TURIN_VCEK: &[u8] = include_bytes!("../../tests/test_data/turin_vcek.pem");
     const MILAN_REPORT: &[u8] =
         include_bytes!("../../tests/test_data/milan_attestation_report.bin");
     const TURIN_REPORT: &[u8] =
         include_bytes!("../../tests/test_data/turin_attestation_report.bin");
     const TURIN_KDS_ASK: &[u8] = include_bytes!("../../tests/test_data/turin_kds_ask.pem");
     const TURIN_KDS_ARK: &[u8] = include_bytes!("../../tests/test_data/turin_kds_ark.pem");
+
+    // Self-signed certificate carrying the Milan report fixture's TCB extensions
+    // (bl=4, tee=0, snp=0x18, ucode=0xDB as DER INTEGERs) but no hardware ID
+    // extension. Generated with `openssl req -new -x509 -key <p384 key> -sha384
+    // -config <cnf>` where the cnf lists the four 1.3.6.1.4.1.3704.1.3.* OIDs.
+    // It is not signed by AMD and is only used for `verify_tcb_values`.
+    const SYNTHETIC_VCEK_NO_HWID: &[u8] =
+        include_bytes!("../../tests/test_data/synthetic_vcek_no_hwid.pem");
 
     // KDS-generated Turin VCEKs for the public Turin report fixture's KDS chip ID
     // 59790FB1C39F35C1. The report TCB is fmc=1, bl=1, tee=1, snp=4,
@@ -390,22 +445,172 @@ mod tests {
     }
 
     #[test]
-    fn extension_value_matching_accepts_supported_encodings() {
-        assert!(extension_value_matches(&[0x05], &[0x05]));
-        assert!(extension_value_matches(&[0x05], &[0x05, 0x00, 0x00]));
-        assert!(extension_value_matches(&[0x02, 0x01, 0x05], &[0x05]));
-        assert!(extension_value_matches(
-            &[0x04, 0x02, 0x05, 0x06],
-            &[0x05, 0x06]
+    fn tcb_extension_matching_accepts_supported_encodings() {
+        assert!(tcb_extension_matches(&[0x05], 0x05));
+        assert!(tcb_extension_matches(&[0xDB], 0xDB));
+        assert!(tcb_extension_matches(&[0x02, 0x01, 0x05], 0x05));
+        assert!(tcb_extension_matches(&[0x02, 0x01, 0x7F], 0x7F));
+        assert!(tcb_extension_matches(&[0x02, 0x02, 0x00, 0x80], 0x80));
+        assert!(tcb_extension_matches(&[0x02, 0x02, 0x00, 0xDB], 0xDB));
+    }
+
+    #[test]
+    fn tcb_extension_matching_rejects_mismatches_and_malformed_encodings() {
+        // Wrong values.
+        assert!(!tcb_extension_matches(&[0x06], 0x05));
+        assert!(!tcb_extension_matches(&[0x02, 0x01, 0x06], 0x05));
+        assert!(!tcb_extension_matches(&[0x02, 0x02, 0x00, 0xDC], 0xDB));
+        // Empty and over-long values.
+        assert!(!tcb_extension_matches(&[], 0x00));
+        assert!(!tcb_extension_matches(&[0x05, 0x00], 0x05));
+        assert!(!tcb_extension_matches(&[0x02, 0x01, 0x05, 0x00], 0x05));
+        // Negative INTEGER: 0x80..=0xFF must use the two-byte form.
+        assert!(!tcb_extension_matches(&[0x02, 0x01, 0xDB], 0xDB));
+        // Non-canonical two-byte INTEGER for a value below 0x80.
+        assert!(!tcb_extension_matches(&[0x02, 0x02, 0x00, 0x05], 0x05));
+        // Out-of-range INTEGER.
+        assert!(!tcb_extension_matches(&[0x02, 0x02, 0x01, 0x05], 0x05));
+        // Wrong length byte and wrong tag.
+        assert!(!tcb_extension_matches(&[0x02, 0x02, 0x05], 0x05));
+        assert!(!tcb_extension_matches(&[0x04, 0x01, 0x05], 0x05));
+    }
+
+    #[test]
+    fn hwid_extension_matching_accepts_generation_lengths() {
+        let mut chip_id = [0u8; 64];
+        for (i, b) in chip_id.iter_mut().enumerate() {
+            *b = i as u8 + 1;
+        }
+        for gen in [Generation::Milan, Generation::Genoa] {
+            assert!(hwid_extension_matches(&chip_id, &chip_id, gen));
+            let mut wrapped = vec![0x04, 64];
+            wrapped.extend_from_slice(&chip_id);
+            assert!(hwid_extension_matches(&wrapped, &chip_id, gen));
+        }
+
+        let mut turin_chip_id = [0u8; 64];
+        turin_chip_id[..8].copy_from_slice(&[0x59, 0x79, 0x0F, 0xB1, 0xC3, 0x9F, 0x35, 0xC1]);
+        assert!(hwid_extension_matches(
+            &turin_chip_id[..8],
+            &turin_chip_id,
+            Generation::Turin
+        ));
+        let mut wrapped = vec![0x04, 8];
+        wrapped.extend_from_slice(&turin_chip_id[..8]);
+        assert!(hwid_extension_matches(
+            &wrapped,
+            &turin_chip_id,
+            Generation::Turin
+        ));
+
+        // A raw ID that starts with 0x04 is compared as raw bytes, not DER.
+        let mut chip_id_04 = chip_id;
+        chip_id_04[0] = 0x04;
+        chip_id_04[1] = 62;
+        assert!(hwid_extension_matches(
+            &chip_id_04,
+            &chip_id_04,
+            Generation::Milan
         ));
     }
 
     #[test]
-    fn extension_value_matching_rejects_mismatches() {
-        assert!(!extension_value_matches(&[0x06], &[0x05]));
-        assert!(!extension_value_matches(&[0x05], &[0x05, 0x01]));
-        assert!(!extension_value_matches(&[0x02, 0x01, 0x06], &[0x05]));
-        assert!(!extension_value_matches(&[0x04, 0x02, 0x06], &[0x05]));
+    fn hwid_extension_matching_rejects_wrong_lengths_and_values() {
+        let chip_id = [0x11u8; 64];
+        // Wrong length for the generation.
+        assert!(!hwid_extension_matches(
+            &chip_id[..8],
+            &chip_id,
+            Generation::Milan
+        ));
+        assert!(!hwid_extension_matches(
+            &chip_id,
+            &chip_id,
+            Generation::Turin
+        ));
+        assert!(!hwid_extension_matches(&[], &chip_id, Generation::Milan));
+        assert!(!hwid_extension_matches(
+            &chip_id[..63],
+            &chip_id,
+            Generation::Milan
+        ));
+        // Value mismatch.
+        let mut other = chip_id;
+        other[63] ^= 0xFF;
+        assert!(!hwid_extension_matches(&other, &chip_id, Generation::Milan));
+        // DER wrapper with the wrong length byte or trailing bytes.
+        let mut wrapped = vec![0x04, 63];
+        wrapped.extend_from_slice(&chip_id);
+        assert!(!hwid_extension_matches(
+            &wrapped,
+            &chip_id,
+            Generation::Milan
+        ));
+        let mut trailing = vec![0x04, 64];
+        trailing.extend_from_slice(&chip_id);
+        trailing.push(0x00);
+        assert!(!hwid_extension_matches(
+            &trailing,
+            &chip_id,
+            Generation::Milan
+        ));
+        // Turin: the 56 report bytes after the 8-byte ID must be zero.
+        let mut turin_chip_id = [0u8; 64];
+        turin_chip_id[..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        turin_chip_id[8] = 1;
+        assert!(!hwid_extension_matches(
+            &turin_chip_id[..8],
+            &turin_chip_id,
+            Generation::Turin
+        ));
+    }
+
+    #[test]
+    fn signing_key_check_accepts_only_vcek() {
+        let mut report = milan_report();
+        check_signing_key(&report).expect("VCEK-signed fixture should be accepted");
+
+        // Flags bits 4:2 hold SIGNING_KEY: 1 = VLEK, 2..=6 reserved, 7 = None.
+        for (raw, name) in [
+            (1u32, "Vlek"),
+            (2, "Reserved(2)"),
+            (6, "Reserved(6)"),
+            (7, "None"),
+        ] {
+            report.flags.set(raw << 2);
+            assert_ne!(
+                report.flags().signing_key(),
+                crate::snp::report::SigningKey::Vcek
+            );
+            match check_signing_key(&report) {
+                Err(VerificationError::SignatureVerificationError(msg)) => {
+                    assert!(msg.contains(name), "{msg}")
+                }
+                other => panic!("signing key {raw} should be rejected, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn verify_tcb_values_accepts_authentic_fixtures() {
+        let vcek = Crypto::from_pem(MILAN_VCEK).expect("Milan VCEK should parse");
+        verify_tcb_values(&vcek, &milan_report()).expect("Milan fixture should match");
+
+        let vcek = Crypto::from_pem(TURIN_VCEK).expect("Turin VCEK should parse");
+        verify_tcb_values(&vcek, &turin_report()).expect("Turin fixture should match");
+    }
+
+    #[test]
+    fn verify_tcb_values_rejects_missing_hwid_extension() {
+        let vcek = Crypto::from_pem(SYNTHETIC_VCEK_NO_HWID).expect("synthetic VCEK should parse");
+        let report = milan_report();
+
+        let err = verify_tcb_values(&vcek, &report).expect_err("Missing hwID should fail");
+        assert!(
+            err.to_string()
+                .contains("Extension OID 1.3.6.1.4.1.3704.1.4 not found"),
+            "expected missing hwID error, got: {err}"
+        );
     }
 
     #[test]
