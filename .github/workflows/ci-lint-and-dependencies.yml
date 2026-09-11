@@ -8,7 +8,7 @@ on:
     - cron: "23 6 * * 1"
 
 concurrency:
-  group: ci-hardening-${{ github.ref }}
+  group: ci-lint-and-dependencies-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
