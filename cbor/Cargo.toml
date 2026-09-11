@@ -11,5 +11,5 @@ license = "MIT"
 
 [dependencies]
 # project-everest/everparse tag v2026.07.02 resolves to this pinned commit.
-cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
-cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
+cborrs = { version = "0.1.0", git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
+cborrs-nondet = { version = "0.1.0", git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }

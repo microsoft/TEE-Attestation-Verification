@@ -4,9 +4,9 @@
 #[cfg(not(feature = "kds"))]
 compile_error!("kds module requires the 'kds' feature");
 
-use crate::crypto::{Certificate, CertificateBackend, Crypto};
 use crate::snp;
 use crate::{certificate_chain::CertificateFetcher, AttestationReport};
+use crypto::{Certificate, CertificateBackend, Crypto};
 #[cfg(target_arch = "wasm32")]
 use js_sys::{Promise, Uint8Array};
 use log::{debug, info};

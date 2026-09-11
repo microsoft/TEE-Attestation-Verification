@@ -337,6 +337,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(not(target_family = "wasm"), sync_crypto))]
     fn into_result_catches_panics_instead_of_propagating() {
         let error = into_result(|| panic!("boom"));
         assert!(!error.is_null());
@@ -346,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(not(target_family = "wasm"), sync_crypto))]
     fn into_result_passes_through_ok() {
         assert!(into_result(|| Ok(())).is_null());
     }

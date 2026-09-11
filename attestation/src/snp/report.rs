@@ -634,7 +634,7 @@ pub(crate) async fn verify_report_signature_async(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{CertificateBackend, Crypto};
+    use crypto::{CertificateBackend, Crypto};
     use std::mem::size_of;
 
     const MILAN_VCEK: &[u8] = include_bytes!("../../tests/test_data/milan_vcek.pem");
@@ -649,7 +649,6 @@ mod tests {
     fn report() -> AttestationReport {
         AttestationReport::try_read_from_bytes(MILAN_REPORT)
             .expect("Failed to parse attestation report")
-            .clone()
     }
 
     #[test]
@@ -843,7 +842,8 @@ mod tests {
 
     #[test]
     fn guest_policy_each_bit_individually() {
-        let bit_accessors: &[(u64, fn(&GuestPolicy) -> bool)] = &[
+        type PolicyAccessor = fn(&GuestPolicy) -> bool;
+        let bit_accessors: &[(u64, PolicyAccessor)] = &[
             (1 << 16, GuestPolicy::smt),
             (1 << 18, GuestPolicy::migrate_ma),
             (1 << 19, GuestPolicy::debug),
@@ -930,8 +930,8 @@ mod tests {
         assert!(higher > baseline);
         assert!(lower < baseline);
         assert!(mixed.partial_cmp(&baseline).is_none());
-        assert!(!(mixed >= baseline));
-        assert!(!(mixed <= baseline));
+        assert!(!mixed.ge(&baseline));
+        assert!(!mixed.le(&baseline));
     }
 
     #[test]
@@ -947,8 +947,8 @@ mod tests {
         assert!(higher > baseline);
         assert!(lower < baseline);
         assert!(mixed.partial_cmp(&baseline).is_none());
-        assert!(!(mixed >= baseline));
-        assert!(!(mixed <= baseline));
+        assert!(!mixed.ge(&baseline));
+        assert!(!mixed.le(&baseline));
     }
 
     fn raw_milan_genoa_tcb(boot_loader: u8, tee: u8, snp: u8, microcode: u8) -> TcbVersionRaw {
