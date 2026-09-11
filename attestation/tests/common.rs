@@ -4,7 +4,9 @@
 use tee_attestation_verification_lib::snp::verify::ChainVerification;
 #[cfg(feature = "kds")]
 use tee_attestation_verification_lib::SevVerifier;
-use tee_attestation_verification_lib::{certificate_from_pem, AttestationReport};
+use tee_attestation_verification_lib::{
+    certificate_from_der, certificate_from_pem, AttestationReport, Certificate,
+};
 use zerocopy::FromBytes;
 
 // Attestation reports
@@ -60,6 +62,22 @@ fn report_with_cpuid(cpuid_fam_id: u8, cpuid_mod_id: u8) -> Vec<u8> {
     report
 }
 
+/// Returns the Milan ARK with the last byte of its DER encoding flipped.
+///
+/// The signature BIT STRING is the final element of a DER certificate, so the
+/// certificate still parses and keeps the pinned issuer and public key, but
+/// its self-signature no longer verifies.
+fn milan_ark_with_corrupted_signature() -> Certificate {
+    let pem = std::str::from_utf8(MILAN_ARK).unwrap();
+    let base64: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    let mut der = crypto::base64::base64_standard_decode(&base64).unwrap();
+    *der.last_mut().unwrap() ^= 0xFF;
+    certificate_from_der(&der).expect("corrupted ARK should still parse as DER")
+}
+
 macro_rules! attestation_tests {
     (
         $milan_ark:expr,
@@ -68,6 +86,7 @@ macro_rules! attestation_tests {
         $milan_ask:expr,
         $genoa_ask:expr,
         $turin_ask:expr,
+        $corrupted_milan_ark:expr,
         $tampered_milan_attestation:expr,
         $unsupported_signature_algo_attestation:expr,
         $unsupported_milan_genoa_model_attestation:expr,
@@ -135,6 +154,16 @@ macro_rules! attestation_tests {
                 ChainVerification::WithProvidedArk {
                     ask: &$milan_ask,
                     ark: &$milan_ask,
+                },
+                Err("Invalid root certificate"),
+            ),
+            (
+                "milan_provided_ark_corrupted_self_signature",
+                MILAN_ATTESTATION,
+                MILAN_VCEK,
+                ChainVerification::WithProvidedArk {
+                    ask: &$milan_ask,
+                    ark: &$corrupted_milan_ark,
                 },
                 Err("Invalid root certificate"),
             ),
@@ -229,6 +258,7 @@ pub fn test_verify_attestation_suite() {
     let milan_ask = certificate_from_pem(MILAN_ASK).unwrap();
     let genoa_ask = certificate_from_pem(GENOA_ASK).unwrap();
     let turin_ask = certificate_from_pem(TURIN_ASK).unwrap();
+    let corrupted_milan_ark = milan_ark_with_corrupted_signature();
 
     for (tag, att, vcek, chain, expected) in attestation_tests!(
         milan_ark,
@@ -237,6 +267,7 @@ pub fn test_verify_attestation_suite() {
         milan_ask,
         genoa_ask,
         turin_ask,
+        corrupted_milan_ark,
         tampered_milan_attestation,
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
@@ -286,6 +317,7 @@ pub async fn test_verify_attestation_suite_async() {
     let milan_ask = certificate_from_pem(MILAN_ASK).unwrap();
     let genoa_ask = certificate_from_pem(GENOA_ASK).unwrap();
     let turin_ask = certificate_from_pem(TURIN_ASK).unwrap();
+    let corrupted_milan_ark = milan_ark_with_corrupted_signature();
 
     for (tag, att, vcek, chain, expected) in attestation_tests!(
         milan_ark,
@@ -294,6 +326,7 @@ pub async fn test_verify_attestation_suite_async() {
         milan_ask,
         genoa_ask,
         turin_ask,
+        corrupted_milan_ark,
         tampered_milan_attestation,
         unsupported_signature_algo_attestation,
         unsupported_milan_genoa_model_attestation,
