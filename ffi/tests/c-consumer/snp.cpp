@@ -59,6 +59,10 @@ TEST_CASE("snp: every report accessor exposes the golden Milan value") {
     REQUIRE(error == nullptr);
     REQUIRE(report != nullptr);
 
+    in.report.assign(in.report.size(), 0xff);
+    in.report.clear();
+    in.report.shrink_to_fit();
+
     // Golden values from demos/c-ffi/test-data/milan-output.golden.txt, which is
     // produced from the same four Milan fixtures loaded above. This exercises
     // every accessor declared in tav/snp.h exactly once.

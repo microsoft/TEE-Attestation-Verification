@@ -106,7 +106,11 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
 
         let report_bytes =
             unsafe { input_bytes(report_bytes, report_len, "attestation report", false) }?;
-        let report = parse_report(report_bytes)?;
+        parse_report(report_bytes)?;
+        let owned_report = TavSnpAttestationReport {
+            bytes: report_bytes.to_vec(),
+        };
+        let report = parse_report(&owned_report.bytes)?;
 
         let ark_pem = unsafe { input_bytes(ark_pem, ark_pem_len, "ARK", false) }?;
         let ark = certificate_from_pem(ark_pem).map_err(|error| {
@@ -133,11 +137,8 @@ pub unsafe extern "C" fn tav_verify_snp_attestation(
         )
         .map_err(tav_error_from_verification_error)?;
 
-        let report = TavSnpAttestationReport {
-            bytes: report_bytes.to_vec(),
-        };
         unsafe {
-            *out_report = Box::into_raw(Box::new(report));
+            *out_report = Box::into_raw(Box::new(owned_report));
         }
         Ok(())
     })

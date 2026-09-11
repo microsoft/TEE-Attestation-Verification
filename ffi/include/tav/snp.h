@@ -50,6 +50,10 @@ typedef struct TavSnpAttestationReport TavSnpAttestationReport;
  * Verify an SNP attestation report using caller-provided ARK, ASK, and VCEK
  * certificates in PEM format.
  *
+ * Verification reads a library-owned copy of the report. On success, the
+ * returned handle owns that same verified copy. Input buffers must remain
+ * valid and unchanged for the duration of the call; none are retained.
+ *
  * out_report must point to a writable report-handle slot. The slot is set to
  * NULL before any fallible work and set to an owned handle only on success.
  */
