@@ -726,6 +726,9 @@ fn native_len(input: &[u8]) -> Result<u32> {
         .map_err(|_| "Input exceeds the Windows API length limit".into())
 }
 
+/// # Safety
+/// `pointer` must reference `len` initialized elements in one allocation kept
+/// alive and immutable by `_owner` for `'a`.
 unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> Result<&'a [T]> {
     if len == 0 {
         return Ok(&[]);
@@ -739,5 +742,6 @@ unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> 
         .checked_mul(size_of::<T>())
         .filter(|bytes| *bytes <= isize::MAX as usize)
         .ok_or("Windows slice is too large")?;
+    // SAFETY: Alignment and size are checked above; the caller ties readable storage to `_owner`.
     Ok(unsafe { std::slice::from_raw_parts(pointer.as_ptr(), len) })
 }

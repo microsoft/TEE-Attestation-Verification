@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
 //! External C and WebAssembly bindings for TEE attestation verification.
 //!
 //! Rust consumers should use the domain crates directly. This crate owns the
