@@ -1,0 +1,42 @@
+name: "FFI sanitizer CI"
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-ffi-sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ffi-c-sanitizers:
+    name: C ABI ASan/UBSan (instrumented Rust)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install sanitizer toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libclang-rt-18-dev cmake libssl-dev pkg-config
+          rustup toolchain install nightly-2026-02-01 --profile minimal --component rust-src
+          jobs="$(( ($(nproc) + 1) >> 1 ))"
+          echo "CARGO_BUILD_JOBS=$jobs" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$jobs" >> "$GITHUB_ENV"
+
+      - name: Configure instrumented static consumer
+        run: >
+          cmake -S ffi/tests/c-consumer -B target/c-consumer-sanitizers
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DTAV_LINK_STATIC=ON
+          -DTAV_SANITIZERS=ON
+
+      - name: Build instrumented Rust and C++ consumer
+        run: cmake --build target/c-consumer-sanitizers
+
+      - name: Run C ABI tests with ASan and UBSan
+        run: ctest --test-dir target/c-consumer-sanitizers --output-on-failure
