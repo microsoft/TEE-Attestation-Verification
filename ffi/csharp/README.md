@@ -133,6 +133,10 @@ managed wrappers are reclaimed by garbage collection; `SnpAttestationReport`,
 Native failures become `VerifyException` with a stable `ErrorCode`; managed input
 errors use standard .NET exceptions.
 
+`CborValue.FromBytes` snapshots and pins the input, then copies the parsed tree
+into native-owned storage before unpinning. Returned values and their projections
+do not depend on managed input buffers.
+
 ## Build and test from source
 
 Run from `ffi/csharp`:

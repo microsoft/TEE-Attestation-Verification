@@ -769,3 +769,60 @@ fn deprecated_to_bytes_serializes_in_det_mode() {
     assert_eq!(value.to_bytes().unwrap(), value.to_bytes_det().unwrap());
     assert_ne!(value.to_bytes().unwrap(), value.to_bytes_nondet().unwrap());
 }
+
+#[test]
+fn compound_key_equivalence_and_duplicate_detection() {
+    let first = CborValue::Map(vec![
+        (CborValue::Int(1), CborValue::Int(2)),
+        (CborValue::Int(3), CborValue::Int(4)),
+    ]);
+    let reordered = CborValue::Map(vec![
+        (CborValue::Int(3), CborValue::Int(4)),
+        (CborValue::Int(1), CborValue::Int(2)),
+    ]);
+    for (key, equivalent) in [
+        (first.clone(), reordered.clone()),
+        (
+            CborValue::Array(vec![first.clone()]),
+            CborValue::Array(vec![reordered.clone()]),
+        ),
+        (
+            CborValue::Tagged {
+                tag: 42,
+                payload: Box::new(first),
+            },
+            CborValue::Tagged {
+                tag: 42,
+                payload: Box::new(reordered),
+            },
+        ),
+    ] {
+        let map = CborValue::Map(vec![(key.clone(), CborValue::Int(7))]);
+        assert_eq!(map.map_at(&equivalent).unwrap(), &CborValue::Int(7));
+        assert!(map.map_has_key(&equivalent).unwrap());
+        for encoded in [map.to_bytes_det().unwrap(), map.to_bytes_nondet().unwrap()] {
+            assert_eq!(
+                CborValue::parse_nondet(&encoded)
+                    .unwrap()
+                    .map_at(&equivalent)
+                    .unwrap(),
+                &CborValue::Int(7)
+            );
+        }
+        let duplicate = CborValue::Map(vec![
+            (key, CborValue::Int(1)),
+            (equivalent, CborValue::Int(2)),
+        ]);
+        assert!(duplicate.to_bytes_det().is_err());
+        assert!(duplicate.to_bytes_nondet().is_err());
+    }
+    // Equivalent map keys with different entry order in non-deterministic input.
+    let duplicate = [0xa2, 0xa2, 1, 2, 3, 4, 0, 0xa2, 3, 4, 1, 2, 1];
+    assert!(CborValue::parse_nondet(&duplicate).is_err());
+    assert!(CborValue::parse_det(&duplicate).is_err());
+    assert!(
+        !CborValue::Array(vec![CborValue::Int(1), CborValue::Int(2)]).key_equivalent(
+            &CborValue::Array(vec![CborValue::Int(2), CborValue::Int(1)])
+        )
+    );
+}

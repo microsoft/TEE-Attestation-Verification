@@ -4,9 +4,9 @@ This demo verifies the checked-in Confidential ACI fixture through the staged
 native C ABI declared by `ffi/include/tav/caci.h`.
 
 The CACI library is the frontend link target for the whole flow: it exports the
-SNP verifier from `ffi/include/tav/snp.h`, the CBOR/COSE helpers from
-`ffi/include/tav/cose.h`, and the CACI UVM/policy functions from
-`ffi/include/tav/caci.h`.
+SNP verifier from `ffi/include/tav/snp.h`, CBOR operations from
+`ffi/include/tav/cbor.h`, COSE verification from `ffi/include/tav/cose.h`,
+and CACI UVM/policy functions from `ffi/include/tav/caci.h`.
 
 The demo hardcodes one minimum-TCB entry for the Milan fixture: CPUID
 `0x00A00F11` with minimum TCB bytes `04000000000018db`, passed as the parallel
@@ -39,4 +39,3 @@ requires `cmake` and `ninja` on `PATH`:
 ```sh
 python3 demos/caci-c-ffi/run_tests.py
 ```
-

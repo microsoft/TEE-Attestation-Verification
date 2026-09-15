@@ -101,12 +101,12 @@ TEST_CASE("C++ moves: Report") {
 TEST_CASE("C++ moves: ByteBuffer") {
     check_handle_moves(
         [](uint8_t byte) {
-            TavCborValue* raw = nullptr;
-            tav::check(tav_cbor_value_from_bytes(&byte, 1, &raw));
-            std::unique_ptr<TavCborValue, decltype(&tav_cbor_value_free)> value(
-                raw, tav_cbor_value_free);
+            TavCborHandle* raw = nullptr;
+            tav::check(tav_cbor_make_signed(byte, &raw));
+            std::unique_ptr<TavCborHandle, decltype(&tav_cbor_free)> value(
+                raw, tav_cbor_free);
             TavByteBuffer* buffer = nullptr;
-            tav::check(tav_cbor_value_to_bytes(value.get(), &buffer));
+            tav::check(tav_cbor_det_serialize(value.get(), TAV_CBOR_MAX_DEPTH, &buffer));
             return tav::ByteBuffer::adopt(buffer);
         },
         [](const tav::ByteBuffer& buffer) {
@@ -136,16 +136,4 @@ TEST_CASE("C++ moves: Exception") {
     check_error_moves<tav::Exception>(
         tav::ErrorCode::IS_NULL, tav::ErrorCode::INVALID_ARGUMENT,
         [](const tav::Exception& error) { return error.code(); });
-}
-
-TEST_CASE("C++ moves: CBOR exceptions") {
-    const auto code = [](const tav::cbor::CborError& error) {
-        return error.error_code();
-    };
-    check_error_moves<tav::cbor::CborError>(
-        tav::cbor::Error::TYPE_MISMATCH, tav::cbor::Error::KEY_NOT_FOUND, code);
-    check_error_moves<tav::cbor::DecodeError>(
-        tav::cbor::Error::DECODE_FAILED, tav::cbor::Error::OUT_OF_BOUND, code);
-    check_error_moves<tav::cbor::EncodeError>(
-        tav::cbor::Error::ENCODE_FAILED, tav::cbor::Error::TYPE_MISMATCH, code);
 }

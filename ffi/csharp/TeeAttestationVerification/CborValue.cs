@@ -10,6 +10,7 @@ namespace TeeAttestationVerification;
 /// </remarks>
 public sealed class CborValue : IDisposable
 {
+    private const nuint MaximumDepth = 64;
     private readonly object _sync = new();
     private readonly SafeCborValueHandle _handle;
 
@@ -23,8 +24,8 @@ public sealed class CborValue : IDisposable
         _handle = handle;
     }
 
-    /// <summary>Gets the CBOR major type.</summary>
-    public CborKind Kind => (CborKind)NativeMethods.CborKind(_handle);
+    /// <summary>Gets the CBOR value kind.</summary>
+    public CborKind Kind => NativeMethods.CborKind(_handle);
 
     /// <summary>Gets the element count of an array or map.</summary>
     /// <exception cref="VerifyException">This value is not an array or map.</exception>
@@ -45,9 +46,13 @@ public sealed class CborValue : IDisposable
         fixed (byte* bytesPointer = snapshot)
         {
             IntPtr error = NativeMethods.CborFromBytes(
-                (IntPtr)bytesPointer, (nuint)snapshot.Length, out IntPtr value);
+                (IntPtr)bytesPointer, (nuint)snapshot.Length, MaximumDepth, out IntPtr value);
             NativeResult.ThrowIfError(error);
-            return FromOwnedHandle(value);
+            using SafeCborValueHandle borrowed = new(value);
+            // The generic parser borrows snapshot. Copy before leaving the fixed block.
+            error = NativeMethods.CborDeepCopy(borrowed, out IntPtr owned);
+            NativeResult.ThrowIfError(error);
+            return FromOwnedHandle(owned);
         }
     }
 
@@ -55,7 +60,7 @@ public sealed class CborValue : IDisposable
     /// <returns>A managed copy of the encoding.</returns>
     public byte[] ToBytes()
     {
-        IntPtr error = NativeMethods.CborToBytes(_handle, out IntPtr bytes);
+        IntPtr error = NativeMethods.CborToBytes(_handle, MaximumDepth, out IntPtr bytes);
         NativeResult.ThrowIfError(error);
         if (bytes == IntPtr.Zero)
         {
@@ -137,7 +142,7 @@ public sealed class CborValue : IDisposable
     /// <exception cref="VerifyException">This value is not tagged.</exception>
     public CborValue TaggedPayload()
     {
-        IntPtr error = NativeMethods.CborTaggedPayload(_handle, out IntPtr payload);
+        IntPtr error = NativeMethods.CborTaggedPayload(_handle, GetTag(), out IntPtr payload);
         NativeResult.ThrowIfError(error);
         return FromOwnedHandle(payload);
     }
@@ -160,9 +165,10 @@ public sealed class CborValue : IDisposable
     /// <exception cref="VerifyException">This value is not a map or the key is absent.</exception>
     public CborValue MapAt(long key)
     {
-        IntPtr error = NativeMethods.CborMapAtInt(_handle, key, out IntPtr child);
+        IntPtr error = NativeMethods.CborMakeSigned(key, out IntPtr pointer);
         NativeResult.ThrowIfError(error);
-        return FromOwnedHandle(child);
+        using CborValue nativeKey = FromOwnedHandle(pointer);
+        return MapAt(nativeKey);
     }
 
     /// <summary>Returns an independently owned map value selected by a text key.</summary>
@@ -174,10 +180,11 @@ public sealed class CborValue : IDisposable
         byte[] utf8 = NativeInput.Utf8(key, nameof(key));
         fixed (byte* keyPointer = utf8)
         {
-            IntPtr error = NativeMethods.CborMapAtText(
-                _handle, (IntPtr)keyPointer, (nuint)utf8.Length, out IntPtr child);
+            IntPtr error = NativeMethods.CborMakeString(
+                (IntPtr)keyPointer, (nuint)utf8.Length, out IntPtr pointer);
             NativeResult.ThrowIfError(error);
-            return FromOwnedHandle(child);
+            using CborValue nativeKey = FromOwnedHandle(pointer);
+            return MapAt(nativeKey);
         }
     }
 
@@ -200,16 +207,10 @@ public sealed class CborValue : IDisposable
     /// <returns><see langword="true"/> when the key exists; otherwise <see langword="false"/>.</returns>
     public bool TryGetValue(long key, out CborValue? value)
     {
-        IntPtr error = NativeMethods.CborMapHasInt(_handle, key, out byte result);
+        IntPtr error = NativeMethods.CborMakeSigned(key, out IntPtr pointer);
         NativeResult.ThrowIfError(error);
-        if (result == 0)
-        {
-            value = null;
-            return false;
-        }
-
-        value = MapAt(key);
-        return true;
+        using CborValue nativeKey = FromOwnedHandle(pointer);
+        return TryGetValue(nativeKey, out value);
     }
 
     /// <summary>Attempts to get a map value selected by a text key.</summary>
@@ -222,18 +223,12 @@ public sealed class CborValue : IDisposable
         byte[] utf8 = NativeInput.Utf8(key, nameof(key));
         fixed (byte* keyPointer = utf8)
         {
-            IntPtr error = NativeMethods.CborMapHasText(
-                _handle, (IntPtr)keyPointer, (nuint)utf8.Length, out byte result);
+            IntPtr error = NativeMethods.CborMakeString(
+                (IntPtr)keyPointer, (nuint)utf8.Length, out IntPtr pointer);
             NativeResult.ThrowIfError(error);
-            if (result == 0)
-            {
-                value = null;
-                return false;
-            }
+            using CborValue nativeKey = FromOwnedHandle(pointer);
+            return TryGetValue(nativeKey, out value);
         }
-
-        value = MapAt(key);
-        return true;
     }
 
     /// <summary>Attempts to get a map value selected by a CBOR key.</summary>
@@ -243,18 +238,16 @@ public sealed class CborValue : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
     public bool TryGetValue(CborValue key, out CborValue? value)
     {
-        ArgumentNullException.ThrowIfNull(key);
-        IntPtr error = NativeMethods.CborMapHas(
-            _handle, key._handle, out byte result);
-        NativeResult.ThrowIfError(error);
-        if (result == 0)
+        value = null;
+        try
         {
-            value = null;
+            value = MapAt(key);
+            return true;
+        }
+        catch (VerifyException error) when (error.Code == ErrorCode.CborKeyNotFound)
+        {
             return false;
         }
-
-        value = MapAt(key);
-        return true;
     }
 
     /// <summary>Returns independently owned key and value views for a map entry.</summary>
@@ -263,21 +256,15 @@ public sealed class CborValue : IDisposable
     /// <exception cref="VerifyException">This value is not a map or the index is invalid.</exception>
     public KeyValuePair<CborValue, CborValue> MapEntryAt(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        IntPtr error = NativeMethods.CborMapEntryAt(
-            _handle, (nuint)index, out IntPtr keyPointer, out IntPtr valuePointer);
-        NativeResult.ThrowIfError(error);
-
-        CborValue? key = null;
+        CborValue key = MapKeyAt(index);
         try
         {
-            key = FromOwnedHandle(keyPointer);
-            CborValue value = FromOwnedHandle(valuePointer);
+            CborValue value = MapValueAt(index);
             return new(key, value);
         }
         catch
         {
-            key?.Dispose();
+            key.Dispose();
             throw;
         }
     }

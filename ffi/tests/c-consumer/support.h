@@ -16,6 +16,7 @@
 
 extern "C" {
 #include "tav/caci.h"
+#include "tav/cbor.h"
 #include "tav/cose.h"
 #include "tav/snp.h"
 #include "tav/utils.h"

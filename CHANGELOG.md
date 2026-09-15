@@ -8,7 +8,13 @@
 
 ### Changed
 
+- Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
+- C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)
+
+### Removed
+
+- The deprecated native `tav_cbor_value_*` functions, `TavCborValue` alias, and `TavCborKind` enum. COSE validation and verification and the independent WASM CBOR API remain supported.
 
 ### Fixed
 

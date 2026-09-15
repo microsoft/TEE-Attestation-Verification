@@ -216,78 +216,65 @@ internal static partial class NativeMethods
     [LibraryImport(LibraryName, EntryPoint = "tav_snp_attestation_report_free")]
     internal static partial void SnpReportFree(IntPtr report);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_from_bytes")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_nondet_parse")]
     internal static partial IntPtr CborFromBytes(
-        IntPtr bytes, nuint length, out IntPtr value);
+        IntPtr bytes, nuint length, nuint maxDepth, out IntPtr value);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_to_bytes")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_deep_copy")]
+    internal static partial IntPtr CborDeepCopy(
+        SafeCborValueHandle value, out IntPtr copy);
+
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_det_serialize")]
     internal static partial IntPtr CborToBytes(
-        SafeCborValueHandle value, out IntPtr bytes);
+        SafeCborValueHandle value, nuint maxDepth, out IntPtr bytes);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_kind")]
-    internal static partial int CborKind(SafeCborValueHandle value);
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_kind")]
+    internal static partial CborKind CborKind(SafeCborValueHandle value);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_int")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_as_signed")]
     internal static partial IntPtr CborInt(SafeCborValueHandle value, out long result);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_simple")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_as_simple")]
     internal static partial IntPtr CborSimple(SafeCborValueHandle value, out byte result);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_bytes")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_as_bytes")]
     internal static partial IntPtr CborBytes(
         SafeCborValueHandle value, out IntPtr data, out nuint length);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_text")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_as_string")]
     internal static partial IntPtr CborText(
         SafeCborValueHandle value, out IntPtr text, out nuint length);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_tag")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_as_tag")]
     internal static partial IntPtr CborTag(SafeCborValueHandle value, out ulong tag);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_tagged_payload")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_tag_at")]
     internal static partial IntPtr CborTaggedPayload(
-        SafeCborValueHandle value, out IntPtr payload);
+        SafeCborValueHandle value, ulong tag, out IntPtr payload);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_len")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_size")]
     internal static partial IntPtr CborLength(SafeCborValueHandle value, out nuint length);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_array_at")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_array_at")]
     internal static partial IntPtr CborArrayAt(
         SafeCborValueHandle value, nuint index, out IntPtr child);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_at_int")]
-    internal static partial IntPtr CborMapAtInt(
-        SafeCborValueHandle value, long key, out IntPtr child);
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_make_signed")]
+    internal static partial IntPtr CborMakeSigned(long value, out IntPtr result);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_at_text")]
-    internal static partial IntPtr CborMapAtText(
-        SafeCborValueHandle value, IntPtr key, nuint keyLength, out IntPtr child);
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_make_string")]
+    internal static partial IntPtr CborMakeString(
+        IntPtr data, nuint length, out IntPtr result);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_at")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_map_at")]
     internal static partial IntPtr CborMapAt(
         SafeCborValueHandle value, SafeCborValueHandle key, out IntPtr child);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_has_int_key")]
-    internal static partial IntPtr CborMapHasInt(
-        SafeCborValueHandle value, long key, out byte result);
-
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_has_text_key")]
-    internal static partial IntPtr CborMapHasText(
-        SafeCborValueHandle value, IntPtr key, nuint keyLength, out byte result);
-
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_has_key")]
-    internal static partial IntPtr CborMapHas(
-        SafeCborValueHandle value, SafeCborValueHandle key, out byte result);
-
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_entry_at")]
-    internal static partial IntPtr CborMapEntryAt(
-        SafeCborValueHandle value, nuint index, out IntPtr key, out IntPtr child);
-
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_key_at")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_map_key_at")]
     internal static partial IntPtr CborMapKeyAt(
         SafeCborValueHandle value, nuint index, out IntPtr key);
 
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_map_value_at")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_map_value_at")]
     internal static partial IntPtr CborMapValueAt(
         SafeCborValueHandle value, nuint index, out IntPtr child);
 
@@ -297,7 +284,7 @@ internal static partial class NativeMethods
 
     // Runs from SafeHandle.ReleaseHandle: the reference count is already zero, so the
     // raw handle is passed and no marshaller reference can be taken.
-    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_value_free")]
+    [LibraryImport(LibraryName, EntryPoint = "tav_cbor_free")]
     internal static partial void CborFree(IntPtr value);
 
     [LibraryImport(LibraryName, EntryPoint = "tav_verify_cose_sign1_embedded")]

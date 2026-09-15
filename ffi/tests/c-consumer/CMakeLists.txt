@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(tav-c-consumer-tests CXX)
+project(tav-c-consumer-tests C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,11 +67,18 @@ target_compile_definitions(tav-c-consumer-tests PRIVATE TAV_REPO_ROOT="${TAV_REP
 target_link_libraries(tav-c-consumer-tests PRIVATE tav)
 target_compile_options(tav-c-consumer-tests PRIVATE -Wall -Wextra)
 
+add_executable(tav-cbor-c-tests cbor.c)
+target_include_directories(tav-cbor-c-tests PRIVATE "${TAV_REPO_ROOT}/ffi/include")
+target_link_libraries(tav-cbor-c-tests PRIVATE tav)
+target_compile_options(tav-cbor-c-tests PRIVATE -Wall -Wextra)
+set_target_properties(tav-cbor-c-tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+
 if(NOT TAV_LINK_STATIC)
-    set_target_properties(tav-c-consumer-tests PROPERTIES
+    set_target_properties(tav-c-consumer-tests tav-cbor-c-tests PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "$ORIGIN")
 endif()
 
 enable_testing()
 add_test(NAME c-consumer COMMAND tav-c-consumer-tests)
+add_test(NAME cbor-c COMMAND tav-cbor-c-tests)

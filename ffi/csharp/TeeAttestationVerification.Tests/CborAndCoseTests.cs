@@ -7,6 +7,19 @@ namespace TeeAttestationVerification.Tests;
 
 public sealed class CborAndCoseTests
 {
+    [Fact]
+    public void MapKeysCompareIndependentlyOfEntryOrder()
+    {
+        using CborValue map = CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 });
+        using CborValue key = CborValue.FromBytes(new byte[] { 0xa2, 3, 4, 1, 2 });
+        Assert.True(map.TryGetValue(key, out CborValue? result));
+        using CborValue found = Assert.IsType<CborValue>(result);
+        using CborValue direct = map.MapAt(key);
+        map.Dispose();
+        Assert.Equal(7, found.GetInt64());
+        Assert.Equal(7, direct.GetInt64());
+    }
+
     private static readonly byte[] ProtectedHeader = [0xa1, 0x01, 0x26];
     private static readonly byte[] Payload = Encoding.UTF8.GetBytes("verification-only COSE vector");
     private static readonly byte[] Spki =
@@ -34,7 +47,7 @@ public sealed class CborAndCoseTests
         Assert.Equal(1, integer.GetInt64());
         Assert.Equal(new byte[] { 0x01 }, integer.ToBytes());
         VerifyException typeError = Assert.Throws<VerifyException>(() => integer.GetTextString());
-        Assert.Equal(ErrorCode.CoseUnexpectedType, typeError.Code);
+        Assert.Equal(ErrorCode.CborTypeMismatch, typeError.Code);
 
         using CborValue simple = CborValue.FromBytes(new byte[] { 0xf6 });
         Assert.Equal(CborKind.Simple, simple.Kind);
@@ -126,8 +139,10 @@ public sealed class CborAndCoseTests
         using CoseSign1 sign1 = parent.AsCoseSign1();
 
         parent.Dispose();
+        CompactAndReuseManagedHeap();
         Assert.Throws<ObjectDisposedException>(() => parent.AsCoseSign1());
         Assert.Equal(Payload, sign1.GetPayload());
+        sign1.VerifyEmbedded(Spki, CoseAlgorithm.Es256);
 
         sign1.Dispose();
         Assert.Throws<ObjectDisposedException>(() => sign1.GetPayload());
@@ -165,6 +180,133 @@ public sealed class CborAndCoseTests
 
         embedded.Dispose();
         Assert.Throws<ObjectDisposedException>(() => embedded.GetSignature());
+    }
+
+    [Fact]
+    public void ParsedPayloadsOwnTheirBytesAfterUnpinningAndParentDisposal()
+    {
+        byte[] input = [0x82, 0x43, 1, 2, 3, 0x62, 0x68, 0x69];
+        using CborValue parent = CborValue.FromBytes(input);
+        Array.Fill(input, (byte)0xff);
+        using CborValue bytes = parent.ArrayAt(0);
+        using CborValue text = parent.ArrayAt(1);
+        parent.Dispose();
+        CompactAndReuseManagedHeap();
+        Assert.Equal(new byte[] { 1, 2, 3 }, bytes.GetByteString());
+        Assert.Equal("hi", text.GetTextString());
+        Assert.Equal(new byte[] { 0x43, 1, 2, 3 }, bytes.ToBytes());
+        Assert.Equal(new byte[] { 0x62, 0x68, 0x69 }, text.ToBytes());
+        byte[] copy = bytes.GetByteString();
+        copy[0] = 0xff;
+        Assert.Equal(new byte[] { 1, 2, 3 }, bytes.GetByteString());
+        Assert.Throws<ObjectDisposedException>(() => parent.Kind);
+    }
+
+    [Fact]
+    public void EmptyPayloadsRemainLiveOwnedValues()
+    {
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(ReadOnlyMemory<byte>.Empty)).Code);
+        using CborValue bytes = CborValue.FromBytes(new byte[] { 0x40 });
+        using CborValue text = CborValue.FromBytes(new byte[] { 0x60 });
+        CompactAndReuseManagedHeap();
+        Assert.Equal(CborKind.Bytes, bytes.Kind);
+        Assert.Equal(CborKind.Text, text.Kind);
+        Assert.Empty(bytes.GetByteString());
+        Assert.Empty(text.GetTextString());
+        Assert.Equal(new byte[] { 0x40 }, bytes.ToBytes());
+        Assert.Equal(new byte[] { 0x60 }, text.ToBytes());
+    }
+
+    [Fact]
+    public void MapHelpersHandleEmptyUnicodeAndNegativeKeys()
+    {
+        using CborValue map = CborValue.FromBytes(
+            new byte[] { 0xa3, 0x60, 0x01, 0x62, 0xcf, 0x80, 0x02, 0x20, 0x03 });
+        using CborValue emptyText = map.MapAt("");
+        using CborValue unicode = map.MapAt("π");
+        using CborValue negative = map.MapAt(-1L);
+        Assert.True(map.TryGetValue("π", out CborValue? found));
+        using CborValue foundValue = Assert.IsType<CborValue>(found);
+        KeyValuePair<CborValue, CborValue> entry = map.MapEntryAt(1);
+        using CborValue key = entry.Key;
+        using CborValue value = entry.Value;
+        map.Dispose();
+        CompactAndReuseManagedHeap();
+        Assert.Equal(1, emptyText.GetInt64());
+        Assert.Equal(2, unicode.GetInt64());
+        Assert.Equal(3, negative.GetInt64());
+        Assert.Equal(2, foundValue.GetInt64());
+        Assert.Equal("π", key.GetTextString());
+        Assert.Equal(2, value.GetInt64());
+    }
+
+    [Fact]
+    public void TryGetValueSuppressesOnlyMissingKeys()
+    {
+        using CborValue scalar = CborValue.FromBytes(new byte[] { 1 });
+        using CborValue key = CborValue.FromBytes(new byte[] { 2 });
+        Assert.Equal(ErrorCode.CborTypeMismatch,
+            Assert.Throws<VerifyException>(() => scalar.TryGetValue(1L, out _)).Code);
+        Assert.Equal(ErrorCode.CborTypeMismatch,
+            Assert.Throws<VerifyException>(() => scalar.TryGetValue("key", out _)).Code);
+        Assert.Equal(ErrorCode.CborTypeMismatch,
+            Assert.Throws<VerifyException>(() => scalar.TryGetValue(key, out _)).Code);
+        using CborValue map = CborValue.FromBytes(new byte[] { 0xa0 });
+        Assert.False(map.TryGetValue(key, out CborValue? missing));
+        Assert.Null(missing);
+        Assert.Equal(ErrorCode.CborKeyNotFound,
+            Assert.Throws<VerifyException>(() => map.MapAt(key)).Code);
+        Assert.Throws<ArgumentNullException>(() => map.TryGetValue((CborValue)null!, out _));
+        Assert.Throws<ArgumentNullException>(() => map.TryGetValue((string)null!, out _));
+        key.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => map.TryGetValue(key, out _));
+        map.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => map.TryGetValue(1L, out _));
+    }
+
+    [Fact]
+    public void GenericParseSerializationAndNavigationReportExactErrors()
+    {
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(new byte[] { 0x18 })).Code);
+        using CborValue nonCanonical = CborValue.FromBytes(new byte[] { 0x18, 1 });
+        Assert.Equal(new byte[] { 1 }, nonCanonical.ToBytes());
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(
+                () => CborValue.FromBytes(new byte[] { 0xa2, 1, 2, 1, 3 })).Code);
+        byte[] tooDeep = [.. Enumerable.Repeat((byte)0x81, 65), 0x01];
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(tooDeep)).Code);
+        using CborValue array = CborValue.FromBytes(new byte[] { 0x80 });
+        Assert.Equal(ErrorCode.CborOutOfBound,
+            Assert.Throws<VerifyException>(() => array.ArrayAt(0)).Code);
+        Assert.Equal(ErrorCode.CborTypeMismatch,
+            Assert.Throws<VerifyException>(() => array.TaggedPayload()).Code);
+        Assert.Throws<ArgumentOutOfRangeException>(() => array.ArrayAt(-1));
+        using CborValue map = CborValue.FromBytes(new byte[] { 0xa0 });
+        Assert.Equal(ErrorCode.CborOutOfBound,
+            Assert.Throws<VerifyException>(() => map.MapEntryAt(0)).Code);
+        Assert.Throws<ArgumentOutOfRangeException>(() => map.MapEntryAt(-1));
+        using CborValue tagged = CborValue.FromBytes(new byte[] { 0xc1, 0x41, 0xaa });
+        using CborValue payload = tagged.TaggedPayload();
+        tagged.Dispose();
+        CompactAndReuseManagedHeap();
+        Assert.Equal(new byte[] { 0xaa }, payload.GetByteString());
+    }
+
+    private static void CompactAndReuseManagedHeap()
+    {
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        byte[][] pressure = new byte[256][];
+        for (int i = 0; i < pressure.Length; ++i)
+        {
+            pressure[i] = new byte[4096];
+            Array.Fill(pressure[i], (byte)0xcc);
+        }
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.KeepAlive(pressure);
     }
 
     private static byte[] BuildSign1(bool embeddedPayload)
