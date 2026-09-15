@@ -8,6 +8,7 @@
 
 ### Changed
 
+- OpenSSL chain verification checks self-signed root signatures and reports the verification error, code, and certificate depth. Non-root trust anchors and current or caller-supplied verification times remain supported. Strict mode remains disabled because AMD VCEKs omit Authority Key Identifiers. (#154)
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)
 
 ### Fixed
