@@ -1,7 +1,7 @@
 # TeeAttestationVerification for .NET
 
-Cross-platform x64 .NET 8 bindings for verifying SNP and CACI attestations
-through the repository's native C ABI.
+Cross-platform x64 .NET 8 bindings for CBOR parsing and COSE, SNP, and CACI
+verification through the native C ABI.
 
 ## Install
 
@@ -13,16 +13,21 @@ dotnet add package TeeAttestationVerification --version 1.0.8
 
 Supported runtime identifiers:
 
-- `linux-x64` with glibc 2.35 or newer and OpenSSL 3;
-- `osx-x64` with OpenSSL 3;
+- `linux-x64` with glibc 2.35 or newer and OpenSSL 3.
+- `osx-x64` with OpenSSL 3.
 - `win-x64` on Windows 10 or Windows Server 2016 and newer.
 
 ARM platforms are not currently supported. OpenSSL must be installed separately
 on Linux and macOS; on macOS, it is available from Homebrew as `openssl@3`.
 
+Missing native assets or required OpenSSL runtime libraries can cause
+`DllNotFoundException`.
+
 ## Inspect an unverified SNP report
 
 ```csharp
+using TeeAttestationVerification;
+
 using SnpAttestationReport report =
     SnpAttestationReport.FromUnverifiedBytes(reportBytes);
 byte[] chipId = report.ChipId();
@@ -120,37 +125,30 @@ specified by the
 Load trusted policy digests and the minimum SVN from relying-party
 configuration.
 
-Native calls fail with `DllNotFoundException` when the package does not carry a
-native asset for the running platform, or when required OpenSSL 3 runtime
-libraries are missing.
-
 ## Ownership and errors
 
-All passed values are snapshotted before a synchronous native call, and all
-returned values are managed copies or managed wrappers. Native resources held by
-managed wrappers are reclaimed by garbage collection; `SnpAttestationReport`,
-`CborValue`, and `CoseSign1` also implement `IDisposable` for faster release.
-Native failures become `VerifyException` with a stable `ErrorCode`; managed input
-errors use standard .NET exceptions.
+Use `using` or `Dispose` to release `SnpAttestationReport`, `CborValue`, and
+`CoseSign1` handles when finished. Their safe handles also release native
+resources during finalization. Returned byte arrays are managed copies.
 
 `CborValue.FromBytes` snapshots and pins the input, then copies the parsed tree
 into native-owned storage before unpinning. Returned values and their projections
 do not depend on managed input buffers.
 
+Native failures throw `VerifyException`; its `Code` property identifies the
+error. Invalid managed arguments throw standard .NET exceptions.
+
 ## Build and test from source
 
-Run from `ffi/csharp`:
+Local builds require Linux x64, the .NET 8 SDK, Rust, OpenSSL development
+headers, and `pkg-config`. Run from `ffi/csharp`:
 
 ```bash
 python3 run_tests.py --configuration Release
 ```
 
-The runner packs a uniquely versioned Linux development NuGet into a temporary
-feed, restores the public xUnit consumer suite against that exact package, and
-tests the complete NuGet → C# → C ABI → Rust path.
-
-Source builds require Rust, the OpenSSL development headers, and `pkg-config`.
-The MSBuild project uses the target-selected default crypto backend.
+The runner builds a Linux development package and runs the consumer suite
+against that package.
 
 To create a local Linux development package:
 
