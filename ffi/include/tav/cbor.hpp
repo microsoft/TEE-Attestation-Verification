@@ -186,35 +186,35 @@ public:
     {
         TavCborHandle* out = nullptr;
         tav::check(tav_cbor_array_at(handle_, index, &out));
-        return adopt(out, "array_at");
+        return Value(out);
     }
 
     [[nodiscard]] Value map_at(const Value& key) const
     {
         TavCborHandle* out = nullptr;
         tav::check(tav_cbor_map_at(handle_, key.handle_, &out));
-        return adopt(out, "map_at");
+        return Value(out);
     }
 
     [[nodiscard]] Value tag_at(uint64_t tag) const
     {
         TavCborHandle* out = nullptr;
         tav::check(tav_cbor_tag_at(handle_, tag, &out));
-        return adopt(out, "tag_at");
+        return Value(out);
     }
 
     [[nodiscard]] Value map_key_at(size_t index) const
     {
         TavCborHandle* out = nullptr;
         tav::check(tav_cbor_map_key_at(handle_, index, &out));
-        return adopt(out, "map_key_at");
+        return Value(out);
     }
 
     [[nodiscard]] Value map_value_at(size_t index) const
     {
         TavCborHandle* out = nullptr;
         tav::check(tav_cbor_map_value_at(handle_, index, &out));
-        return adopt(out, "map_value_at");
+        return Value(out);
     }
 
     [[nodiscard]] std::vector<uint8_t> nondet_serialize(
@@ -288,21 +288,12 @@ private:
         std::vector<TavCborHandle*> handles_;
     };
 
-    static Value adopt(TavCborHandle* handle, const char* what)
-    {
-        if (handle == nullptr)
-        {
-            throw tav::Exception(tav::ErrorCode::CBOR_ENCODE_FAILED, what);
-        }
-        return Value(handle);
-    }
-
     template<class Builder>
-    static Value construct(Builder builder, const char* what)
+    static Value construct(Builder builder)
     {
         TavCborHandle* out = nullptr;
         tav::check(builder(&out));
-        return adopt(out, what);
+        return Value(out);
     }
 
     using Encoder =
@@ -314,7 +305,7 @@ private:
     {
         TavCborHandle* out = nullptr;
         tav::check(parser(raw.data(), raw.size(), max_depth, &out));
-        return Value::adopt(out, "parse");
+        return Value(out);
     }
 
     explicit Value(TavCborHandle* handle) : handle_(handle) {}
@@ -340,29 +331,27 @@ private:
 inline Value make_signed(int64_t value)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_signed(value, out); }, "make_signed");
+      [&](auto out) { return tav_cbor_make_signed(value, out); });
 }
 
 inline Value make_simple(uint8_t value)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_simple(value, out); }, "make_simple");
+      [&](auto out) { return tav_cbor_make_simple(value, out); });
 }
 
 /// Borrows data, which must outlive the returned value.
 inline Value make_bytes(std::span<const uint8_t> data)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_bytes(data.data(), data.size(), out); },
-      "make_bytes");
+      [&](auto out) { return tav_cbor_make_bytes(data.data(), data.size(), out); });
 }
 
 /// Borrows data, which must outlive the returned value and be valid UTF-8.
 inline Value make_string(std::string_view data)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_string(data.data(), data.size(), out); },
-      "make_string");
+      [&](auto out) { return tav_cbor_make_string(data.data(), data.size(), out); });
 }
 
 inline Value make_array(std::vector<Value>&& items)
@@ -374,8 +363,7 @@ inline Value make_array(std::vector<Value>&& items)
         batch.add(std::move(item));
     }
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_array(batch.data(), batch.size(), out); },
-      "make_array");
+      [&](auto out) { return tav_cbor_make_array(batch.data(), batch.size(), out); });
 }
 
 /// Keys may be any supported CBOR value and must be unique. Duplicate keys are
@@ -391,8 +379,7 @@ inline Value make_map(std::vector<MapItem>&& entries)
         batch.add(std::move(entry.second));
     }
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_map(batch.data(), pair_count, out); },
-      "make_map");
+      [&](auto out) { return tav_cbor_make_map(batch.data(), pair_count, out); });
 }
 
 inline Value make_tagged(uint64_t tag, Value&& payload)
@@ -401,8 +388,7 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
     batch.reserve(1);
     batch.add(std::move(payload));
     return Value::construct(
-      [&](auto out) { return tav_cbor_make_tagged(tag, batch.data(), out); },
-      "make_tagged");
+      [&](auto out) { return tav_cbor_make_tagged(tag, batch.data(), out); });
 }
 
 /// Borrows raw, which must outlive the returned value.
@@ -428,7 +414,7 @@ inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPT
 inline Value shallow_copy(const Value& value)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_shallow_copy(value.handle_, out); }, "shallow_copy");
+      [&](auto out) { return tav_cbor_shallow_copy(value.handle_, out); });
 }
 
 /// Copy a value, copying every payload, so the result borrows nothing.
@@ -438,7 +424,7 @@ inline Value shallow_copy(const Value& value)
 inline Value deep_copy(const Value& value)
 {
     return Value::construct(
-      [&](auto out) { return tav_cbor_deep_copy(value.handle_, out); }, "deep_copy");
+      [&](auto out) { return tav_cbor_deep_copy(value.handle_, out); });
 }
 
 /// Run f, prefixing msg onto any tav::Exception while preserving its code.
