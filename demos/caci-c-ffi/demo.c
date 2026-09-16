@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "tav/caci.h"
+#include "tav/cbor.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -404,14 +405,15 @@ static void print_borrowed_report_field(
     print_hex_lines(data, len, 4);
 }
 
-static void print_uvm_endorsement(const TavCborValue *uvm_endorsement) {
-    TavCborValue *sign1 = NULL;
-    TavCborValue *protected_value = NULL;
+static void print_uvm_endorsement(const TavCborHandle *uvm_endorsement) {
+    TavCborHandle *sign1 = NULL;
+    TavCborHandle *protected_value = NULL;
     const uint8_t *protected_bytes = NULL;
     size_t protected_len = 0;
-    TavCborValue *protected_header = NULL;
-    TavCborValue *content_type = NULL;
-    TavCborValue *feed = NULL;
+    TavCborHandle *protected_header = NULL;
+    TavCborHandle *content_type = NULL;
+    TavCborHandle *feed = NULL;
+    TavCborHandle *key = NULL;
     const char *text = NULL;
     size_t text_len = 0;
 
@@ -419,32 +421,37 @@ static void print_uvm_endorsement(const TavCborValue *uvm_endorsement) {
         tav_validate_cose_sign1(uvm_endorsement, &sign1),
         "validate returned UVM COSE_Sign1");
     check_cose_error(
-        tav_cbor_value_array_at(sign1, TAV_COSE_SIGN1_PROTECTED, &protected_value),
+        tav_cbor_array_at(sign1, TAV_COSE_SIGN1_PROTECTED, &protected_value),
         "read UVM protected header bytes");
     check_cose_error(
-        tav_cbor_value_bytes(protected_value, &protected_bytes, &protected_len),
+        tav_cbor_as_bytes(protected_value, &protected_bytes, &protected_len),
         "borrow UVM protected header bytes");
     check_cose_error(
-        tav_cbor_value_from_bytes(protected_bytes, protected_len, &protected_header),
+        tav_cbor_nondet_parse(protected_bytes, protected_len, 64, &protected_header),
         "parse UVM protected header");
 
+    check_cose_error(tav_cbor_make_signed(TAV_COSE_HEADER_CONTENT_TYPE, &key), "make content type key");
     check_cose_error(
-        tav_cbor_value_map_at_int(protected_header, TAV_COSE_HEADER_CONTENT_TYPE, &content_type),
+        tav_cbor_map_at(protected_header, key, &content_type),
         "read UVM content type");
-    check_cose_error(tav_cbor_value_text(content_type, &text, &text_len), "read UVM content type text");
+    tav_cbor_free(key);
+    key = NULL;
+    check_cose_error(tav_cbor_as_string(content_type, &text, &text_len), "read UVM content type text");
     print_text_value("content_type", text, text_len);
 
+    check_cose_error(tav_cbor_make_string("feed", strlen("feed"), &key), "make feed key");
     check_cose_error(
-        tav_cbor_value_map_at_text(protected_header, "feed", strlen("feed"), &feed),
+        tav_cbor_map_at(protected_header, key, &feed),
         "read UVM feed");
-    check_cose_error(tav_cbor_value_text(feed, &text, &text_len), "read UVM feed text");
+    check_cose_error(tav_cbor_as_string(feed, &text, &text_len), "read UVM feed text");
     print_text_value("feed", text, text_len);
 
-    tav_cbor_value_free(feed);
-    tav_cbor_value_free(content_type);
-    tav_cbor_value_free(protected_header);
-    tav_cbor_value_free(protected_value);
-    tav_cbor_value_free(sign1);
+    tav_cbor_free(key);
+    tav_cbor_free(feed);
+    tav_cbor_free(content_type);
+    tav_cbor_free(protected_header);
+    tav_cbor_free(protected_value);
+    tav_cbor_free(sign1);
 }
 
 static uint64_t parse_u64(const char *text, const char *name) {
@@ -510,7 +517,7 @@ int main(int argc, char **argv) {
 
     int exit_code = 0;
     TavSnpAttestationReport *attestation = NULL;
-    TavCborValue *uvm_endorsement = NULL;
+    TavCborHandle *uvm_endorsement = NULL;
     TavByteBuffer *report_data = NULL;
 
     exit_code = consume_snp_error(
@@ -579,7 +586,7 @@ int main(int argc, char **argv) {
 
 cleanup:
     tav_byte_buffer_free(report_data);
-    tav_cbor_value_free(uvm_endorsement);
+    tav_cbor_free(uvm_endorsement);
     tav_snp_attestation_report_free(attestation);
     free_string(&ark);
     free_string(&ask);

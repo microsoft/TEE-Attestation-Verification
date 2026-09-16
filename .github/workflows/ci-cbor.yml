@@ -33,7 +33,7 @@ jobs:
       - name: Build FFI native
         run: cargo build --manifest-path ffi/Cargo.toml --no-default-features --features crypto_openssl
 
-      # Includes the tests that pin include/tav/internal/cbor_abi.h against
+      # Includes the tests that pin include/tav/cbor.h against
       # the Rust constants and exported symbols.
       - name: Test FFI native
         run: cargo test --manifest-path ffi/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture

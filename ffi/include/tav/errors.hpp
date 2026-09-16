@@ -11,6 +11,7 @@
 
 #include <tav/errors.h>
 
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -42,6 +43,12 @@ enum class ErrorCode : int
     CACI_SIGNATURE = TAV_ERROR_CACI_SIGNATURE,
     CACI_MEASUREMENT = TAV_ERROR_CACI_MEASUREMENT,
     CACI_POLICY = TAV_ERROR_CACI_POLICY,
+
+    CBOR_DECODE_FAILED = TAV_ERROR_CBOR_DECODE_FAILED,
+    CBOR_KEY_NOT_FOUND = TAV_ERROR_CBOR_KEY_NOT_FOUND,
+    CBOR_OUT_OF_BOUND = TAV_ERROR_CBOR_OUT_OF_BOUND,
+    CBOR_TYPE_MISMATCH = TAV_ERROR_CBOR_TYPE_MISMATCH,
+    CBOR_ENCODE_FAILED = TAV_ERROR_CBOR_ENCODE_FAILED,
 };
 
 /// Thrown for every TavError the C ABI reports.
@@ -70,9 +77,9 @@ inline void check(TavError* error)
     {
         return;
     }
+    const std::unique_ptr<TavError, decltype(&tav_error_free)> owned(error, tav_error_free);
     const ErrorCode code = static_cast<ErrorCode>(tav_error_code(error));
     const std::string message = tav_error_message(error);
-    tav_error_free(error);
     throw Exception(code, message);
 }
 }

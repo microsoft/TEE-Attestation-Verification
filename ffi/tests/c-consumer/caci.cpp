@@ -79,10 +79,10 @@ CaciInputs load_caci_inputs() {
 // Owns the two verified handles that tav_verify_caci_attestation consumes.
 struct VerifiedArtifacts {
     TavSnpAttestationReport *attestation = nullptr;
-    TavCborValue *uvm_endorsement = nullptr;
+    TavCborHandle *uvm_endorsement = nullptr;
 
     ~VerifiedArtifacts() {
-        tav_cbor_value_free(uvm_endorsement);
+        tav_cbor_free(uvm_endorsement);
         tav_snp_attestation_report_free(attestation);
     }
 };
@@ -202,7 +202,7 @@ TEST_CASE("caci: duplicate minimum TCB CPUIDs are rejected") {
 
 TEST_CASE("caci: uvm-endorsement handle out-parameter is write-only on failure") {
     // A non-null sentinel must be overwritten with NULL before any fallible work.
-    TavCborValue *uvm = reinterpret_cast<TavCborValue *>(0x1);
+    TavCborHandle *uvm = reinterpret_cast<TavCborHandle *>(0x1);
     TavError *error = tav_verify_caci_uvm_endorsement(nullptr, 0, nullptr, 0, &uvm);
 
     REQUIRE(error != nullptr);

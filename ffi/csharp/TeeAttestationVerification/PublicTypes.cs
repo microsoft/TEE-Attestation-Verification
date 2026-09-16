@@ -46,25 +46,39 @@ public enum ErrorCode
     CaciMeasurement = 305,
     /// <summary>The CACI relying-party policy rejected the attestation.</summary>
     CaciPolicy = 306,
+
+    /// <summary>Generic CBOR parsing failed.</summary>
+    CborDecodeFailed = 401,
+    /// <summary>A generic CBOR map key or tag was not found.</summary>
+    CborKeyNotFound = 402,
+    /// <summary>A generic CBOR array or map index is out of bounds.</summary>
+    CborOutOfBound = 403,
+    /// <summary>A generic CBOR read received a null argument or an unexpected kind.</summary>
+    CborTypeMismatch = 404,
+    /// <summary>Generic CBOR construction, copying, or serialization failed.</summary>
+    CborEncodeFailed = 405,
 }
 
-/// <summary>The CBOR major type represented by a <see cref="CborValue"/>.</summary>
+/// <summary>The value kind represented by a <see cref="CborValue"/>.</summary>
+/// <remarks>Mirrors TavCborHandleKind in ffi/include/tav/cbor.h, not CBOR wire major types.</remarks>
 public enum CborKind
 {
+    /// <summary>An invalid or empty native handle.</summary>
+    Invalid = -1,
     /// <summary>A signed integer.</summary>
-    Int = 1,
+    Int = 0,
     /// <summary>A CBOR simple value.</summary>
-    Simple = 2,
+    Simple = 6,
     /// <summary>A byte string.</summary>
-    Bytes = 3,
+    Bytes = 1,
     /// <summary>A UTF-8 text string.</summary>
-    Text = 4,
+    Text = 2,
     /// <summary>An array.</summary>
-    Array = 5,
+    Array = 3,
     /// <summary>A map.</summary>
-    Map = 6,
+    Map = 4,
     /// <summary>A tagged value.</summary>
-    Tagged = 7,
+    Tagged = 5,
 }
 
 /// <summary>A COSE signature algorithm supported by TAV verification.</summary>

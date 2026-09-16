@@ -564,7 +564,7 @@ impl<'a> CborValue<'a> {
     /// Returns an error if this value is not a map.
     pub fn map_has_key(&self, key: &CborValue<'_>) -> Result<bool, String> {
         match self {
-            CborValue::Map(entries) => Ok(entries.iter().any(|(k, _)| k == key)),
+            CborValue::Map(entries) => Ok(entries.iter().any(|(k, _)| k.key_equivalent(key))),
             other => Err(format!("Expected Map, got {:?}", other.type_name())),
         }
     }
@@ -576,10 +576,39 @@ impl<'a> CborValue<'a> {
         match self {
             CborValue::Map(entries) => entries
                 .iter()
-                .find(|(k, _)| k == key)
+                .find(|(k, _)| k.key_equivalent(key))
                 .map(|(_, v)| v)
                 .ok_or_else(|| format!("Key {key:?} not found in map")),
             other => Err(format!("Expected Map, got {:?}", other.type_name())),
+        }
+    }
+
+    /// RFC 8949 key equivalence for the supported CBOR types.
+    ///
+    /// Array order matters; map entry order does not. Parsed maps have unique
+    /// keys. This comparison does not validate manually constructed values.
+    pub fn key_equivalent(&self, other: &CborValue<'_>) -> bool {
+        match (self, other) {
+            (Self::Array(left), CborValue::Array(right)) => {
+                left.len() == right.len()
+                    && left.iter().zip(right).all(|(a, b)| a.key_equivalent(b))
+            }
+            (Self::Map(left), CborValue::Map(right)) => {
+                left.len() == right.len()
+                    && left.iter().all(|(key, value)| {
+                        right.iter().any(|(other_key, other_value)| {
+                            key.key_equivalent(other_key) && value.key_equivalent(other_value)
+                        })
+                    })
+            }
+            (
+                Self::Tagged { tag, payload },
+                CborValue::Tagged {
+                    tag: other_tag,
+                    payload: other_payload,
+                },
+            ) => tag == other_tag && payload.key_equivalent(other_payload),
+            _ => self == other,
         }
     }
 

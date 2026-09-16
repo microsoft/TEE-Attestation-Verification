@@ -7,9 +7,11 @@ shipped C ABI (symbols, signatures, return codes, and ownership contract) that
 the in-crate Rust unit tests cannot observe, since those never cross the real
 ABI boundary.
 
-The CBOR/COSE coverage exercises independently owned direct and nested child
-views, validated COSE_Sign1 views, parent-first freeing, and failure
-out-parameters.
+The CBOR and COSE tests use the shared `TavCborHandle` API. Coverage includes
+borrowed parsing, deep-copied payloads, direct and nested child views, validated
+COSE_Sign1 views, parent-first freeing, map key equality, and depth limits.
+Failed reads preserve scalar and borrowed outputs; failed navigation clears
+owned output slots.
 
 The suite uses [doctest](https://github.com/doctest/doctest), vendored as a
 single header under `vendor/doctest.h` (MIT licensed).

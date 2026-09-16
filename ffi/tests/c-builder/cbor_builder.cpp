@@ -16,6 +16,8 @@
 #include <vector>
 
 using namespace tav::cbor;
+using tav::ErrorCode;
+using tav::Exception;
 
 // Non-copyable ownership is what keeps one value from being consumed twice,
 // and only the factories can manufacture a Value from a handle.
@@ -24,6 +26,14 @@ static_assert(!std::is_copy_assignable_v<Value>);
 static_assert(std::is_move_constructible_v<Value>);
 static_assert(std::is_move_assignable_v<Value>);
 static_assert(!std::is_constructible_v<Value, TavCborHandle*>);
+static_assert(static_cast<int>(Kind::INVALID) == -1);
+static_assert(static_cast<int>(Kind::SIGNED) == 0);
+static_assert(static_cast<int>(Kind::BYTES) == 1);
+static_assert(static_cast<int>(Kind::STRING) == 2);
+static_assert(static_cast<int>(Kind::ARRAY) == 3);
+static_assert(static_cast<int>(Kind::MAP) == 4);
+static_assert(static_cast<int>(Kind::TAGGED) == 5);
+static_assert(static_cast<int>(Kind::SIMPLE) == 6);
 
 namespace {
 
@@ -32,7 +42,47 @@ std::vector<uint8_t> vec(std::span<const uint8_t> data)
     return {data.begin(), data.end()};
 }
 
+template<class Action>
+void expect_error(Action action, ErrorCode code)
+{
+    try
+    {
+        action();
+        FAIL("expected a CBOR exception");
+    }
+    catch (const Exception& error)
+    {
+        CHECK(error.code() == code);
+    }
+}
+
 } // namespace
+
+TEST_CASE("cbor handle: owned errors preserve native error codes")
+{
+    expect_error([] { (void)make_simple(24); }, ErrorCode::CBOR_ENCODE_FAILED);
+    expect_error(
+      [] { (void)make_string(std::string_view("\xff", 1)); }, ErrorCode::CBOR_ENCODE_FAILED);
+    const Value empty;
+    expect_error([&] { (void)shallow_copy(empty); }, ErrorCode::CBOR_ENCODE_FAILED);
+    expect_error([&] { (void)deep_copy(empty); }, ErrorCode::CBOR_ENCODE_FAILED);
+    expect_error([&] { (void)empty.det_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
+    expect_error([&] { (void)empty.nondet_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
+    expect_error([&] { (void)empty.as_signed(); }, ErrorCode::CBOR_TYPE_MISMATCH);
+    const Value map = make_map({});
+    const Value key = make_signed(1);
+    expect_error([&] { (void)map.map_at(key); }, ErrorCode::CBOR_KEY_NOT_FOUND);
+    const Value tagged = make_tagged(18, make_signed(1));
+    expect_error([&] { (void)tagged.tag_at(19); }, ErrorCode::CBOR_KEY_NOT_FOUND);
+
+    std::vector<Value> batch;
+    batch.push_back(make_signed(1));
+    batch.emplace_back();
+    expect_error(
+      [&] { (void)make_array(std::move(batch)); }, ErrorCode::CBOR_ENCODE_FAILED);
+    CHECK(batch[0].empty());
+    CHECK(batch[1].empty());
+}
 
 TEST_CASE("cbor handle: signed round trips")
 {
@@ -187,34 +237,34 @@ TEST_CASE("cbor handle: errors carry the ABI status")
     const Value parsed = nondet_parse(document);
     const Value& root = parsed;
 
-    CHECK_THROWS_AS((void)root.array_at(5), CborError);
+    CHECK_THROWS_AS((void)root.array_at(5), Exception);
     try
     {
         (void)root.array_at(5);
     }
-    catch (const CborError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::OUT_OF_BOUND);
+        CHECK(e.code() == ErrorCode::CBOR_OUT_OF_BOUND);
     }
 
     try
     {
         (void)root.as_signed(); // an array is not a signed value
-        FAIL("expected a CborError");
+        FAIL("expected tav::Exception");
     }
-    catch (const CborError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::TYPE_MISMATCH);
+        CHECK(e.code() == ErrorCode::CBOR_TYPE_MISMATCH);
     }
 
     try
     {
         (void)root.tag_at(18); // not tagged at all
-        FAIL("expected a CborError");
+        FAIL("expected tav::Exception");
     }
-    catch (const CborError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::TYPE_MISMATCH);
+        CHECK(e.code() == ErrorCode::CBOR_TYPE_MISMATCH);
     }
 
     // A non-canonical encoding: 1 in a two-byte head. Only det_parse rejects
@@ -229,11 +279,11 @@ TEST_CASE("cbor handle: errors carry the ABI status")
     try
     {
         (void)det_parse(non_canonical);
-        FAIL("expected a CborError");
+        FAIL("expected tav::Exception");
     }
-    catch (const CborError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::DECODE_FAILED);
+        CHECK(e.code() == ErrorCode::CBOR_DECODE_FAILED);
     }
 }
 
@@ -256,7 +306,7 @@ TEST_CASE("cbor handle: an empty value cannot be placed in a container")
 
     // The ABI rejects the complete batch, then the wrapper releases the
     // handles it had taken from the source values.
-    CHECK_THROWS_AS(make_array(std::move(items)), CborError);
+    CHECK_THROWS_AS(make_array(std::move(items)), Exception);
 }
 
 TEST_CASE("cbor handle: navigation returns an independently owned value")
@@ -312,14 +362,14 @@ TEST_CASE("cbor handle: a nested document survives build, serialize, parse and w
     CHECK(vec(parsed_signature.as_bytes()) == signature);
 }
 
-TEST_CASE("cbor handle: decode and encode failures are distinguishable")
+TEST_CASE("cbor handle: decode and encode failures have distinct shared codes")
 {
     const std::vector<uint8_t> non_canonical = {0x18, 0x01};
-    CHECK_THROWS_AS((void)det_parse(non_canonical), DecodeError);
+    expect_error([&] { (void)det_parse(non_canonical); }, ErrorCode::CBOR_DECODE_FAILED);
 
     const std::vector<uint8_t> document = {0x81, 0x01}; // [1]
     const Value parsed = nondet_parse(document);
-    CHECK_THROWS_AS((void)parsed.as_signed(), DecodeError);
+    expect_error([&] { (void)parsed.as_signed(); }, ErrorCode::CBOR_TYPE_MISMATCH);
 
     // Nesting deeper than the serializer is allowed to walk.
     std::vector<Value> inner;
@@ -327,26 +377,83 @@ TEST_CASE("cbor handle: decode and encode failures are distinguishable")
     std::vector<Value> outer;
     outer.push_back(make_array(std::move(inner)));
     const Value nested = make_array(std::move(outer));
-    CHECK_THROWS_AS((void)nested.det_serialize(1), EncodeError);
-
-    // Both remain catchable as the common base.
-    CHECK_THROWS_AS((void)det_parse(non_canonical), CborError);
+    expect_error([&] { (void)nested.det_serialize(1); }, ErrorCode::CBOR_ENCODE_FAILED);
 }
 
 TEST_CASE("cbor handle: invalid UTF-8 fails string construction")
 {
     const char invalid[] = {static_cast<char>(0xff)};
     CHECK_THROWS_AS(
-      (void)make_string(std::string_view(invalid, 1)), EncodeError);
+      (void)make_string(std::string_view(invalid, 1)), Exception);
+}
+
+TEST_CASE("cbor handle: shared utilities preserve CBOR exception codes and messages")
+{
+    const auto failure = [](auto&& operation, ErrorCode code, const char* message) {
+        try
+        {
+            operation();
+            FAIL("expected tav::Exception");
+        }
+        catch (const Exception& error)
+        {
+            CHECK(error.code() == code);
+            CHECK(std::string(error.what()) == message);
+        }
+    };
+    const Value array = make_array({});
+    failure([&] { (void)array.array_at(0); }, ErrorCode::CBOR_OUT_OF_BOUND,
+      "CBOR index out of bounds");
+    failure([&] { (void)array.as_signed(); }, ErrorCode::CBOR_TYPE_MISMATCH,
+      "CBOR type mismatch or null argument");
+    const Value map = make_map({});
+    const Value key = make_signed(1);
+    failure([&] { (void)map.map_at(key); }, ErrorCode::CBOR_KEY_NOT_FOUND,
+      "CBOR key or tag not found");
+    const Value empty;
+    failure([&] { (void)empty.as_signed(); }, ErrorCode::CBOR_TYPE_MISMATCH,
+      "CBOR type mismatch or null argument");
+
+    const std::vector<uint8_t> invalid = {0x18};
+    TavCborHandle* out = nullptr;
+    TavError* raw_error = tav_cbor_det_parse(invalid.data(), invalid.size(), MAX_DEPTH, &out);
+    REQUIRE(raw_error != nullptr);
+    const std::string parse_message = tav_error_message(raw_error);
+    tav_error_free(raw_error);
+    REQUIRE(out == nullptr);
+    failure(
+      [&] { (void)det_parse(invalid); }, ErrorCode::CBOR_DECODE_FAILED, parse_message.c_str());
+    failure(
+      [&] { (void)nondet_parse(invalid); }, ErrorCode::CBOR_DECODE_FAILED, parse_message.c_str());
+
+    raw_error = tav_cbor_make_simple(24, &out);
+    REQUIRE(raw_error != nullptr);
+    CHECK(tav_error_code(raw_error) == TAV_ERROR_CBOR_ENCODE_FAILED);
+    const std::string build_message = tav_error_message(raw_error);
+    tav_error_free(raw_error);
+    REQUIRE(out == nullptr);
+    failure([] { (void)make_simple(24); }, ErrorCode::CBOR_ENCODE_FAILED, build_message.c_str());
+
+    TavByteBuffer* bytes = nullptr;
+    raw_error = tav_cbor_det_serialize(nullptr, MAX_DEPTH, &bytes);
+    REQUIRE(raw_error != nullptr);
+    const std::string encode_message = tav_error_message(raw_error);
+    tav_error_free(raw_error);
+    REQUIRE(bytes == nullptr);
+    failure([&] { (void)empty.det_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED,
+      encode_message.c_str());
+    failure([&] { (void)empty.nondet_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED,
+      encode_message.c_str());
 }
 
 TEST_CASE("cbor handle: simple values convert to and from booleans")
 {
     CHECK(simple_to_boolean(SimpleValue::True));
     CHECK_FALSE(simple_to_boolean(SimpleValue::False));
-    CHECK_THROWS_AS((void)simple_to_boolean(SimpleValue::Null), DecodeError);
-    CHECK_THROWS_AS(
-      (void)simple_to_boolean(SimpleValue::Undefined), DecodeError);
+    expect_error([] { (void)simple_to_boolean(SimpleValue::Null); },
+      ErrorCode::CBOR_TYPE_MISMATCH);
+    expect_error([] { (void)simple_to_boolean(SimpleValue::Undefined); },
+      ErrorCode::CBOR_TYPE_MISMATCH);
     CHECK(boolean_to_simple(true) == SimpleValue::True);
     CHECK(boolean_to_simple(false) == SimpleValue::False);
 
@@ -360,7 +467,7 @@ TEST_CASE("cbor handle: reserved simple values cannot be built")
 {
     for (uint8_t value = 24; value <= 31; ++value)
     {
-        CHECK_THROWS_AS((void)make_simple(value), EncodeError);
+        expect_error([&] { (void)make_simple(value); }, ErrorCode::CBOR_ENCODE_FAILED);
     }
 
     // The neighbours on both sides still build and serialize.
@@ -370,7 +477,7 @@ TEST_CASE("cbor handle: reserved simple values cannot be built")
     CHECK(above.det_serialize() == std::vector<uint8_t>{0xf8, 0x20});
 }
 
-TEST_CASE("cbor handle: rethrow_with_msg prefixes decode errors only")
+TEST_CASE("cbor handle: rethrow_with_msg preserves shared exceptions")
 {
     const std::vector<uint8_t> document = {0x81, 0x01}; // [1]
     const Value parsed = nondet_parse(document);
@@ -384,25 +491,44 @@ TEST_CASE("cbor handle: rethrow_with_msg prefixes decode errors only")
     {
         (void)rethrow_with_msg(
           [&] { return parsed.array_at(9); }, "reading item");
-        FAIL("expected a DecodeError");
+        FAIL("expected tav::Exception");
     }
-    catch (const DecodeError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::OUT_OF_BOUND);
-        CHECK(std::string(e.what()).starts_with("reading item: "));
+        CHECK(e.code() == ErrorCode::CBOR_OUT_OF_BOUND);
+        CHECK(std::string(e.what()) == "reading item: CBOR index out of bounds");
     }
 
     // Without a message the original error passes through unchanged.
     try
     {
         (void)rethrow_with_msg([&] { return parsed.array_at(9); });
-        FAIL("expected a DecodeError");
+        FAIL("expected tav::Exception");
     }
-    catch (const DecodeError& e)
+    catch (const Exception& e)
     {
-        CHECK(e.error_code() == Error::OUT_OF_BOUND);
-        CHECK(std::string(e.what()) == "array_at");
+        CHECK(e.code() == ErrorCode::CBOR_OUT_OF_BOUND);
+        CHECK(std::string(e.what()) == "CBOR index out of bounds");
     }
+
+    for (const auto code : {ErrorCode::CBOR_DECODE_FAILED, ErrorCode::CBOR_ENCODE_FAILED,
+           ErrorCode::INVALID_ARGUMENT, ErrorCode::SNP_SIGNATURE_VERIFICATION_ERROR})
+    {
+        try
+        {
+            rethrow_with_msg([&] { throw Exception(code, "native message"); }, "context");
+            FAIL("expected tav::Exception");
+        }
+        catch (const Exception& error)
+        {
+            CHECK(error.code() == code);
+            CHECK(std::string(error.what()) == "context: native message");
+        }
+    }
+    struct Unrelated {};
+    CHECK_THROWS_AS(rethrow_with_msg([] { throw Unrelated{}; }, "context"), Unrelated);
+    int result = 42;
+    CHECK(&rethrow_with_msg([&]() -> int& { return result; }) == &result);
 }
 
 TEST_CASE("cbor handle: map lookup by key round trips")
@@ -498,8 +624,8 @@ TEST_CASE("cbor handle: copying reproduces every kind")
 TEST_CASE("cbor handle: an empty value cannot be copied")
 {
     const Value empty;
-    CHECK_THROWS_AS((void)shallow_copy(empty), EncodeError);
-    CHECK_THROWS_AS((void)deep_copy(empty), EncodeError);
+    CHECK_THROWS_AS((void)shallow_copy(empty), Exception);
+    CHECK_THROWS_AS((void)deep_copy(empty), Exception);
 }
 
 TEST_CASE("cbor handle: rebuilding a map with one entry replaced")
@@ -600,7 +726,7 @@ TEST_CASE("cbor handle: serialization stops one level past the depth ceiling")
     CHECK_NOTHROW((void)deep_copy(at_ceiling));
 
     const Value past_ceiling = nest(MAX_DEPTH + 1);
-    CHECK_THROWS_AS((void)past_ceiling.det_serialize(), EncodeError);
+    CHECK_THROWS_AS((void)past_ceiling.det_serialize(), Exception);
 
     // Copying carries no depth limit of its own, so it still succeeds.
     CHECK_NOTHROW((void)deep_copy(past_ceiling));
@@ -629,29 +755,29 @@ TEST_CASE("cbor handle: every key a map holds can be looked up")
     }
 }
 
-TEST_CASE("cbor handle: a container cannot be a map key")
+TEST_CASE("cbor handle: compound map keys can be built and looked up")
 {
     std::vector<MapItem> entries;
     entries.emplace_back(make_array({}), make_signed(7));
-    CHECK_THROWS_AS(make_map(std::move(entries)), EncodeError);
+    const Value map = make_map(std::move(entries));
+    CHECK(map.map_at(make_array({})).as_signed() == 7);
 
     std::vector<MapItem> tagged;
     tagged.emplace_back(make_tagged(18, make_signed(1)), make_signed(7));
-    CHECK_THROWS_AS(make_map(std::move(tagged)), EncodeError);
+    const Value tagged_map = make_map(std::move(tagged));
+    CHECK(tagged_map.map_at(make_tagged(18, make_signed(1))).as_signed() == 7);
 
-    // Parsing applies the same rule, so no map reachable through this API
-    // holds a key map_at would refuse.
-    CHECK_THROWS_AS(
-      (void)nondet_parse(std::vector<uint8_t>{0xa1, 0x81, 0x01, 0x02}),
-      DecodeError); // {[1]: 2}
-    CHECK_THROWS_AS(
-      (void)det_parse(std::vector<uint8_t>{0xa1, 0x81, 0x01, 0x02}),
-      DecodeError);
+    const std::vector<uint8_t> encoded{0xa1, 0x81, 0x01, 0x02};
+    const Value parsed = nondet_parse(encoded);
+    const Value key = parsed.map_key_at(0);
+    CHECK(parsed.map_at(key).as_signed() == 2);
+    CHECK(det_parse(encoded).map_at(key).as_signed() == 2);
 
-    // Nested below the root, so the whole tree is checked.
-    CHECK_THROWS_AS(
-      (void)nondet_parse(std::vector<uint8_t>{0x81, 0xa1, 0x81, 0x01, 0x02}),
-      DecodeError); // [{[1]: 2}]
+    const std::vector<uint8_t> map_key{0xa1, 0xa2, 1, 2, 3, 4, 7};
+    const std::vector<uint8_t> reordered{0xa2, 3, 4, 1, 2};
+    const Value root = nondet_parse(map_key);
+    const Value reordered_key = nondet_parse(reordered);
+    CHECK(root.map_at(reordered_key).as_signed() == 7);
 }
 
 TEST_CASE("cbor handle: duplicate map keys cannot be serialized")
@@ -666,8 +792,8 @@ TEST_CASE("cbor handle: duplicate map keys cannot be serialized")
     CHECK(integers[1].first.empty());
     CHECK(integers[1].second.empty());
     CHECK(map.size() == 2);
-    CHECK_THROWS_AS((void)map.nondet_serialize(), EncodeError);
-    CHECK_THROWS_AS((void)map.det_serialize(), EncodeError);
+    CHECK_THROWS_AS((void)map.nondet_serialize(), Exception);
+    CHECK_THROWS_AS((void)map.det_serialize(), Exception);
     CHECK(map.size() == 2);
 }
 
@@ -700,7 +826,7 @@ TEST_CASE("cbor handle: as_tag reads the tag a tagged value carries")
 
     // Anything else is a mismatch rather than a silent zero.
     const Value untagged = make_signed(1);
-    CHECK_THROWS_AS((void)untagged.as_tag(), DecodeError);
+    CHECK_THROWS_AS((void)untagged.as_tag(), Exception);
 }
 
 TEST_CASE("cbor handle: moving transfers the handle and releases the target's own")

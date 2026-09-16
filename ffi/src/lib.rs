@@ -10,7 +10,7 @@
 //!
 //! See `README.md` for consumer-facing docs.
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 use std::ffi::CString;
 
 use attestation::snp::verify::VerificationError;
@@ -63,6 +63,12 @@ pub enum TavErrorCode {
     CaciSignature = 304,
     CaciMeasurement = 305,
     CaciPolicy = 306,
+
+    CborDecodeFailed = 401,
+    CborKeyNotFound = 402,
+    CborOutOfBound = 403,
+    CborTypeMismatch = 404,
+    CborEncodeFailed = 405,
 }
 
 impl From<&VerificationError> for TavErrorCode {
@@ -80,14 +86,14 @@ impl From<&VerificationError> for TavErrorCode {
 }
 
 /// Shared error handle returned by public C ABI functions.
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 #[derive(Debug)]
 pub struct TavError {
     pub(crate) code: TavErrorCode,
     pub(crate) message: CString,
 }
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 impl TavError {
     pub fn new(code: TavErrorCode, message: impl Into<String>) -> Self {
         Self {
@@ -114,19 +120,19 @@ impl TavError {
     }
 }
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 fn c_string(message: String) -> CString {
     CString::new(message.replace('\0', "\\0")).expect("NUL bytes were replaced")
 }
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 impl std::fmt::Display for TavError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message())
     }
 }
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 impl std::error::Error for TavError {}
 
 // The native C ABI (`into_result`, below) relies on `std::panic::catch_unwind`
@@ -157,7 +163,7 @@ compile_error!(
 /// is always `abort` regardless of profile settings, so `catch_unwind` cannot
 /// catch anything there; a panicking wasm export instead traps, which the JS
 /// caller observes as a thrown `RuntimeError`.
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 pub fn into_result(f: impl FnOnce() -> Result<(), TavError>) -> *mut TavError {
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|payload| {
@@ -169,7 +175,7 @@ pub fn into_result(f: impl FnOnce() -> Result<(), TavError>) -> *mut TavError {
     }
 }
 
-#[cfg(all(not(target_family = "wasm"), sync_crypto))]
+#[cfg(not(target_family = "wasm"))]
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     let message = payload
         .downcast_ref::<&str>()
@@ -253,6 +259,26 @@ mod tests {
                 TavErrorCode::CaciMeasurement as i32,
             ),
             ("TAV_ERROR_CACI_POLICY", TavErrorCode::CaciPolicy as i32),
+            (
+                "TAV_ERROR_CBOR_DECODE_FAILED",
+                TavErrorCode::CborDecodeFailed as i32,
+            ),
+            (
+                "TAV_ERROR_CBOR_KEY_NOT_FOUND",
+                TavErrorCode::CborKeyNotFound as i32,
+            ),
+            (
+                "TAV_ERROR_CBOR_OUT_OF_BOUND",
+                TavErrorCode::CborOutOfBound as i32,
+            ),
+            (
+                "TAV_ERROR_CBOR_TYPE_MISMATCH",
+                TavErrorCode::CborTypeMismatch as i32,
+            ),
+            (
+                "TAV_ERROR_CBOR_ENCODE_FAILED",
+                TavErrorCode::CborEncodeFailed as i32,
+            ),
         ];
 
         for (name, value) in error_code_map {
@@ -272,6 +298,8 @@ mod tests {
             .collect();
         let mapped_names: std::collections::BTreeSet<&str> =
             error_code_map.iter().map(|(name, _)| *name).collect();
+        assert_eq!(header_names.len(), c_header_error_codes(header).len());
+        assert_eq!(mapped_names.len(), error_code_map.len());
         assert_eq!(
             header_names, mapped_names,
             "include/tav/errors.h TAV_ERROR_ codes must exactly match the checked set"
