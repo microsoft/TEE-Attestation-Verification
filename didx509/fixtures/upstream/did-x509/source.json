@@ -1,0 +1,18 @@
+{
+  "repository": "microsoft/did-x509",
+  "revision": "471c7ca05824f6b25b010a0c4da6cab85ad55dcf",
+  "files": {
+    "test-vectors.json": {
+      "path": "test-vectors.json",
+      "sha256": "23f17f58c332b80d335d43fef7267d9c76edcbc877d1b362a13db2584f5e3648"
+    },
+    "specification.md": {
+      "path": "specification.md",
+      "sha256": "f9e6875e17c29808f591a7e977832081aad506d4f160388152fa53139843d915"
+    },
+    "LICENSE": {
+      "path": "LICENSE",
+      "sha256": "fd532481d828e13a0b13ccb598e02338a3617740675a862ee6bdc1541b68e93d"
+    }
+  }
+}

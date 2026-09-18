@@ -1,0 +1,23 @@
+[package]
+name = "tee-attestation-verification-didx509"
+version = "1.0.8"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Rust did:x509 validation and resolution using TAV crypto"
+repository = "https://github.com/microsoft/TEE-Attestation-Verification"
+exclude = ["fuzz/**"]
+
+[features]
+default = ["crypto_openssl", "crypto_windows", "crypto_webcrypto"]
+crypto_openssl = ["tee-attestation-verification-crypto/crypto_openssl"]
+crypto_windows = ["tee-attestation-verification-crypto/crypto_windows"]
+crypto_webcrypto = ["tee-attestation-verification-crypto/crypto_webcrypto"]
+
+[dependencies]
+maybe-async-attr = { package = "tee-attestation-verification-maybe-async", version = "1.0.8", path = "maybe-async" }
+tee-attestation-verification-crypto = { version = "1.0.8", path = "../crypto", default-features = false, features = ["x509"] }
+
+[dev-dependencies]
+serde_json = "1"
+wasm-bindgen-test = "0.3"
