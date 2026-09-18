@@ -55,8 +55,25 @@ preserve their structure. Entirely empty subject names remain supported.
 Windows metadata decoding rejects high-tag-number encodings inside opaque ASN.1
 values, such as custom `otherName` payloads.
 
-Decoded metadata does not imply trust. The `x509` feature does not change
-certificate-chain verification or path policy.
+Decoded metadata does not imply trust. Certificate paths must be verified separately.
+
+## Supplied certificate paths
+
+`CryptoBackend::verify_chain` and `AsyncCryptoBackend::verify_chain` verify the
+supplied path, with intermediates ordered from the trust anchor toward the leaf.
+OpenSSL compares its constructed path against the supplied certificates and
+rejects unused or reordered intermediates. It no longer accepts an unordered
+pool of candidates. Windows and WebCrypto verify adjacent signatures and apply
+the shared path-policy subset.
+
+The `verify_chain_exact` methods enforce the same path requirement with a
+supplied-anchor policy. On Windows and WebCrypto, this policy allows a
+caller-selected anchor that is not self-issued. With `x509` enabled, it also
+decodes critical SAN and EKU extensions instead of rejecting those extensions
+as unhandled. The existing `verify_chain` policy remains unchanged on those
+backends.
+
+These APIs do not implement full RFC 5280 certificate-policy processing.
 
 ## Trademarks
 

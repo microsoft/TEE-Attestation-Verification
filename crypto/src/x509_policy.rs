@@ -92,6 +92,32 @@ where
     Backend::Certificate: 'cert,
     Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
 {
+    path_policy::<Backend, Path>(path, unix_time, true)
+}
+
+/// Validate an exact path whose first certificate is caller-supplied anchor information.
+pub(crate) fn supplied_anchor_policy<'cert, Backend, Path>(
+    path: Path,
+    unix_time: Duration,
+) -> super::Result<()>
+where
+    Backend: CertificateBackend,
+    Backend::Certificate: 'cert,
+    Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
+{
+    path_policy::<Backend, Path>(path, unix_time, false)
+}
+
+fn path_policy<'cert, Backend, Path>(
+    path: Path,
+    unix_time: Duration,
+    require_self_issued_anchor: bool,
+) -> super::Result<()>
+where
+    Backend: CertificateBackend,
+    Backend::Certificate: 'cert,
+    Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
+{
     let path_len = path.clone().count();
     if path_len == 0 {
         return Err("Certificate path must not be empty".into());
@@ -101,7 +127,7 @@ where
     for window in padded_windows::<_, _, 2>(path.clone()) {
         match window {
             [None, Some(cert)] => {
-                if !Backend::is_self_issued(cert)? {
+                if require_self_issued_anchor && !Backend::is_self_issued(cert)? {
                     return Err(format!(
                         "First certificate {} is not self-issued",
                         Backend::subject_name(cert)
@@ -139,7 +165,7 @@ where
         assert_skipped_extension_not_present::<Backend>(cert, oid::NAME_CONSTRAINTS, true)?;
         assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_CONSTRAINTS, true)?;
         assert_skipped_extension_not_present::<Backend>(cert, oid::INHIBIT_ANY_POLICY, true)?;
-        assert_no_unhandled_critical_extensions::<Backend>(cert)?;
+        assert_no_unhandled_critical_extensions::<Backend>(cert, !require_self_issued_anchor)?;
     }
 
     // assert basic_constraints and key usage for all certs with a child - ie a non-leaf cert
@@ -248,8 +274,31 @@ fn assert_skipped_extension_not_present<Backend: CertificateBackend>(
 /// Rejects critical extensions outside the subset handled by this module.
 fn assert_no_unhandled_critical_extensions<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
+    allow_did_extensions: bool,
 ) -> super::Result<()> {
+    #[cfg(not(feature = "x509"))]
+    let _ = allow_did_extensions;
     for critical_oid in Backend::critical_extension_oids(cert) {
+        #[cfg(feature = "x509")]
+        if allow_did_extensions && matches!(critical_oid.as_str(), "2.5.29.17" | "2.5.29.37") {
+            let details = Backend::certificate_details(cert)?;
+            if critical_oid == "2.5.29.17" {
+                let names = details
+                    .subject_alt_names
+                    .ok_or("Missing subject alternative names")?;
+                if names.is_empty() {
+                    return Err("Empty subject alternative names".into());
+                }
+            } else {
+                let usages = details
+                    .extended_key_usage
+                    .ok_or("Missing extended key usage")?;
+                if usages.is_empty() {
+                    return Err("Empty extended key usage".into());
+                }
+            }
+            continue;
+        }
         if !oid::HANDLED_CRITICAL_EXTENSIONS.contains(&critical_oid.as_str()) {
             return Err(format!(
                 "Certificate {} contains unhandled critical extension {}",
@@ -429,6 +478,17 @@ mod tests {
         let path = [&root, &leaf];
 
         policy(&path, Duration::from_secs(10)).expect_err("unknown critical extension must fail");
+    }
+
+    #[test]
+    fn legacy_policy_rejects_critical_did_extensions_even_with_decoding_enabled() {
+        for oid in ["2.5.29.17", "2.5.29.37"] {
+            let mut root = TestCertificate::ca("Root", "Root");
+            root.extensions.insert(oid.to_string(), true);
+            let error = policy(&[&root], Duration::from_secs(10))
+                .expect_err("DID decoding must not change the legacy policy");
+            assert!(error.to_string().contains("unhandled critical extension"));
+        }
     }
 
     #[test]

@@ -450,6 +450,14 @@ impl CertificateBackend for Crypto {
 }
 
 impl CryptoBackend for Crypto {
+    fn verify_chain_exact(
+        trusted_cert: &Self::Certificate,
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+        unix_time: Option<Duration>,
+    ) -> Result<()> {
+        verify_chain_path(trusted_cert, untrusted_chain, leaf, unix_time, true)
+    }
     type Key = Key;
     type Signature = Signature;
 
@@ -547,21 +555,36 @@ impl CryptoBackend for Crypto {
         leaf: &Self::Certificate,
         unix_time: Option<Duration>,
     ) -> Result<()> {
-        super::x509_policy::verify_certificate_path(
-            verify_x509_certificate_signature,
-            trusted_cert,
-            untrusted_chain,
-            leaf,
-        )?;
+        verify_chain_path(trusted_cert, untrusted_chain, leaf, unix_time, false)
+    }
+}
 
-        let singleton_path = untrusted_chain.is_empty() && trusted_cert.der() == leaf.der();
-        let policy_path = std::iter::once(trusted_cert)
-            .chain(untrusted_chain.iter().copied())
-            .chain((!singleton_path).then_some(leaf));
-        super::x509_policy::rfc5280_policy::<Crypto, _>(
-            policy_path,
-            unix_time.unwrap_or(SystemTime::now().duration_since(UNIX_EPOCH)?),
-        )
+fn verify_chain_path(
+    trusted_cert: &Certificate,
+    untrusted_chain: &[&Certificate],
+    leaf: &Certificate,
+    unix_time: Option<Duration>,
+    exact: bool,
+) -> Result<()> {
+    super::x509_policy::verify_certificate_path(
+        verify_x509_certificate_signature,
+        trusted_cert,
+        untrusted_chain,
+        leaf,
+    )?;
+
+    let singleton_path = untrusted_chain.is_empty() && trusted_cert.der() == leaf.der();
+    let policy_path = std::iter::once(trusted_cert)
+        .chain(untrusted_chain.iter().copied())
+        .chain((!singleton_path).then_some(leaf));
+    let time = match unix_time {
+        Some(time) => time,
+        None => SystemTime::now().duration_since(UNIX_EPOCH)?,
+    };
+    if exact {
+        super::x509_policy::supplied_anchor_policy::<Crypto, _>(policy_path, time)
+    } else {
+        super::x509_policy::rfc5280_policy::<Crypto, _>(policy_path, time)
     }
 }
 
