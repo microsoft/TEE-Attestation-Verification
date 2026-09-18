@@ -1,3 +1,4 @@
 [workspace]
-members = ["caci", "attestation", "cbor", "cose", "crypto", "ffi"]
+members = ["caci", "attestation", "cbor", "cose", "crypto", "didx509", "didx509/maybe-async", "ffi"]
+exclude = ["didx509/fuzz/differential"]
 resolver = "2"

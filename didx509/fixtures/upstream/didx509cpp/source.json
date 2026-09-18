@@ -1,0 +1,62 @@
+{
+  "repository": "microsoft/didx509cpp",
+  "revision": "f754568baebcba3c39e62fdfe47beed3357b72a7",
+  "files": {
+    "LICENSE": {
+      "path": "LICENSE",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    },
+    "cn-embedded-nul.pem": {
+      "path": "test/test-data/cn-embedded-nul.pem",
+      "sha256": "6ab7937c0bb337d0f457e0577f89c4919d0e870d326a6678c02d6d8b5fb0d113"
+    },
+    "cn-utf8.pem": {
+      "path": "test/test-data/cn-utf8.pem",
+      "sha256": "9ddfc7b339c47e26cf195a42314dfcea313113c14265c0191ae2141143a968f8"
+    },
+    "custom-oid-subject.pem": {
+      "path": "test/test-data/custom-oid-subject.pem",
+      "sha256": "9bd600a7183bbbeaab70aee6a8250e023750c7a02c10b408c8531fceb48235ac"
+    },
+    "dns-san.pem": {
+      "path": "test/test-data/dns-san.pem",
+      "sha256": "f18f112a21ca6b22c6ffeeab721f14a6311e8494aa6510215c85de0ccb0e23b0"
+    },
+    "ec-leading-zero.pem": {
+      "path": "test/test-data/ec-leading-zero.pem",
+      "sha256": "8073a2c8436759bac9a07dfeef0dc1af35f8529db8a04b3aa6fa3c4b49bbe6f3"
+    },
+    "fulcio-email.pem": {
+      "path": "test/test-data/fulcio-email.pem",
+      "sha256": "9975c3bc56cff2fe0bc7bf4288f7c05a1bbb480a0a2d6f0bea85014aced937b6"
+    },
+    "fulcio-github-actions.pem": {
+      "path": "test/test-data/fulcio-github-actions.pem",
+      "sha256": "d4018582f2d272ca119547138790dded651baab48ce779af122eeb3fdfc4c008"
+    },
+    "ms-code-signing.pem": {
+      "path": "test/test-data/ms-code-signing.pem",
+      "sha256": "a5a09837932f5a6d693ef5f8a5903856e6050adbdc60f11d6a39801ca306a38a"
+    },
+    "ms-test.pem": {
+      "path": "test/test-data/ms-test.pem",
+      "sha256": "cbee9fcf79b7b378d73d655fb617fdfb7eeba01092bea01f0788806b78cbd647"
+    },
+    "san-subject-fallback.pem": {
+      "path": "test/test-data/san-subject-fallback.pem",
+      "sha256": "90da3c97bfb299f9858a7ecd4064b191045c2d7f8d9aebfaf9f98e012fbbd57e"
+    },
+    "uri-san-embedded-nul.pem": {
+      "path": "test/test-data/uri-san-embedded-nul.pem",
+      "sha256": "33930be3e227461c4931b21f24d20b69aea5aee920d49e913204747bc631f918"
+    },
+    "utf8-subject.pem": {
+      "path": "test/test-data/utf8-subject.pem",
+      "sha256": "74542106d0c27501d63c26f0b87ec41236a6da4abf8a238a8c81d790fd57ba08"
+    },
+    "wildcard-dns-san.pem": {
+      "path": "test/test-data/wildcard-dns-san.pem",
+      "sha256": "7843c7f611f085348648e55610a73f44588f87d0077dea141648f564806dc797"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "tee-attestation-verification-maybe-async"
+version = "1.0.8"
+edition = "2021"
+rust-version = "1.85"
+repository = "https://github.com/microsoft/TEE-Attestation-Verification"
+description = "Shared sync and async module generation for TEE attestation verification"
+license = "MIT"
+
+[lib]
+proc-macro = true

@@ -1,0 +1,8 @@
+Repository: https://github.com/microsoft/did-x509
+Pull request: https://github.com/microsoft/did-x509/pull/24
+Commit: ff0bed406451d7bce008ab93aded816b40c202a2
+Path: test-vectors.json
+SHA-256: 23f17f58c332b80d335d43fef7267d9c76edcbc877d1b362a13db2584f5e3648
+
+The DER files under vendor/tav/crypto/src/test_data/did_x509 are exact
+base64url decodings of selected leaf certificates from this JSON fixture.
