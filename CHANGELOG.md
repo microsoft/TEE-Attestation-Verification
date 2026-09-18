@@ -11,7 +11,7 @@
 
 ### Changed
 
-- CACI checks both trusted and issuer did:x509 predicates against the endorsement certificate chain instead of accepting prefix/fingerprint-only matches.
+- CACI checks both trusted and issuer did:x509 predicates against the endorsement certificate chain instead of accepting prefix/fingerprint-only matches. (#164)
 - OpenSSL certificate-chain verification rejects paths that reorder or discard supplied intermediates. (#162)
 - `KeyUsage` adds public `digital_signature` and `key_agreement` fields, including without `x509`. Downstream struct literals must initialize these fields, and exhaustive patterns must include them or use `..`. Queried malformed KeyUsage extensions now return errors instead of decoded flags or absence. (#161)
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
