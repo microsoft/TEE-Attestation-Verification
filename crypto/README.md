@@ -26,8 +26,8 @@ generic cryptographic primitives.
 
 ## Certificate metadata
 
-The optional `x509` feature adds `CertificateBackend::certificate_details` and
-`CertificateBackend::public_key_components`. The returned types belong to this
+`CertificateBackend` provides `certificate_details` and
+`public_key_components`. The returned types belong to this
 crate and do not expose backend-specific types.
 
 `certificate_details` returns subject attributes grouped by relative
@@ -42,11 +42,11 @@ named curves and uncompressed points. Component extraction does not enforce key
 strength or check whether an EC point lies on its curve.
 
 `CertificateBackend::key_usage` exposes `key_cert_sign`, `digital_signature`,
-and `key_agreement` with or without `x509`. A malformed queried KeyUsage extension
+and `key_agreement`. A malformed queried KeyUsage extension
 returns an error.
 
-OpenSSL and Windows decode metadata through native APIs. Enabling `x509` does
-not add `x509-cert`, `pkcs1`, `der`, or `spki` to their production dependency
+OpenSSL and Windows decode metadata through native APIs. Neither backend
+includes `x509-cert`, `pkcs1`, `der`, or `spki` in its production dependency
 graphs. Only WebCrypto uses the private `x509-cert` metadata decoder. Raw
 extension lookup by OID remains available.
 
@@ -55,8 +55,7 @@ preserve their structure. Entirely empty subject names remain supported.
 Windows metadata decoding rejects high-tag-number encodings inside opaque ASN.1
 values, such as custom `otherName` payloads.
 
-Decoded metadata does not imply trust. The `x509` feature does not change
-certificate-chain verification or path policy.
+Decoded metadata does not imply trust. Certificate paths must be verified separately.
 
 ## Trademarks
 

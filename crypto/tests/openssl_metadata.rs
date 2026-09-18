@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(all(feature = "x509", crypto_backend = "crypto_openssl"))]
+#![cfg(crypto_backend = "crypto_openssl")]
 
 use foreign_types_shared::ForeignType;
 use openssl::{
