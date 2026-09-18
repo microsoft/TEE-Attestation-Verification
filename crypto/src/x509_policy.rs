@@ -491,6 +491,81 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "x509")]
+    #[test]
+    fn supplied_anchor_policy_validates_critical_san_and_eku_metadata() {
+        use crate::x509::{CertificateDetails, SubjectAlternativeName};
+
+        let check = |path: &[TestCertificate]| {
+            super::supplied_anchor_policy::<TestBackend, _>(path.iter(), Duration::from_secs(10))
+        };
+        for (oid, empty_error, missing_error) in [
+            (
+                "2.5.29.17",
+                "Empty subject alternative names",
+                "Missing subject alternative names",
+            ),
+            (
+                "2.5.29.37",
+                "Empty extended key usage",
+                "Missing extended key usage",
+            ),
+        ] {
+            for index in 0..2 {
+                let mut path = [
+                    TestCertificate::ca("Anchor", "Parent"),
+                    TestCertificate::leaf("Leaf", "Anchor"),
+                ];
+                path[index].extensions.insert(oid.to_string(), true);
+                path[index].details = Some(CertificateDetails {
+                    subject: vec![],
+                    subject_alt_names: Some(vec![SubjectAlternativeName::Dns(
+                        "example.test".into(),
+                    )]),
+                    extended_key_usage: Some(vec!["1.3.6.1.5.5.7.3.3".into()]),
+                });
+                check(&path).expect("Decoded critical metadata must be accepted");
+
+                let details = path[index].details.as_mut().unwrap();
+                if oid == "2.5.29.17" {
+                    details.subject_alt_names = Some(vec![]);
+                } else {
+                    details.extended_key_usage = Some(vec![]);
+                }
+                assert_eq!(check(&path).unwrap_err().to_string(), empty_error);
+
+                let details = path[index].details.as_mut().unwrap();
+                if oid == "2.5.29.17" {
+                    details.subject_alt_names = None;
+                } else {
+                    details.extended_key_usage = None;
+                }
+                assert_eq!(check(&path).unwrap_err().to_string(), missing_error);
+
+                path[index].details = None;
+                assert_eq!(
+                    check(&path).unwrap_err().to_string(),
+                    "Malformed certificate metadata"
+                );
+            }
+        }
+    }
+
+    #[cfg(not(feature = "x509"))]
+    #[test]
+    fn supplied_anchor_policy_rejects_critical_san_and_eku_without_decoding() {
+        for oid in ["2.5.29.17", "2.5.29.37"] {
+            let mut anchor = TestCertificate::ca("Anchor", "Parent");
+            anchor.extensions.insert(oid.to_string(), true);
+            let error = super::supplied_anchor_policy::<TestBackend, _>(
+                [&anchor].into_iter(),
+                Duration::from_secs(10),
+            )
+            .expect_err("Critical metadata requires the x509 decoder");
+            assert!(error.to_string().contains("unhandled critical extension"));
+        }
+    }
+
     #[test]
     fn rfc5280_policy_rejects_non_ca_issuer() {
         let mut root = TestCertificate::ca("Root", "Root");
@@ -546,6 +621,8 @@ mod tests {
         basic_constraints: Option<BasicConstraints>,
         key_usage: Option<KeyUsage>,
         extensions: HashMap<String, bool>,
+        #[cfg(feature = "x509")]
+        details: Option<crate::x509::CertificateDetails>,
     }
 
     impl TestCertificate {
@@ -571,6 +648,8 @@ mod tests {
                     key_agreement: false,
                 }),
                 extensions,
+                #[cfg(feature = "x509")]
+                details: None,
             }
         }
 
@@ -584,6 +663,8 @@ mod tests {
                 basic_constraints: None,
                 key_usage: None,
                 extensions: HashMap::new(),
+                #[cfg(feature = "x509")]
+                details: None,
             }
         }
     }
@@ -592,6 +673,15 @@ mod tests {
 
     impl CertificateBackend for TestBackend {
         type Certificate = TestCertificate;
+
+        #[cfg(feature = "x509")]
+        fn certificate_details(
+            cert: &Self::Certificate,
+        ) -> Result<crate::x509::CertificateDetails> {
+            cert.details
+                .clone()
+                .ok_or_else(|| "Malformed certificate metadata".into())
+        }
 
         fn from_pem(_pem: &[u8]) -> Result<Self::Certificate> {
             unimplemented!("test backend does not parse certificates")
