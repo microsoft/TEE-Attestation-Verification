@@ -14,9 +14,8 @@ use std::time::Duration;
 
 pub mod base64;
 pub mod hex;
-#[cfg(feature = "x509")]
 pub mod x509;
-#[cfg(all(feature = "x509", crypto_backend = "crypto_webcrypto"))]
+#[cfg(crypto_backend = "crypto_webcrypto")]
 mod x509_decode;
 // OpenSSL enforces its own path policy. Keep the shared policy tests on all backends.
 #[cfg(any(
@@ -79,13 +78,11 @@ pub trait CertificateBackend {
     type Certificate: Clone;
 
     /// Decode structured metadata, rejecting malformed certificate encodings.
-    #[cfg(feature = "x509")]
     fn certificate_details(_cert: &Self::Certificate) -> Result<x509::CertificateDetails> {
         Err("Backend does not implement structured certificate metadata".into())
     }
 
     /// Extract RSA or named-curve EC components for public-key serialization.
-    #[cfg(feature = "x509")]
     fn public_key_components(_cert: &Self::Certificate) -> Result<x509::PublicKey> {
         Err("Backend does not implement public-key component extraction".into())
     }

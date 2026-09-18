@@ -276,10 +276,7 @@ fn assert_no_unhandled_critical_extensions<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
     allow_did_extensions: bool,
 ) -> super::Result<()> {
-    #[cfg(not(feature = "x509"))]
-    let _ = allow_did_extensions;
     for critical_oid in Backend::critical_extension_oids(cert) {
-        #[cfg(feature = "x509")]
         if allow_did_extensions && matches!(critical_oid.as_str(), "2.5.29.17" | "2.5.29.37") {
             let details = Backend::certificate_details(cert)?;
             if critical_oid == "2.5.29.17" {
@@ -481,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_policy_rejects_critical_did_extensions_even_with_decoding_enabled() {
+    fn legacy_policy_rejects_critical_san_and_eku() {
         for oid in ["2.5.29.17", "2.5.29.37"] {
             let mut root = TestCertificate::ca("Root", "Root");
             root.extensions.insert(oid.to_string(), true);
@@ -491,7 +488,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "x509")]
     #[test]
     fn supplied_anchor_policy_validates_critical_san_and_eku_metadata() {
         use crate::x509::{CertificateDetails, SubjectAlternativeName};
@@ -551,21 +547,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "x509"))]
-    #[test]
-    fn supplied_anchor_policy_rejects_critical_san_and_eku_without_decoding() {
-        for oid in ["2.5.29.17", "2.5.29.37"] {
-            let mut anchor = TestCertificate::ca("Anchor", "Parent");
-            anchor.extensions.insert(oid.to_string(), true);
-            let error = super::supplied_anchor_policy::<TestBackend, _>(
-                [&anchor].into_iter(),
-                Duration::from_secs(10),
-            )
-            .expect_err("Critical metadata requires the x509 decoder");
-            assert!(error.to_string().contains("unhandled critical extension"));
-        }
-    }
-
     #[test]
     fn rfc5280_policy_rejects_non_ca_issuer() {
         let mut root = TestCertificate::ca("Root", "Root");
@@ -621,7 +602,6 @@ mod tests {
         basic_constraints: Option<BasicConstraints>,
         key_usage: Option<KeyUsage>,
         extensions: HashMap<String, bool>,
-        #[cfg(feature = "x509")]
         details: Option<crate::x509::CertificateDetails>,
     }
 
@@ -648,7 +628,6 @@ mod tests {
                     key_agreement: false,
                 }),
                 extensions,
-                #[cfg(feature = "x509")]
                 details: None,
             }
         }
@@ -663,7 +642,6 @@ mod tests {
                 basic_constraints: None,
                 key_usage: None,
                 extensions: HashMap::new(),
-                #[cfg(feature = "x509")]
                 details: None,
             }
         }
@@ -674,7 +652,6 @@ mod tests {
     impl CertificateBackend for TestBackend {
         type Certificate = TestCertificate;
 
-        #[cfg(feature = "x509")]
         fn certificate_details(
             cert: &Self::Certificate,
         ) -> Result<crate::x509::CertificateDetails> {

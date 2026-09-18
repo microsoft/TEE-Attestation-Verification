@@ -25,7 +25,6 @@ use super::{
     EcSignatureKeyAlgorithm, KeyBackend, Result, SignatureBackend, SignatureKeyAlgorithm,
 };
 
-#[cfg(feature = "x509")]
 #[path = "x509_windows.rs"]
 mod x509_windows;
 
@@ -260,12 +259,10 @@ impl SignatureBackend for Signature {
 impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
-    #[cfg(feature = "x509")]
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
         cert.with_context(x509_windows::certificate_details)
     }
 
-    #[cfg(feature = "x509")]
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
         cert.with_context(x509_windows::public_key_components)
     }

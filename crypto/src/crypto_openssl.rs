@@ -29,7 +29,6 @@ use openssl_sys::{
 use std::cmp::Ordering;
 
 #[path = "x509_openssl.rs"]
-#[cfg(feature = "x509")]
 mod x509;
 
 use super::{
@@ -115,12 +114,10 @@ impl SignatureBackend for Signature {
 impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
-    #[cfg(feature = "x509")]
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
         x509::certificate_details(cert)
     }
 
-    #[cfg(feature = "x509")]
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
         x509::public_key_components(cert)
     }
