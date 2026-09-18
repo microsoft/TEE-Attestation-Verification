@@ -6,14 +6,14 @@
 
 - Rust-native did:x509 validation and resolution through TAV crypto, with shared synchronous/asynchronous APIs and explicit limits on RFC 5280 policy processing. (#163)
 - Supplied-anchor certificate-path verification for callers that select a non-self-issued trust anchor. (#162)
-- Optional crypto `x509` feature for backend-neutral certificate metadata and RSA/EC public-key components, with native OpenSSL and Windows implementations and a private WebCrypto decoder. (#161)
+- Backend-neutral certificate metadata and RSA/EC public-key components through `CertificateBackend`, with native OpenSSL and Windows implementations and a private WebCrypto decoder. (#161)
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
 
 ### Changed
 
 - CACI checks both trusted and issuer did:x509 predicates against the endorsement certificate chain instead of accepting prefix/fingerprint-only matches. (#164)
 - OpenSSL certificate-chain verification rejects paths that reorder or discard supplied intermediates. (#162)
-- `KeyUsage` adds public `digital_signature` and `key_agreement` fields, including without `x509`. Downstream struct literals must initialize these fields, and exhaustive patterns must include them or use `..`. Queried malformed KeyUsage extensions now return errors instead of decoded flags or absence. (#161)
+- `KeyUsage` adds public `digital_signature` and `key_agreement` fields. Downstream struct literals must initialize these fields, and exhaustive patterns must include them or use `..`. Queried malformed KeyUsage extensions now return errors instead of decoded flags or absence. (#161)
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
 - C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)

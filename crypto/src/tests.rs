@@ -15,7 +15,6 @@ const GENOA_ASK: &[u8] = include_bytes!("test_data/genoa_ask.pem");
 const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 const SELF_SIGNED_LEAF: &[u8] = include_bytes!("test_data/self_signed_leaf.pem");
 
-#[cfg(feature = "x509")]
 #[cfg_attr(not(target_family = "wasm"), test)]
 #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
 fn certificate_metadata_preserves_backend_der() {

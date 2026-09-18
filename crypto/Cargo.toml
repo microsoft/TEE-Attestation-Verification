@@ -15,7 +15,6 @@ default = ["crypto_openssl", "crypto_webcrypto", "crypto_windows"]
 crypto_openssl = ["dep:foreign-types-shared", "dep:openssl", "dep:openssl-sys"]
 crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]
-x509 = []
 
 [target.'cfg(all(not(target_family = "wasm"), not(windows)))'.dependencies]
 # Must match the ForeignType trait used by openssl's foreign-types 0.3 dependency.

@@ -8,7 +8,7 @@ DID grammar, certificate predicates, fingerprints, JWKs, and DID Documents.
 
 `tee-attestation-verification-didx509` is a member of the
 [TAV workspace](https://github.com/microsoft/TEE-Attestation-Verification).
-It uses the sibling [`crypto`](../crypto) crate with the optional `x509` feature.
+It uses the sibling [`crypto`](../crypto) crate.
 The DID crate and its shared [`maybe-async`](maybe-async) proc macro use version
 `1.0.8`, Rust 1.85, edition 2021, and the MIT license. Both dependencies use local
 paths with registry versions. No Git dependency, patch, or vendored TAV checkout
@@ -102,18 +102,19 @@ the conformance corpus and comparing serialized output. Production serialization
 requires no JSON dependency. `scripts/check.sh dependencies` checks the DID
 crate's normal dependency graph across all targets and fails if
 `serde_json` appears. It excludes CACI, which uses `serde_json`, and dev-dependencies.
-The same command checks DID and CACI production dependencies with `x509` enabled
-on both native backends and rejects `x509-cert`, `pkcs1`, `der`, or `spki`. It uses the
+The same command checks DID and CACI production dependencies on both native backends
+and rejects `x509-cert`, `pkcs1`, `der`, or `spki`. It uses the
 `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` targets regardless of the
 host. CACI is the workspace consumer; there is no separate consumer smoke workspace.
 
-Base64 encoding and exact-path validation use TAV crypto. Its optional `x509`
-feature enables `CertificateBackend::certificate_details` and
-`CertificateBackend::public_key_components`. OpenSSL and Windows extract metadata
+Base64 encoding and exact-path validation use TAV crypto.
+`CertificateBackend::certificate_details` and
+`CertificateBackend::public_key_components` expose metadata on every backend.
+OpenSSL and Windows extract metadata
 through native APIs without `x509-cert` or `pkcs1`. Only WebCrypto uses TAV's
 private parser to decode backend DER. The public accessor types contain
 neutral attributes, SAN variants, OID strings, and key components, not parser
-types. Other TAV consumers need not enable `x509`.
+types.
 
 DID validation checks structural metadata and predicates without extracting a
 supported JWK. Only resolution calls `public_key_components` and applies the
