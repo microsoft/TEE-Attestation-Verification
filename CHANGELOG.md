@@ -4,7 +4,7 @@
 
 ### Added
 
-- Rust-native did:x509 validation and resolution through TAV crypto, with shared synchronous/asynchronous APIs and explicit limits on RFC 5280 policy processing.
+- Rust-native did:x509 validation and resolution through TAV crypto, with shared synchronous/asynchronous APIs and explicit limits on RFC 5280 policy processing. (#163)
 - Supplied-anchor certificate-path verification for callers that select a non-self-issued trust anchor. (#162)
 - Optional crypto `x509` feature for backend-neutral certificate metadata and RSA/EC public-key components, with native OpenSSL and Windows implementations and a private WebCrypto decoder. (#161)
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
