@@ -92,6 +92,32 @@ where
     Backend::Certificate: 'cert,
     Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
 {
+    path_policy::<Backend, Path>(path, unix_time, true)
+}
+
+/// Validate an exact path whose first certificate is caller-supplied anchor information.
+pub(crate) fn supplied_anchor_policy<'cert, Backend, Path>(
+    path: Path,
+    unix_time: Duration,
+) -> super::Result<()>
+where
+    Backend: CertificateBackend,
+    Backend::Certificate: 'cert,
+    Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
+{
+    path_policy::<Backend, Path>(path, unix_time, false)
+}
+
+fn path_policy<'cert, Backend, Path>(
+    path: Path,
+    unix_time: Duration,
+    require_self_issued_anchor: bool,
+) -> super::Result<()>
+where
+    Backend: CertificateBackend,
+    Backend::Certificate: 'cert,
+    Path: Clone + Iterator<Item = &'cert Backend::Certificate>,
+{
     let path_len = path.clone().count();
     if path_len == 0 {
         return Err("Certificate path must not be empty".into());
@@ -101,7 +127,7 @@ where
     for window in padded_windows::<_, _, 2>(path.clone()) {
         match window {
             [None, Some(cert)] => {
-                if !Backend::is_self_issued(cert)? {
+                if require_self_issued_anchor && !Backend::is_self_issued(cert)? {
                     return Err(format!(
                         "First certificate {} is not self-issued",
                         Backend::subject_name(cert)
@@ -139,7 +165,7 @@ where
         assert_skipped_extension_not_present::<Backend>(cert, oid::NAME_CONSTRAINTS, true)?;
         assert_skipped_extension_not_present::<Backend>(cert, oid::POLICY_CONSTRAINTS, true)?;
         assert_skipped_extension_not_present::<Backend>(cert, oid::INHIBIT_ANY_POLICY, true)?;
-        assert_no_unhandled_critical_extensions::<Backend>(cert)?;
+        assert_no_unhandled_critical_extensions::<Backend>(cert, !require_self_issued_anchor)?;
     }
 
     // assert basic_constraints and key usage for all certs with a child - ie a non-leaf cert
@@ -248,8 +274,28 @@ fn assert_skipped_extension_not_present<Backend: CertificateBackend>(
 /// Rejects critical extensions outside the subset handled by this module.
 fn assert_no_unhandled_critical_extensions<Backend: CertificateBackend>(
     cert: &Backend::Certificate,
+    allow_did_extensions: bool,
 ) -> super::Result<()> {
     for critical_oid in Backend::critical_extension_oids(cert) {
+        if allow_did_extensions && matches!(critical_oid.as_str(), "2.5.29.17" | "2.5.29.37") {
+            let details = Backend::certificate_details(cert)?;
+            if critical_oid == "2.5.29.17" {
+                let names = details
+                    .subject_alt_names
+                    .ok_or("Missing subject alternative names")?;
+                if names.is_empty() {
+                    return Err("Empty subject alternative names".into());
+                }
+            } else {
+                let usages = details
+                    .extended_key_usage
+                    .ok_or("Missing extended key usage")?;
+                if usages.is_empty() {
+                    return Err("Empty extended key usage".into());
+                }
+            }
+            continue;
+        }
         if !oid::HANDLED_CRITICAL_EXTENSIONS.contains(&critical_oid.as_str()) {
             return Err(format!(
                 "Certificate {} contains unhandled critical extension {}",
@@ -432,6 +478,76 @@ mod tests {
     }
 
     #[test]
+    fn legacy_policy_rejects_critical_san_and_eku() {
+        for oid in ["2.5.29.17", "2.5.29.37"] {
+            let mut root = TestCertificate::ca("Root", "Root");
+            root.extensions.insert(oid.to_string(), true);
+            let error = policy(&[&root], Duration::from_secs(10))
+                .expect_err("DID decoding must not change the legacy policy");
+            assert!(error.to_string().contains("unhandled critical extension"));
+        }
+    }
+
+    #[test]
+    fn supplied_anchor_policy_validates_critical_san_and_eku_metadata() {
+        use crate::x509::{CertificateDetails, SubjectAlternativeName};
+
+        let check = |path: &[TestCertificate]| {
+            super::supplied_anchor_policy::<TestBackend, _>(path.iter(), Duration::from_secs(10))
+        };
+        for (oid, empty_error, missing_error) in [
+            (
+                "2.5.29.17",
+                "Empty subject alternative names",
+                "Missing subject alternative names",
+            ),
+            (
+                "2.5.29.37",
+                "Empty extended key usage",
+                "Missing extended key usage",
+            ),
+        ] {
+            for index in 0..2 {
+                let mut path = [
+                    TestCertificate::ca("Anchor", "Parent"),
+                    TestCertificate::leaf("Leaf", "Anchor"),
+                ];
+                path[index].extensions.insert(oid.to_string(), true);
+                path[index].details = Some(CertificateDetails {
+                    subject: vec![],
+                    subject_alt_names: Some(vec![SubjectAlternativeName::Dns(
+                        "example.test".into(),
+                    )]),
+                    extended_key_usage: Some(vec!["1.3.6.1.5.5.7.3.3".into()]),
+                });
+                check(&path).expect("Decoded critical metadata must be accepted");
+
+                let details = path[index].details.as_mut().unwrap();
+                if oid == "2.5.29.17" {
+                    details.subject_alt_names = Some(vec![]);
+                } else {
+                    details.extended_key_usage = Some(vec![]);
+                }
+                assert_eq!(check(&path).unwrap_err().to_string(), empty_error);
+
+                let details = path[index].details.as_mut().unwrap();
+                if oid == "2.5.29.17" {
+                    details.subject_alt_names = None;
+                } else {
+                    details.extended_key_usage = None;
+                }
+                assert_eq!(check(&path).unwrap_err().to_string(), missing_error);
+
+                path[index].details = None;
+                assert_eq!(
+                    check(&path).unwrap_err().to_string(),
+                    "Malformed certificate metadata"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn rfc5280_policy_rejects_non_ca_issuer() {
         let mut root = TestCertificate::ca("Root", "Root");
         root.basic_constraints = Some(BasicConstraints {
@@ -486,6 +602,7 @@ mod tests {
         basic_constraints: Option<BasicConstraints>,
         key_usage: Option<KeyUsage>,
         extensions: HashMap<String, bool>,
+        details: Option<crate::x509::CertificateDetails>,
     }
 
     impl TestCertificate {
@@ -511,6 +628,7 @@ mod tests {
                     key_agreement: false,
                 }),
                 extensions,
+                details: None,
             }
         }
 
@@ -524,6 +642,7 @@ mod tests {
                 basic_constraints: None,
                 key_usage: None,
                 extensions: HashMap::new(),
+                details: None,
             }
         }
     }
@@ -532,6 +651,14 @@ mod tests {
 
     impl CertificateBackend for TestBackend {
         type Certificate = TestCertificate;
+
+        fn certificate_details(
+            cert: &Self::Certificate,
+        ) -> Result<crate::x509::CertificateDetails> {
+            cert.details
+                .clone()
+                .ok_or_else(|| "Malformed certificate metadata".into())
+        }
 
         fn from_pem(_pem: &[u8]) -> Result<Self::Certificate> {
             unimplemented!("test backend does not parse certificates")
