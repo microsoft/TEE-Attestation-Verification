@@ -30,7 +30,10 @@ jobs:
       - name: Test with OpenSSL backend
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture
 
-      - name: Check compliant default dependencies
+      - name: Test OpenSSL certificate metadata
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_openssl,x509 -- --nocapture
+
+      - name: Check default and native metadata dependencies
         run: scripts/check-crypto-default-dependencies.sh
 
       - name: Test compliant default
@@ -49,6 +52,9 @@ jobs:
 
       - name: Test with Windows CNG backend
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows -- --nocapture
+
+      - name: Test Windows certificate metadata
+        run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows,x509 -- --nocapture
 
       - name: Test compliant default
         run: cargo test --manifest-path crypto/Cargo.toml -- --nocapture
@@ -77,6 +83,10 @@ jobs:
       - name: Test WebCrypto backend
         working-directory: crypto
         run: wasm-pack test --node --no-default-features --features crypto_webcrypto
+
+      - name: Test WebCrypto certificate metadata
+        working-directory: crypto
+        run: wasm-pack test --node --no-default-features --features crypto_webcrypto,x509
 
       - name: Test compliant default
         working-directory: crypto

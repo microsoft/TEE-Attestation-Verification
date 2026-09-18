@@ -139,6 +139,8 @@ impl Certificate {
             .get_extension::<X509KeyUsage>()?
             .map(|(_, key_usage)| KeyUsage {
                 key_cert_sign: key_usage.key_cert_sign(),
+                digital_signature: key_usage.digital_signature(),
+                key_agreement: key_usage.key_agreement(),
             }))
     }
 

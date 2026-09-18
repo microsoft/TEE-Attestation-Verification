@@ -15,6 +15,82 @@ const GENOA_ASK: &[u8] = include_bytes!("test_data/genoa_ask.pem");
 const GENOA_VCEK: &[u8] = include_bytes!("test_data/genoa_vcek.pem");
 const SELF_SIGNED_LEAF: &[u8] = include_bytes!("test_data/self_signed_leaf.pem");
 
+#[cfg(feature = "x509")]
+#[cfg_attr(not(target_family = "wasm"), test)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+fn certificate_metadata_preserves_backend_der() {
+    let cert = Crypto::from_pem(MILAN_ARK).unwrap();
+    let original = Crypto::to_der(&cert).unwrap();
+    let details = Crypto::certificate_details(&cert).unwrap();
+    assert!(details
+        .subject
+        .iter()
+        .flatten()
+        .any(|attribute| attribute.oid == "2.5.4.3" && !attribute.value.is_empty()));
+    assert_eq!(details.subject_alt_names, None);
+    assert_eq!(details.extended_key_usage, None);
+    let crate::x509::PublicKey::Rsa { n, e } = Crypto::public_key_components(&cert).unwrap() else {
+        panic!("Expected an RSA public key");
+    };
+    assert!(!n.is_empty());
+    assert_eq!(e, [1, 0, 1]);
+    assert_eq!(Crypto::to_der(&cert).unwrap(), original);
+}
+
+#[cfg_attr(not(target_family = "wasm"), test)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+fn key_usage_decodes_individual_flags() {
+    let original = Crypto::to_der(&Crypto::from_pem(MILAN_ARK).unwrap()).unwrap();
+    let encoded = [
+        0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02, 0x01, 0x06,
+    ];
+    let offset = original
+        .windows(encoded.len())
+        .position(|bytes| bytes == encoded)
+        .unwrap()
+        + encoded.len()
+        - 2;
+    for (bits, digital_signature, key_agreement, key_cert_sign) in [
+        ([7, 0x80], true, false, false),
+        ([3, 0x08], false, true, false),
+        ([2, 0x04], false, false, true),
+    ] {
+        let mut der = original.clone();
+        der[offset..offset + 2].copy_from_slice(&bits);
+        let cert = Crypto::from_der(&der).unwrap();
+        assert_eq!(
+            Crypto::key_usage(&cert).unwrap(),
+            Some(crate::KeyUsage {
+                digital_signature,
+                key_agreement,
+                key_cert_sign,
+            })
+        );
+        assert_eq!(Crypto::to_der(&cert).unwrap(), der);
+    }
+}
+
+#[cfg_attr(not(target_family = "wasm"), test)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+fn malformed_key_usage_is_not_valid_metadata() {
+    let der = Crypto::to_der(&Crypto::from_pem(MILAN_ARK).unwrap()).unwrap();
+    let encoded = [
+        0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02, 0x01, 0x06,
+    ];
+    let offset = der
+        .windows(encoded.len())
+        .position(|bytes| bytes == encoded)
+        .unwrap()
+        + encoded.len()
+        - 4;
+    for invalid in [[0x05, 0x00, 0x00, 0x00], [0x03, 0x01, 0x00, 0x00]] {
+        let mut malformed = der.clone();
+        malformed[offset..offset + 4].copy_from_slice(&invalid);
+        let certificate = Crypto::from_der(&malformed).unwrap();
+        assert!(Crypto::key_usage(&certificate).is_err());
+    }
+}
+
 const EC_TEST_MESSAGE: &[u8] = b"tee-attestation-verification crypto ec curve test vector";
 const RSA_PSS_TEST_MESSAGE: &[u8] = b"tee-attestation-verification crypto rsa-pss test vector";
 const RSA_PKCS1V15_TEST_MESSAGE: &[u8] = &[
