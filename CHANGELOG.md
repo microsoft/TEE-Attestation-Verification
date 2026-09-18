@@ -4,13 +4,13 @@
 
 ### Added
 
-- Supplied-anchor certificate-path verification for callers that select a non-self-issued trust anchor.
+- Supplied-anchor certificate-path verification for callers that select a non-self-issued trust anchor. (#162)
 - Optional crypto `x509` feature for backend-neutral certificate metadata and RSA/EC public-key components, with native OpenSSL and Windows implementations and a private WebCrypto decoder. (#161)
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
 
 ### Changed
 
-- OpenSSL certificate-chain verification rejects paths that reorder or discard supplied intermediates.
+- OpenSSL certificate-chain verification rejects paths that reorder or discard supplied intermediates. (#162)
 - `KeyUsage` adds public `digital_signature` and `key_agreement` fields, including without `x509`. Downstream struct literals must initialize these fields, and exhaustive patterns must include them or use `..`. Queried malformed KeyUsage extensions now return errors instead of decoded flags or absence. (#161)
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
 - C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
@@ -22,7 +22,7 @@
 
 ### Fixed
 
-- WebCrypto verifies ECDSA certificate signatures using the issuer's curve independently of the signature's hash algorithm.
+- WebCrypto verifies ECDSA certificate signatures using the issuer's curve independently of the signature's hash algorithm. (#162)
 - `ChainVerification::WithProvidedArk` verifies the provided ARK's self-signature against the pinned ARK and rejects a corrupted ARK with `InvalidRootCertificate`. (#145)
 - `tav_verify_snp_attestation` copies the report before verification and returns that verified copy, so the returned handle never holds bytes that were not verified. (#151)
 
