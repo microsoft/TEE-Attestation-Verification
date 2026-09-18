@@ -8,4 +8,4 @@ publish = false
 
 [dependencies]
 tee-attestation-verification-didx509 = { version = "1.0.8", path = "../..", default-features = false, features = ["crypto_openssl"] }
-tee-attestation-verification-crypto = { version = "1.0.8", path = "../../../crypto", default-features = false, features = ["x509", "crypto_openssl"] }
+tee-attestation-verification-crypto = { version = "1.0.8", path = "../../../crypto", default-features = false, features = ["crypto_openssl"] }

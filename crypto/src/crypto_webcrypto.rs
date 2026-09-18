@@ -111,12 +111,10 @@ impl Certificate {
 impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
-    #[cfg(feature = "x509")]
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
         super::x509_decode::Certificate::from_backend::<Self>(cert)?.details()
     }
 
-    #[cfg(feature = "x509")]
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
         super::x509_decode::Certificate::from_backend::<Self>(cert)?.public_key()
     }

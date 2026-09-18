@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(all(feature = "x509", crypto_backend = "crypto_windows"))]
+#![cfg(crypto_backend = "crypto_windows")]
 
 use std::ffi::CString;
 use tee_attestation_verification_crypto::{
