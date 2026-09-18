@@ -50,6 +50,7 @@ flowchart LR
     cose --> caci
     crypto --> caci
     crypto --> didx509
+    didx509 --> caci
     cbor --> cose
     crypto --> cose
     attestation --> ffi
@@ -72,7 +73,8 @@ target-compatible backend:
 Use explicit backend features with `--no-default-features` for backend-specific
 testing.
 
-The did:x509 crate validates certificate predicates and resolves DID Documents.
+CACI validates the trusted and issuer did:x509 predicates against the endorsement
+certificate chain.
 Full RFC 5280 processing is not implemented. See the
 [DID validator's policy and backend limitations](didx509/README.md) before relying
 on draft conformance.

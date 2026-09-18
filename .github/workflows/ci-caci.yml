@@ -15,8 +15,15 @@ permissions:
 
 jobs:
   native:
-    name: Native OpenSSL backend
-    runs-on: ubuntu-24.04
+    name: Native ${{ matrix.backend }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            backend: crypto_openssl
+          - os: windows-2022
+            backend: crypto_windows
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,8 +32,24 @@ jobs:
         run: |
           rustup update stable && rustup default stable
 
-      - name: Build with OpenSSL backend
-        run: cargo build --manifest-path caci/Cargo.toml --no-default-features --features crypto_openssl
+      - name: Build CACI
+        run: cargo build --locked --manifest-path caci/Cargo.toml --no-default-features --features ${{ matrix.backend }}
 
-      - name: Test with OpenSSL backend
-        run: cargo test --manifest-path caci/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture
+      - name: Test CACI
+        run: cargo test --locked --manifest-path caci/Cargo.toml --no-default-features --features ${{ matrix.backend }} -- --nocapture
+
+  wasm:
+    name: WASM WebCrypto backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust and WASM tooling
+        run: |
+          rustup update stable && rustup default stable
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-pack --version 0.13.1 --locked
+
+      - name: Test CACI
+        working-directory: caci
+        run: wasm-pack test --node --locked --no-default-features --features crypto_webcrypto
