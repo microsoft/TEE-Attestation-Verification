@@ -14,13 +14,16 @@ use std::time::Duration;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use super::x509_certificate::Certificate as X509Certificate;
+mod certificate;
+mod metadata;
+
 use super::x509_policy;
 use super::{
     compatible_key_and_signature, AsyncCryptoBackend, AsyncKeyBackend, CertificateBackend,
     DigestAlgorithm, EcSignatureKeyAlgorithm, Result, RsaPkcs1v15SignatureKeyAlgorithm,
     RsaPssSignatureKeyAlgorithm, SignatureBackend, SignatureKeyAlgorithm,
 };
+use certificate::Certificate as X509Certificate;
 
 pub struct Crypto;
 
@@ -112,11 +115,11 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
-        super::x509_decode::Certificate::from_backend::<Self>(cert)?.details()
+        metadata::Certificate::from_backend::<Self>(cert)?.details()
     }
 
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
-        super::x509_decode::Certificate::from_backend::<Self>(cert)?.public_key()
+        metadata::Certificate::from_backend::<Self>(cert)?.public_key()
     }
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {

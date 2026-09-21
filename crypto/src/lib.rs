@@ -15,8 +15,6 @@ use std::time::Duration;
 pub mod base64;
 pub mod hex;
 pub mod x509;
-#[cfg(crypto_backend = "crypto_webcrypto")]
-mod x509_decode;
 // OpenSSL enforces its own path policy. Keep the shared policy tests on all backends.
 #[cfg(any(
     test,
@@ -240,8 +238,6 @@ pub(crate) mod crypto_openssl;
 pub(crate) mod crypto_webcrypto;
 #[cfg(crypto_backend = "crypto_windows")]
 pub(crate) mod crypto_windows;
-#[cfg(crypto_backend = "crypto_webcrypto")]
-mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;
