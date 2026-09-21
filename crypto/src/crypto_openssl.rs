@@ -28,8 +28,7 @@ use openssl_sys::{
 };
 use std::cmp::Ordering;
 
-#[path = "x509_openssl.rs"]
-mod x509;
+mod certificate;
 
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -115,11 +114,11 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
-        x509::certificate_details(cert)
+        certificate::certificate_details(cert)
     }
 
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
-        x509::public_key_components(cert)
+        certificate::public_key_components(cert)
     }
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
