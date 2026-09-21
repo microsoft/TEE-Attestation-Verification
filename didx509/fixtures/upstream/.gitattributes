@@ -1,0 +1,2 @@
+# Preserve pinned upstream bytes, including CRLF and trailing blank lines.
+* -text -whitespace linguist-vendored
