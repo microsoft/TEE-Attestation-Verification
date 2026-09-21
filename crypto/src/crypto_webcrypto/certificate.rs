@@ -13,7 +13,7 @@ use x509_cert::{
     time::Time,
 };
 
-use super::{
+use crate::{
     BasicConstraints, KeyUsage, Result, RsaPkcs1v15SignatureKeyAlgorithm,
     RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
@@ -95,15 +95,15 @@ impl Certificate {
         parse_signature_algorithm(self.inner.signature_algorithm())
     }
 
-    pub fn ecdsa_signature_digest(&self) -> Result<Option<super::DigestAlgorithm>> {
+    pub fn ecdsa_signature_digest(&self) -> Result<Option<crate::DigestAlgorithm>> {
         if self.inner.signature_algorithm() != self.inner.tbs_certificate().signature() {
             return Err("Certificate signature algorithms disagree".into());
         }
         let algorithm = self.inner.signature_algorithm();
         let digest = match algorithm.oid.to_string().as_str() {
-            "1.2.840.10045.4.3.2" => Some(super::DigestAlgorithm::Sha256),
-            "1.2.840.10045.4.3.3" => Some(super::DigestAlgorithm::Sha384),
-            "1.2.840.10045.4.3.4" => Some(super::DigestAlgorithm::Sha512),
+            "1.2.840.10045.4.3.2" => Some(crate::DigestAlgorithm::Sha256),
+            "1.2.840.10045.4.3.3" => Some(crate::DigestAlgorithm::Sha384),
+            "1.2.840.10045.4.3.4" => Some(crate::DigestAlgorithm::Sha512),
             _ => None,
         };
         if digest.is_some() && algorithm.parameters.is_some() {
@@ -112,7 +112,7 @@ impl Certificate {
         Ok(digest)
     }
 
-    pub fn ec_public_key_algorithm(&self) -> Result<super::EcSignatureKeyAlgorithm> {
+    pub fn ec_public_key_algorithm(&self) -> Result<crate::EcSignatureKeyAlgorithm> {
         let spki = self.inner.tbs_certificate().subject_public_key_info();
         if spki.algorithm.oid.to_string() != "1.2.840.10045.2.1" {
             return Err("ECDSA issuer must have an EC public key".into());
@@ -124,9 +124,9 @@ impl Certificate {
             .ok_or("Missing EC curve")?
             .decode_as::<ObjectIdentifier>()?;
         match curve.to_string().as_str() {
-            "1.2.840.10045.3.1.7" => Ok(super::EcSignatureKeyAlgorithm::P256),
-            "1.3.132.0.34" => Ok(super::EcSignatureKeyAlgorithm::P384),
-            "1.3.132.0.35" => Ok(super::EcSignatureKeyAlgorithm::P521),
+            "1.2.840.10045.3.1.7" => Ok(crate::EcSignatureKeyAlgorithm::P256),
+            "1.3.132.0.34" => Ok(crate::EcSignatureKeyAlgorithm::P384),
+            "1.3.132.0.35" => Ok(crate::EcSignatureKeyAlgorithm::P521),
             _ => Err("Unsupported EC issuer curve".into()),
         }
     }
@@ -339,9 +339,9 @@ mod test {
         RsaPkcs1v15SignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
     };
 
-    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
-    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
-    const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
+    const MILAN_ARK: &[u8] = include_bytes!("../test_data/milan_ark.pem");
+    const MILAN_ASK: &[u8] = include_bytes!("../test_data/milan_ask.pem");
+    const MILAN_VCEK: &[u8] = include_bytes!("../test_data/milan_vcek.pem");
 
     fn cert(pem: &[u8]) -> Certificate {
         Certificate::from_pem(pem).unwrap()

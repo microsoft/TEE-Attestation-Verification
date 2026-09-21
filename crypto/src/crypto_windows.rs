@@ -25,8 +25,7 @@ use super::{
     EcSignatureKeyAlgorithm, KeyBackend, Result, SignatureBackend, SignatureKeyAlgorithm,
 };
 
-#[path = "x509_windows.rs"]
-mod x509_windows;
+mod certificate;
 
 const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END: &str = "-----END CERTIFICATE-----";
@@ -260,11 +259,11 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
-        cert.with_context(x509_windows::certificate_details)
+        cert.with_context(certificate::certificate_details)
     }
 
     fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
-        cert.with_context(x509_windows::public_key_components)
+        cert.with_context(certificate::public_key_components)
     }
 
     fn from_pem(pem: &[u8]) -> Result<Certificate> {

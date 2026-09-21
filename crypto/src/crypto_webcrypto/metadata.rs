@@ -199,7 +199,7 @@ mod tests {
     #[cfg_attr(not(target_family = "wasm"), test)]
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
     fn typed_certificate_decodes_backend_der_and_rejects_trailing_bytes() {
-        let cert = Crypto::from_pem(include_bytes!("test_data/milan_ark.pem")).unwrap();
+        let cert = Crypto::from_pem(include_bytes!("../test_data/milan_ark.pem")).unwrap();
         let mut der = Crypto::to_der(&cert).unwrap();
         let decoded = Certificate::from_der(&der).unwrap();
         assert!(!decoded.subject().unwrap().is_empty());
