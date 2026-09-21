@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub mod base64;
 pub mod hex;
+pub mod x509;
 // OpenSSL enforces its own path policy. Keep the shared policy tests on all backends.
 #[cfg(any(
     test,
@@ -66,11 +67,23 @@ pub struct BasicConstraints {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KeyUsage {
     pub key_cert_sign: bool,
+    pub digital_signature: bool,
+    pub key_agreement: bool,
 }
 
 /// API for the certificate types of the backend
 pub trait CertificateBackend {
     type Certificate: Clone;
+
+    /// Decode structured metadata, rejecting malformed certificate encodings.
+    fn certificate_details(_cert: &Self::Certificate) -> Result<x509::CertificateDetails> {
+        Err("Backend does not implement structured certificate metadata".into())
+    }
+
+    /// Extract RSA or named-curve EC components for public-key serialization.
+    fn public_key_components(_cert: &Self::Certificate) -> Result<x509::PublicKey> {
+        Err("Backend does not implement public-key component extraction".into())
+    }
 
     /// Parse a certificate from PEM-encoded data.
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate>;
@@ -225,8 +238,6 @@ pub(crate) mod crypto_openssl;
 pub(crate) mod crypto_webcrypto;
 #[cfg(crypto_backend = "crypto_windows")]
 pub(crate) mod crypto_windows;
-#[cfg(crypto_backend = "crypto_webcrypto")]
-mod x509_certificate;
 
 #[cfg(crypto_backend = "crypto_openssl")]
 pub type Crypto = crypto_openssl::Crypto;

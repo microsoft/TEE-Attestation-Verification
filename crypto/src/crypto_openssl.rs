@@ -9,9 +9,10 @@
 //! enabled for a non-`wasm32` target.
 
 use foreign_types_shared::ForeignType;
-use openssl::asn1::{Asn1Object, Asn1Time};
+use openssl::asn1::{Asn1BitString, Asn1Object, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
+use openssl::error::ErrorStack;
 use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, Public};
@@ -23,10 +24,11 @@ use openssl::x509::verify::X509VerifyParam;
 use openssl_sys::{
     ASN1_STRING_get0_data, ASN1_STRING_length, OBJ_obj2txt, X509_EXTENSION_get_critical,
     X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
-    X509_get_ext_count, X509_get_extension_flags, X509_get_key_usage, X509v3_KU_KEY_CERT_SIGN,
-    EXFLAG_CA,
+    X509_get_ext_count, X509_get_extension_flags, X509v3_KU_KEY_CERT_SIGN, EXFLAG_CA,
 };
 use std::cmp::Ordering;
+
+mod certificate;
 
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -110,6 +112,14 @@ impl SignatureBackend for Signature {
 
 impl CertificateBackend for Crypto {
     type Certificate = Certificate;
+
+    fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
+        certificate::certificate_details(cert)
+    }
+
+    fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
+        certificate::public_key_components(cert)
+    }
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
         openssl::x509::X509::from_pem(pem).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
@@ -232,14 +242,60 @@ impl CertificateBackend for Crypto {
     }
 
     fn key_usage(cert: &Self::Certificate) -> Result<Option<super::KeyUsage>> {
-        if Self::extension_criticality(cert, oid::KEY_USAGE)?.is_none() {
-            return Ok(None);
+        // Public OpenSSL APIs not exposed by the Rust wrappers or openssl-sys.
+        extern "C" {
+            fn d2i_ASN1_BIT_STRING(
+                out: *mut *mut openssl_sys::ASN1_BIT_STRING,
+                input: *mut *const u8,
+                length: std::ffi::c_long,
+            ) -> *mut openssl_sys::ASN1_BIT_STRING;
+            fn i2d_ASN1_BIT_STRING(
+                value: *const openssl_sys::ASN1_BIT_STRING,
+                out: *mut *mut u8,
+            ) -> std::ffi::c_int;
         }
-        // SAFETY: cert owns a live X509 for the duration of this call.
-        let key_usage = unsafe { X509_get_key_usage(cert.as_ptr()) };
+
+        let Some(der) = Self::get_extension_value_by_oid(cert, oid::KEY_USAGE)? else {
+            return Ok(None);
+        };
+        let mut cursor = der.as_ptr();
+        // SAFETY: d2i reads within der. The checked result transfers ownership
+        // to Asn1BitString, which frees it on every subsequent return path.
+        let usage = unsafe {
+            let raw = d2i_ASN1_BIT_STRING(std::ptr::null_mut(), &mut cursor, der.len().try_into()?);
+            if raw.is_null() {
+                return Err(ErrorStack::get().into());
+            }
+            Asn1BitString::from_ptr(raw)
+        };
+        if cursor != der.as_ptr().wrapping_add(der.len()) {
+            return Err("Trailing data in key usage".into());
+        }
+        // SAFETY: usage owns the decoded BIT STRING; a null output requests its size.
+        let length = unsafe { i2d_ASN1_BIT_STRING(usage.as_ptr(), std::ptr::null_mut()) };
+        if length <= 0 {
+            return Err(ErrorStack::get().into());
+        }
+        if length as usize != der.len() {
+            return Err("Key usage is not canonical DER".into());
+        }
+        let mut encoded = vec![0; length as usize];
+        let mut output = encoded.as_mut_ptr();
+        // SAFETY: encoded has the exact capacity reported by OpenSSL for usage.
+        if unsafe { i2d_ASN1_BIT_STRING(usage.as_ptr(), &mut output) } != length
+            || output != encoded.as_mut_ptr().wrapping_add(encoded.len())
+        {
+            return Err("OpenSSL returned an inconsistent key usage DER length".into());
+        }
+        if encoded != der {
+            return Err("Key usage is not canonical DER".into());
+        }
+        let key_usage = u32::from(usage.as_slice().first().copied().unwrap_or(0));
 
         Ok(Some(super::KeyUsage {
             key_cert_sign: key_usage & X509v3_KU_KEY_CERT_SIGN != 0,
+            digital_signature: key_usage & openssl_sys::X509v3_KU_DIGITAL_SIGNATURE != 0,
+            key_agreement: key_usage & openssl_sys::X509v3_KU_KEY_AGREEMENT != 0,
         }))
     }
 
