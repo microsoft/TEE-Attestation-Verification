@@ -57,6 +57,24 @@ values, such as custom `otherName` payloads.
 
 Decoded metadata does not imply trust. Certificate paths must be verified separately.
 
+## Supplied certificate paths
+
+`CryptoBackend::verify_chain` and `AsyncCryptoBackend::verify_chain` verify the
+supplied path, with intermediates ordered from the trust anchor toward the leaf.
+OpenSSL compares its constructed path against the supplied certificates and
+rejects unused or reordered intermediates. It no longer accepts an unordered
+pool of candidates. Windows and WebCrypto verify adjacent signatures and apply
+the shared path-policy subset.
+
+The `verify_chain_exact` methods enforce the same path requirement with a
+supplied-anchor policy. On Windows and WebCrypto, this policy allows a
+caller-selected anchor that is not self-issued. It also
+decodes critical SAN and EKU extensions instead of rejecting those extensions
+as unhandled. The existing `verify_chain` policy remains unchanged on those
+backends.
+
+These APIs do not implement full RFC 5280 certificate-policy processing.
+
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.
