@@ -768,6 +768,7 @@ dependencies = [
  "serde_json",
  "tee-attestation-verification-cose",
  "tee-attestation-verification-crypto",
+ "tee-attestation-verification-didx509",
  "tee-attestation-verification-lib",
  "tokio",
  "wasm-bindgen-test",

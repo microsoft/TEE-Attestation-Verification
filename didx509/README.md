@@ -101,11 +101,11 @@ shared escaping for all string fields. `serde_json` is a dev-dependency for read
 the conformance corpus and comparing serialized output. Production serialization
 requires no JSON dependency. `scripts/check.sh dependencies` checks the DID
 crate's normal dependency graph across all targets and fails if
-`serde_json` appears. It excludes dev-dependencies.
-The same command checks DID production dependencies on both native backends
+`serde_json` appears. It excludes CACI, which uses `serde_json`, and dev-dependencies.
+The same command checks DID and CACI production dependencies on both native backends
 and rejects `x509-cert`, `pkcs1`, `der`, or `spki`. It uses the
 `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` targets regardless of the
-host.
+host. CACI is the workspace consumer; there is no separate consumer smoke workspace.
 
 Base64 encoding and exact-path validation use TAV crypto.
 `CertificateBackend::certificate_details` and
@@ -170,7 +170,7 @@ python3 scripts/generate-key-fixtures.py --unsupported-key-only  # only the vali
 ```
 
 `check.sh` changes to the crate directory before invoking tools. Native checks
-select only the DID and macro packages in one Cargo invocation, not the
+select only the DID, macro, and CACI packages in one Cargo invocation, not the
 whole workspace. Native and WASM
 checks use the root workspace lockfile. WASM runs
 `wasm-pack test --node --locked --no-default-features --features crypto_webcrypto`

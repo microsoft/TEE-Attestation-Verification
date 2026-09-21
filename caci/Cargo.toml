@@ -14,27 +14,31 @@ features = ["crypto_openssl", "crypto_webcrypto"]
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [features]
-default = ["crypto/default", "attestation/default", "cose/default"]
+default = ["crypto/default", "attestation/default", "cose/default", "didx509/default"]
 crypto_openssl = [
     "crypto/crypto_openssl",
     "attestation/crypto_openssl",
     "cose/crypto_openssl",
+    "didx509/crypto_openssl",
 ]
 crypto_webcrypto = [
     "crypto/crypto_webcrypto",
     "attestation/crypto_webcrypto",
     "cose/crypto_webcrypto",
+    "didx509/crypto_webcrypto",
 ]
 crypto_windows = [
     "crypto/crypto_windows",
     "attestation/crypto_windows",
     "cose/crypto_windows",
+    "didx509/crypto_windows",
 ]
 
 [dependencies]
 attestation = { package = "tee-attestation-verification-lib", version = "1.0.8", path = "../attestation", default-features = false }
 cose = { package = "tee-attestation-verification-cose", version = "1.0.8", path = "../cose", default-features = false }
 crypto = { package = "tee-attestation-verification-crypto", version = "1.0.8", path = "../crypto", default-features = false }
+didx509 = { package = "tee-attestation-verification-didx509", version = "1.0.8", path = "../didx509", default-features = false }
 serde_json = ">=1, <2"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
