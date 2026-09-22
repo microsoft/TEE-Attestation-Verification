@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TEE Attested Service</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+    /* --- Verification in progress --- */
+    #verifying {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #f5f5f5;
+      color: #333;
+    }
+    #verifying .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid #ccc;
+      border-top-color: #0078d4;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 1.5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* --- Blocked --- */
+    #blocked {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #fdf2f2;
+      color: #b91c1c;
+    }
+    #blocked .icon { font-size: 4rem; margin-bottom: 1rem; }
+    #blocked h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+    #blocked p { color: #666; max-width: 480px; text-align: center; line-height: 1.5; }
+    #blocked .error-detail {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      background: #fee2e2;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      max-width: 600px;
+      word-break: break-all;
+    }
+
+    /* --- Trusted app --- */
+    #app {
+      display: none;
+    }
+    #app header {
+      background: #0078d4;
+      color: white;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    #app header .badge {
+      background: #22c55e;
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    #app main {
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    #app h2 { margin-bottom: 1rem; color: #333; }
+    #app .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    #app .card h3 { margin-bottom: 0.5rem; color: #0078d4; }
+    #app .card p { color: #666; line-height: 1.5; }
+    #app .attestation-info {
+      font-family: monospace;
+      font-size: 0.85rem;
+      background: #f9fafb;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    #app .attestation-info dt { font-weight: 600; color: #333; margin-top: 0.5rem; }
+    #app .attestation-info dd { color: #666; margin-left: 1rem; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+  <!-- State 1: Verifying attestation -->
+  <div id="verifying">
+    <div class="spinner"></div>
+    <h1>Verifying backend attestation&hellip;</h1>
+    <p>Confirming the service is running in a trusted execution environment.</p>
+  </div>
+
+  <!-- State 2: Blocked (attestation failed) -->
+  <div id="blocked">
+    <div class="icon">&#x1f6ab;</div>
+    <h1>Connection Blocked</h1>
+    <p>The backend service could not provide a valid TEE attestation report.
+       This connection is not trusted.</p>
+    <div class="error-detail" id="error-detail"></div>
+  </div>
+
+  <!-- State 3: Trusted app -->
+  <div id="app">
+    <header>
+      <h1>Attested Service</h1>
+      <span class="badge">&#x2713; TEE Verified</span>
+    </header>
+    <main>
+      <h2>Dashboard</h2>
+      <div class="card">
+        <h3>Attestation Details</h3>
+        <dl class="attestation-info" id="attestation-info"></dl>
+      </div>
+      <div class="card">
+        <h3>Service Data</h3>
+        <p id="service-data">Loading data from trusted backend&hellip;</p>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
