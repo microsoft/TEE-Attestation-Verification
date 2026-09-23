@@ -6,6 +6,8 @@
 //!
 //! The public ABI is declared in `include/tav/cbor.h`. The C++ RAII wrapper
 //! in `include/tav/cbor.hpp` preserves the same borrowing contract.
+//! This module also implements the crypto-independent COSE TBS encoding
+//! declared in `include/tav/cose.h`.
 //!
 //! # Handle ownership
 //!
@@ -38,7 +40,7 @@ use cbor::{CborValue, Det, Mode, Nondet};
 
 use crate::cbor_view::{CborView, NativeCborValue};
 
-use super::utils::{owned_out_ptr, TavByteBuffer};
+use super::utils::{input_bytes, owned_out_ptr, TavByteBuffer};
 use crate::{into_result, TavError, TavErrorCode};
 
 /// A null or otherwise unreadable handle.
@@ -416,6 +418,35 @@ pub unsafe extern "C" fn tav_cbor_free(value: *mut TavCborHandle) {
 }
 
 // --- Serialization ---
+
+/// Encode a COSE_Sign1 Sig_structure without invoking cryptography.
+///
+/// # Safety
+/// Nonempty inputs must point to readable buffers for the duration of the call.
+/// `out_tbs` must be null or a writable handle slot separate from input storage.
+#[no_mangle]
+pub unsafe extern "C" fn tav_build_cose_sign1_tbs(
+    protected_bytes: *const u8,
+    protected_len: usize,
+    payload: *const u8,
+    payload_len: usize,
+    external_aad: *const u8,
+    external_aad_len: usize,
+    out_tbs: *mut *mut TavByteBuffer,
+) -> *mut TavError {
+    into_result(|| {
+        unsafe { owned_out_ptr(out_tbs, "out_tbs") }?;
+        let protected =
+            unsafe { input_bytes(protected_bytes, protected_len, "protected header", true) }?;
+        let payload = unsafe { input_bytes(payload, payload_len, "payload", true) }?;
+        let external_aad =
+            unsafe { input_bytes(external_aad, external_aad_len, "external AAD", true) }?;
+        let tbs = cose::cose_sign1_tbs(protected, payload, external_aad)
+            .map_err(|error| TavError::new(TavErrorCode::CoseCbor, error))?;
+        unsafe { *out_tbs = Box::into_raw(TavByteBuffer::from_bytes(tbs)) };
+        Ok(())
+    })
+}
 
 unsafe fn serialize<M: Mode>(
     value: *const TavCborHandle,

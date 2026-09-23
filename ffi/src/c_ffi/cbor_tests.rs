@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use super::cbor::*;
-use std::ptr;
+use std::ptr::{self, null, null_mut};
 
 use super::utils::*;
 use crate::{TavError, TavErrorCode};
@@ -112,6 +112,77 @@ fn decode(bytes: &[u8], max_depth: usize, det: bool) -> Result<*mut TavCborHandl
 
 fn parse_nondet(bytes: &[u8]) -> Result<*mut TavCborHandle, String> {
     decode(bytes, MAX_DEPTH_LIMIT, false)
+}
+
+// --- COSE TBS encoding ---
+
+#[test]
+fn tbs_output_owns_its_bytes() {
+    let mut protected = vec![0xa1, 0x18, 0x01, 0x26];
+    let mut payload = b"payload".to_vec();
+    let mut aad = b"aad".to_vec();
+    let mut out = null_mut();
+    unsafe {
+        assert!(tav_build_cose_sign1_tbs(
+            protected.as_ptr(),
+            protected.len(),
+            payload.as_ptr(),
+            payload.len(),
+            aad.as_ptr(),
+            aad.len(),
+            &mut out,
+        )
+        .is_null());
+        protected.fill(0);
+        payload.fill(0);
+        aad.fill(0);
+        let bytes = std::slice::from_raw_parts(tav_byte_buffer_data(out), tav_byte_buffer_len(out));
+        assert_eq!(
+            bytes,
+            b"\x84\x6aSignature1\x44\xa1\x18\x01\x26\x43aad\x47payload",
+        );
+        tav_byte_buffer_free(out);
+    }
+}
+
+#[test]
+fn tbs_validates_inputs_and_clears_output() {
+    unsafe {
+        let mut out = null_mut();
+        assert!(tav_build_cose_sign1_tbs(null(), 0, null(), 0, null(), 0, &mut out,).is_null());
+        assert_eq!(
+            std::slice::from_raw_parts(tav_byte_buffer_data(out), tav_byte_buffer_len(out)),
+            b"\x84\x6aSignature1\x40\x40\x40",
+        );
+        tav_byte_buffer_free(out);
+
+        let byte = 0u8;
+        for field in 0..3 {
+            for (data, len) in [(null(), 1), (std::ptr::from_ref(&byte), MAX_INPUT_LEN + 1)] {
+                let mut inputs = [(null(), 0); 3];
+                inputs[field] = (data, len);
+                out = std::ptr::dangling_mut();
+                let error = tav_build_cose_sign1_tbs(
+                    inputs[0].0,
+                    inputs[0].1,
+                    inputs[1].0,
+                    inputs[1].1,
+                    inputs[2].0,
+                    inputs[2].1,
+                    &mut out,
+                );
+                assert!(!error.is_null());
+                assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
+                assert!(out.is_null());
+                tav_error_free(error);
+            }
+        }
+
+        let error = tav_build_cose_sign1_tbs(null(), 0, null(), 0, null(), 0, null_mut());
+        assert!(!error.is_null());
+        assert_eq!((*error).code(), TavErrorCode::InvalidArgument);
+        tav_error_free(error);
+    }
 }
 
 // --- Construction and round trips ---

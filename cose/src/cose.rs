@@ -123,15 +123,19 @@ pub fn cose_alg_for_signature_key_algorithm(
     }
 }
 
-/// To-be-signed (TBS).
+/// Build the encoded COSE_Sign1 Sig_structure, without performing cryptography.
+///
+/// `phdr` is the serialized protected header, `payload` is the payload, all
+/// preserved byte-for-byte. Empty `external_aad` when no external authenticated
+/// data is used is expected.
 /// https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4.
-fn sig_structure(phdr: &[u8], payload: &[u8]) -> Result<Vec<u8>, String> {
+pub fn cose_sign1_tbs(phdr: &[u8], payload: &[u8], external_aad: &[u8]) -> Result<Vec<u8>, String> {
     // Borrowed payloads, so building the array copies nothing. The TBS bytes
     // must be deterministic because they are what gets signed.
     CborValue::Array(vec![
         CborValue::text(SIG_STRUCTURE1_CONTEXT),
         CborValue::bytes(phdr),
-        CborValue::bytes(&[][..]),
+        CborValue::bytes(external_aad),
         CborValue::bytes(payload),
     ])
     .to_bytes_det()
@@ -168,7 +172,7 @@ pub fn cose_verify1(
         return Err("Algorithm mismatch between supplied alg and key".into());
     }
     let signature = signature_from_cose_bytes(sig, algorithm)?;
-    let tbs = sig_structure(phdr, payload)?;
+    let tbs = cose_sign1_tbs(phdr, payload, &[])?;
 
     <crypto::Crypto as CryptoBackend>::verify_signature(key, &signature, &tbs)
         .map_err(|e| e.to_string())
@@ -191,7 +195,7 @@ pub async fn cose_verify1_async(
         return Err("Algorithm mismatch between supplied alg and key".into());
     }
     let signature = signature_from_cose_bytes(sig, algorithm)?;
-    let tbs = sig_structure(phdr, payload)?;
+    let tbs = cose_sign1_tbs(phdr, payload, &[])?;
 
     <crypto::Crypto as AsyncCryptoBackend>::verify_signature(key, &signature, &tbs)
         .await
@@ -264,6 +268,24 @@ fn signature_from_cose_bytes(
 mod tests {
     use super::*;
     use crypto::KeyBackend;
+
+    #[test]
+    fn sign1_tbs_preserves_protected_bytes_and_external_aad() {
+        // Non-preferred integer encoding must not be canonicalized inside phdr.
+        let phdr = [0xa1, 0x18, 0x01, 0x26];
+        assert_eq!(
+            cose_sign1_tbs(&phdr, b"payload", b"aad").unwrap(),
+            b"\x84\x6aSignature1\x44\xa1\x18\x01\x26\x43aad\x47payload",
+        );
+    }
+
+    #[test]
+    fn sign1_tbs_accepts_empty_inputs() {
+        assert_eq!(
+            cose_sign1_tbs(&[], &[], &[]).unwrap(),
+            b"\x84\x6aSignature1\x40\x40\x40",
+        );
+    }
 
     const PAYLOAD: &[u8] = b"verification-only COSE vector";
 
