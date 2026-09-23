@@ -27,7 +27,7 @@ error codes, ownership contracts, and limits.
 |---|---|---|
 | `cbor.h` | CBOR construction, parsing, navigation, and serialization | `cbor.hpp` |
 | `snp.h` | SNP verification and report accessors | `snp.hpp` |
-| `cose.h` | COSE validation and verification | None |
+| `cose.h` | COSE TBS construction, validation and verification | None |
 | `caci.h` | CACI endorsement and attestation verification | None |
 | `errors.h` | `TavError` and error codes | `errors.hpp` |
 | `byte_buffer.h` | Owned `TavByteBuffer` results | `byte_buffer.hpp` |
@@ -93,6 +93,13 @@ tav_cbor_free(child);
 
 Byte and text accessors return borrowed views. Keep the backing storage alive
 while using a view. For handle-owned payloads, keep the accessor's handle alive.
+
+## COSE TBS
+
+`tav_build_cose_sign1_tbs` returns an owned `TavByteBuffer` for your signer or
+verifier. Supply the original protected-header bytes, actual payload (even when
+detached), and external AAD or `NULL, 0`. Assemble envelopes with `cbor.h`,
+using the same protected-header bytes and a COSE-format signature.
 
 ## SNP verification
 

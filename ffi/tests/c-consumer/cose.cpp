@@ -68,6 +68,23 @@ void check_error(TavError *error, TavErrorCode code) {
 
 } // namespace
 
+TEST_CASE("cose: TBS preserves protected bytes and external AAD") {
+    const uint8_t protected_bytes[] = {0xa1, 0x18, 0x01, 0x26};
+    const uint8_t payload[] = {0xca, 0xfe};
+    const uint8_t aad[] = {0x01, 0x02};
+    TavByteBuffer *tbs = nullptr;
+    REQUIRE(tav_build_cose_sign1_tbs(
+        protected_bytes, sizeof(protected_bytes), payload, sizeof(payload),
+        aad, sizeof(aad), &tbs) == nullptr);
+    const std::vector<uint8_t> expected = {
+        0x84, 0x6a, 'S', 'i', 'g', 'n', 'a', 't', 'u', 'r', 'e', '1',
+        0x44, 0xa1, 0x18, 0x01, 0x26, 0x42, 0x01, 0x02, 0x42, 0xca, 0xfe};
+    CHECK(std::vector<uint8_t>(
+        tav_byte_buffer_data(tbs),
+        tav_byte_buffer_data(tbs) + tav_byte_buffer_len(tbs)) == expected);
+    tav_byte_buffer_free(tbs);
+}
+
 TEST_CASE("cbor: map keys compare independently of entry order") {
     const uint8_t encoded[] = {0xa1, 0xa2, 1, 2, 3, 4, 7};
     const uint8_t reordered[] = {0xa2, 3, 4, 1, 2};
