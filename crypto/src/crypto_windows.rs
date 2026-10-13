@@ -25,6 +25,8 @@ use super::{
     EcSignatureKeyAlgorithm, KeyBackend, Result, SignatureBackend, SignatureKeyAlgorithm,
 };
 
+mod certificate;
+
 const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END: &str = "-----END CERTIFICATE-----";
 const X509_PEM_BEGIN: &str = "-----BEGIN X509 CERTIFICATE-----";
@@ -71,6 +73,9 @@ pub struct Signature {
 impl Certificate {
     fn from_der(der: &[u8]) -> Result<Self> {
         let context = NativeCertificate::from_der(der)?;
+        if context.der()? != der {
+            return Err("Crypt32 did not preserve the complete certificate encoding".into());
+        }
         Ok(Self(Arc::from(context.der()?)))
     }
 
@@ -139,6 +144,19 @@ impl NativeCertificate {
         let extensions = self.extensions()?;
         if extensions.is_empty() {
             return Ok(None);
+        }
+        let mut matches = 0;
+        for extension in extensions {
+            if extension.pszObjId.is_null() {
+                return Err("Null certificate extension OID".into());
+            }
+            // SAFETY: context owns the native, null-terminated OID.
+            if unsafe { extension.pszObjId.as_bytes() } == oid.as_bytes() {
+                matches += 1;
+            }
+        }
+        if matches > 1 {
+            return Err("Duplicate certificate extension".into());
         }
         Ok(unsafe { Crypto32::CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
     }
@@ -239,6 +257,14 @@ impl SignatureBackend for Signature {
 
 impl CertificateBackend for Crypto {
     type Certificate = Certificate;
+
+    fn certificate_details(cert: &Self::Certificate) -> Result<super::x509::CertificateDetails> {
+        cert.with_context(certificate::certificate_details)
+    }
+
+    fn public_key_components(cert: &Self::Certificate) -> Result<super::x509::PublicKey> {
+        cert.with_context(certificate::public_key_components)
+    }
 
     fn from_pem(pem: &[u8]) -> Result<Certificate> {
         Certificate::from_der(&decode_pem(pem)?)
@@ -385,19 +411,19 @@ impl CertificateBackend for Crypto {
 
     fn key_usage(cert: &Certificate) -> Result<Option<super::KeyUsage>> {
         cert.with_context(|context| {
-            if context.extension(KEY_USAGE_OID)?.is_none() {
+            let Some(extension) = context.extension(KEY_USAGE_OID)? else {
                 return Ok(None);
-            }
-            let mut usage = [0];
-            unsafe {
-                Crypto32::CertGetIntendedKeyUsage(
-                    Crypto32::X509_ASN_ENCODING,
-                    context.info()?,
-                    &mut usage,
-                )
-            }?;
+            };
+            let encoded =
+                unsafe { native_slice(extension.Value.pbData, extension.Value.cbData, context)? };
+            let decoded = decode_canonical::<Crypto32::CRYPT_BIT_BLOB>(encoded)?;
+            let bytes = unsafe { native_slice(decoded.pbData, decoded.cbData, &decoded)? };
+            validate_bit_blob(&decoded, bytes)?;
+            let usage = bytes.first().copied().unwrap_or(0);
             Ok(Some(super::KeyUsage {
-                key_cert_sign: usage[0] & Crypto32::CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
+                key_cert_sign: usage & Crypto32::CERT_KEY_CERT_SIGN_KEY_USAGE as u8 != 0,
+                digital_signature: usage & Crypto32::CERT_DIGITAL_SIGNATURE_KEY_USAGE as u8 != 0,
+                key_agreement: usage & Crypto32::CERT_KEY_AGREEMENT_KEY_USAGE as u8 != 0,
             }))
         })
     }
@@ -569,6 +595,22 @@ impl DecodeType for Crypto32::CERT_PUBLIC_KEY_INFO {
     const KIND: PCSTR = Crypto32::X509_PUBLIC_KEY_INFO;
 }
 
+impl DecodeType for Crypto32::CRYPT_BIT_BLOB {
+    const KIND: PCSTR = Crypto32::X509_BITS;
+}
+
+fn validate_bit_blob(value: &Crypto32::CRYPT_BIT_BLOB, bytes: &[u8]) -> Result<()> {
+    if value.cUnusedBits > 7
+        || (bytes.is_empty() && value.cUnusedBits != 0)
+        || bytes
+            .last()
+            .is_some_and(|last| last & ((1u8 << value.cUnusedBits) - 1) != 0)
+    {
+        return Err("Invalid BIT STRING unused bits".into());
+    }
+    Ok(())
+}
+
 struct Decoded<T> {
     value: NonNull<T>,
     _allocation: Owned<HLOCAL>,
@@ -611,6 +653,14 @@ fn decode<T: DecodeType>(input: &[u8]) -> Result<Decoded<T>> {
         value,
         _allocation: allocation,
     })
+}
+
+fn decode_canonical<T: DecodeType>(input: &[u8]) -> Result<Decoded<T>> {
+    let value = decode::<T>(input)?;
+    if encode(T::KIND, &*value)? != input {
+        return Err("Value is not canonical DER".into());
+    }
+    Ok(value)
 }
 
 fn encode<T>(kind: PCSTR, value: &T) -> Result<Vec<u8>> {

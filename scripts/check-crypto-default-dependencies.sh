@@ -8,12 +8,15 @@ ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 MANIFEST_PATH="${ROOT}/crypto/Cargo.toml"
 
 dependency_tree() {
+  local target="$1"
+  shift
   cargo tree \
     --locked \
     --manifest-path "${MANIFEST_PATH}" \
-    --target "$1" \
+    --target "${target}" \
     --edges normal \
-    --prefix none
+    --prefix none \
+    "$@"
 }
 
 require_dependency() {
@@ -22,7 +25,7 @@ require_dependency() {
   local target="$3"
 
   if ! grep -Eq "^${dependency} v" <<<"${tree}"; then
-    echo "${target}: expected ${dependency} in the default dependency graph" >&2
+    echo "${target}: expected ${dependency} in the production dependency graph" >&2
     return 1
   fi
 }
@@ -33,7 +36,7 @@ reject_dependency() {
   local target="$3"
 
   if grep -Eq "^${dependency} v" <<<"${tree}"; then
-    echo "${target}: unexpected ${dependency} in the default dependency graph" >&2
+    echo "${target}: unexpected ${dependency} in the production dependency graph" >&2
     return 1
   fi
 }
@@ -43,6 +46,8 @@ require_dependency "${linux_tree}" openssl x86_64-unknown-linux-gnu
 reject_dependency "${linux_tree}" windows x86_64-unknown-linux-gnu
 reject_dependency "${linux_tree}" pkcs1 x86_64-unknown-linux-gnu
 reject_dependency "${linux_tree}" x509-cert x86_64-unknown-linux-gnu
+reject_dependency "${linux_tree}" der x86_64-unknown-linux-gnu
+reject_dependency "${linux_tree}" spki x86_64-unknown-linux-gnu
 
 windows_tree="$(dependency_tree x86_64-pc-windows-msvc)"
 require_dependency "${windows_tree}" windows x86_64-pc-windows-msvc
@@ -50,6 +55,8 @@ reject_dependency "${windows_tree}" openssl x86_64-pc-windows-msvc
 reject_dependency "${windows_tree}" openssl-sys x86_64-pc-windows-msvc
 reject_dependency "${windows_tree}" pkcs1 x86_64-pc-windows-msvc
 reject_dependency "${windows_tree}" x509-cert x86_64-pc-windows-msvc
+reject_dependency "${windows_tree}" der x86_64-pc-windows-msvc
+reject_dependency "${windows_tree}" spki x86_64-pc-windows-msvc
 
 wasm_tree="$(dependency_tree wasm32-unknown-unknown)"
 require_dependency "${wasm_tree}" pkcs1 wasm32-unknown-unknown
@@ -57,3 +64,5 @@ require_dependency "${wasm_tree}" x509-cert wasm32-unknown-unknown
 reject_dependency "${wasm_tree}" openssl wasm32-unknown-unknown
 reject_dependency "${wasm_tree}" openssl-sys wasm32-unknown-unknown
 reject_dependency "${wasm_tree}" windows wasm32-unknown-unknown
+
+echo "Default production dependency graphs passed."
