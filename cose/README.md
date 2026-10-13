@@ -3,8 +3,9 @@
 `tee-attestation-verification-cose` verifies COSE_Sign1 signatures using the
 shared `tee-attestation-verification-crypto` backends.
 
-This crate is intentionally verification-only. It does not expose COSE signing
-or encryption APIs.
+Cryptographic operations are intentionally verification-only. The crate also
+provides key-independent TBS construction for callers using their own signer
+or verifier; it does not perform signing or encryption.
 
 ## Crypto backends
 
@@ -48,6 +49,15 @@ The verifier accepts:
 If the protected header contains `alg`, it must match the caller-supplied
 algorithm. If it omits `alg`, the caller-supplied algorithm is used as external
 context.
+
+## TBS construction
+
+`cose_sign1_tbs(protected_bytes, payload, external_aad)` returns the encoded
+COSE_Sign1 `Sig_structure` without hashing or invoking a crypto backend.
+Use the original protected-header bytes and the actual payload, even when
+the envelope carries a detached payload.
+The caller is responsible for header validation, algorithm/key compatibility,
+and signature encoding.
 
 ## Usage
 

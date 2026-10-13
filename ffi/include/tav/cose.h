@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /*
- * COSE_Sign1 validation and verification over TavCborHandle values.
+ * COSE_Sign1 TBS construction, validation and verification.
  * Parse, inspect, and serialize CBOR with tav/cbor.h.
  *
  * Fallible calls return NULL on success or an owned TavError* on failure.
@@ -60,6 +60,20 @@ typedef enum TavCwtClaim {
     TAV_CWT_CLAIMS_SUBJECT = 2,
     TAV_CWT_CLAIMS_IAT = 6,
 } TavCwtClaim;
+
+/*
+ * Encode ["Signature1", bstr(protected_bytes), bstr(external_aad), bstr(payload)].
+ * Use original protected-header bytes and the actual payload, even when detached.
+ * Writes an owned buffer to out_tbs; free it with tav_byte_buffer_free.
+ */
+TAV_COSE_API TavError *tav_build_cose_sign1_tbs(
+    const uint8_t *protected_bytes,
+    size_t protected_len,
+    const uint8_t *payload,
+    size_t payload_len,
+    const uint8_t *external_aad,
+    size_t external_aad_len,
+    TavByteBuffer **out_tbs);
 
 TAV_COSE_API TavError *tav_validate_cose_sign1(
     const TavCborHandle *value,
