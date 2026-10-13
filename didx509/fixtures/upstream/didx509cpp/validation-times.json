@@ -1,0 +1,15 @@
+{
+  "custom-oid-subject.pem": 3358162058,
+  "fulcio-github-actions.pem": 1654742591,
+  "cn-embedded-nul.pem": 3344025600,
+  "ms-test.pem": 1758182464,
+  "ec-leading-zero.pem": 1938862306,
+  "ms-code-signing.pem": 1668113164,
+  "san-subject-fallback.pem": 3357976432,
+  "cn-utf8.pem": 3344025600,
+  "wildcard-dns-san.pem": 3357976432,
+  "fulcio-email.pem": 1660049533,
+  "utf8-subject.pem": 3357974519,
+  "dns-san.pem": 1938687299,
+  "uri-san-embedded-nul.pem": 3357976432
+}

@@ -13,6 +13,8 @@ and returning authenticated report claims to callers.
 |---|---|---|
 | `cbor/` | `tee-attestation-verification-cbor` | CBOR values over deterministic and non-deterministic EverCBOR. |
 | `crypto/` | `tee-attestation-verification-crypto` | Backend abstraction for certificate handling, certificate-chain verification, and signature verification. |
+| `didx509/` | `tee-attestation-verification-didx509` | did:x509 validation and resolution using the workspace crypto crate. |
+| `didx509/maybe-async/` | `tee-attestation-verification-maybe-async` | Proc macro sharing the DID validator's synchronous and asynchronous implementation. |
 | `cose/` | `tee-attestation-verification-cose` | COSE_Sign1 verification helpers. |
 | `caci/` | `tee-attestation-verification-caci` | CACI UVM endorsement verification against SEV-SNP attestations and DID x509 roots of trust. |
 | `attestation/` | `tee-attestation-verification-lib` | Public attestation verification APIs, SEV-SNP report types, and KDS support. |
@@ -26,6 +28,7 @@ Read the crate-specific docs for API details:
 - [`caci/README.md`](caci/README.md)
 - [`cose/README.md`](cose/README.md)
 - [`crypto/README.md`](crypto/README.md)
+- [`didx509/README.md`](didx509/README.md)
 - [`ffi/README.md`](ffi/README.md)
 
 ## Component dependencies
@@ -39,12 +42,14 @@ flowchart LR
     cbor[cbor]
     cose[cose]
     crypto[crypto]
+    didx509[didx509]
     ffi[ffi]
 
     crypto --> attestation
     attestation --> caci
     cose --> caci
     crypto --> caci
+    crypto --> didx509
     cbor --> cose
     crypto --> cose
     attestation --> ffi
@@ -66,6 +71,11 @@ target-compatible backend:
 
 Use explicit backend features with `--no-default-features` for backend-specific
 testing.
+
+The did:x509 crate validates certificate predicates and resolves DID Documents.
+Full RFC 5280 processing is not implemented. See the
+[DID validator's policy and backend limitations](didx509/README.md) before relying
+on draft conformance.
 
 ## Quick start
 
