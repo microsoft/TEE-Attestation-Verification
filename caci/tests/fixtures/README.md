@@ -3,6 +3,15 @@
 These fixtures include one legacy UVM endorsement set and one transparent/SCITT
 UVM endorsement set. They are intended for local regression tests.
 
+The CACI DID integration tests verify both deployed signatures without changing
+their protected headers or historic signing times. Predicate and chain rejection
+cases use the existing CBOR parser and serializer to mutate these fixtures.
+Those cases retain the original signature and assert the specific validation
+failure before signature verification. A mutation with valid DID predicates must
+still fail signature verification. No private signing keys are used.
+
+Protected signing times are signer claims, not independent timestamp proof.
+
 The legacy files were captured from an earlier CACI container run.
 
 The transparent/SCITT fixture capture flow was:
