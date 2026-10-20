@@ -17,7 +17,8 @@ crypto_webcrypto = ["dep:pkcs1", "dep:x509-cert"]
 crypto_windows = ["dep:windows"]
 
 [target.'cfg(all(not(target_family = "wasm"), not(windows)))'.dependencies]
-foreign-types-shared = { version = ">=0.1, <0.4", optional = true }
+# Must match the ForeignType trait used by openssl's foreign-types 0.3 dependency.
+foreign-types-shared = { version = "0.1", optional = true }
 openssl = { version = ">=0.10, <0.11", optional = true }
 openssl-sys = { version = ">=0.9, <0.10", optional = true }
 
