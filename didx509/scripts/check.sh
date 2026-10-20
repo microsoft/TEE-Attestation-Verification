@@ -10,7 +10,8 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(( ($(nproc) + 1) >> 1 ))}"
 case "${1:-native}" in
     native)
         cargo test --locked -p tee-attestation-verification-didx509 \
-            -p tee-attestation-verification-maybe-async
+            -p tee-attestation-verification-maybe-async \
+            -p tee-attestation-verification-caci
         ;;
     wasm)
         wasm-pack test --node --locked --no-default-features --features crypto_webcrypto
@@ -30,10 +31,11 @@ case "${1:-native}" in
                 crypto_windows) target=x86_64-pc-windows-msvc ;;
             esac
             native_dependencies="$(cargo tree --locked -p tee-attestation-verification-didx509 \
+                -p tee-attestation-verification-caci \
                 --no-default-features --features "$backend" --target "$target" \
                 --edges normal --prefix none --format '{p}')"
             if grep -Eq '^(x509-cert|pkcs1|der|spki) v' <<< "$native_dependencies"; then
-                printf '%s DID dependencies must not include Rust ASN.1/certificate decoders\n' "$backend" >&2
+                printf '%s DID and CACI dependencies must not include Rust ASN.1/certificate decoders\n' "$backend" >&2
                 exit 1
             fi
         done
