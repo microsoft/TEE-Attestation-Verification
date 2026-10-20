@@ -810,6 +810,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tee-attestation-verification-didx509"
+version = "1.0.8"
+dependencies = [
+ "serde_json",
+ "tee-attestation-verification-crypto",
+ "tee-attestation-verification-maybe-async",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "tee-attestation-verification-ffi"
 version = "1.0.8"
 dependencies = [
@@ -843,6 +853,10 @@ dependencies = [
  "wasm-logger",
  "zerocopy",
 ]
+
+[[package]]
+name = "tee-attestation-verification-maybe-async"
+version = "1.0.8"
 
 [[package]]
 name = "tls_codec"

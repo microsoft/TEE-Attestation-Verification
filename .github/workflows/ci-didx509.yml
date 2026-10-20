@@ -1,0 +1,82 @@
+name: "DID x509 CI"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-didx509-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  native:
+    name: Native ${{ matrix.backend }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            backend: crypto_openssl
+          - os: windows-2022
+            backend: crypto_windows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup show
+      - name: Test DID validation
+        run: cargo test --locked -p tee-attestation-verification-didx509 --no-default-features --features ${{ matrix.backend }}
+      - name: Test shared macro
+        run: cargo test --locked -p tee-attestation-verification-maybe-async
+      - name: Check DID production dependencies
+        if: runner.os == 'Linux'
+        run: bash didx509/scripts/check.sh dependencies
+
+  wasm:
+    name: WASM WebCrypto
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust and WASM tooling
+        run: |
+          rustup show
+          cargo install wasm-pack --version 0.13.1 --locked
+      - name: Test DID validation
+        run: bash didx509/scripts/check.sh wasm
+
+  differential:
+    name: Differential fuzz (OpenSSL)
+    runs-on: ubuntu-24.04
+    # OpenSSL 3.4 or later supplies the certificate date options used by the generator.
+    container: rust:1-trixie
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install differential fuzz tools
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends g++ pkg-config libssl-dev openssl python3
+      - name: Compare Rust and C++ resolvers
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -o pipefail
+          bash didx509/scripts/check.sh differential 200 7 2>&1 | tee differential-fuzz.log
+      - name: Preserve fuzz results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: differential-fuzz-results
+          path: |
+            differential-fuzz.log
+            didx509/fuzz/differential/failures/
+          if-no-files-found: ignore
+          retention-days: 14

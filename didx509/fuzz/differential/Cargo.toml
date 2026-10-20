@@ -1,0 +1,11 @@
+[package]
+name = "didx509-rust-oracle"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+tee-attestation-verification-didx509 = { version = "1.0.8", path = "../..", default-features = false, features = ["crypto_openssl"] }
+tee-attestation-verification-crypto = { version = "1.0.8", path = "../../../crypto", default-features = false, features = ["crypto_openssl"] }

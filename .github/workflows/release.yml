@@ -90,6 +90,11 @@ jobs:
     needs: prepare_release
     uses: ./.github/workflows/ci-crypto.yml
 
+  ci-didx509:
+    name: DID x509 CI
+    needs: prepare_release
+    uses: ./.github/workflows/ci-didx509.yml
+
   ci-demo:
     name: Demo CI
     needs: prepare_release
@@ -182,6 +187,7 @@ jobs:
       - ci-cbor
       - ci-cose
       - ci-crypto
+      - ci-didx509
       - ci-demo
       - ci-ffi
       - package
