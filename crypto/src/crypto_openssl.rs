@@ -414,29 +414,81 @@ impl CryptoBackend for Crypto {
         leaf: &Certificate,
         unix_time: Option<std::time::Duration>,
     ) -> Result<()> {
-        let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
-        store_builder.add_cert(trusted_cert.to_owned())?;
-        store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
-        if let Some(unix_time) = unix_time {
-            let mut params = X509VerifyParam::new()?;
-            let unix_time = unix_time
-                .as_secs()
-                .try_into()
-                .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
-            params.set_time(unix_time);
-            store_builder.set_param(&params)?;
+        verify_path(trusted_cert, untrusted_chain, leaf, unix_time, false)
+    }
+
+    fn verify_chain_exact(
+        trusted_cert: &Certificate,
+        untrusted_chain: &[&Certificate],
+        leaf: &Certificate,
+        unix_time: Option<std::time::Duration>,
+    ) -> Result<()> {
+        verify_path(trusted_cert, untrusted_chain, leaf, unix_time, true)
+    }
+}
+
+fn verify_path(
+    trusted_cert: &Certificate,
+    untrusted_chain: &[&Certificate],
+    leaf: &Certificate,
+    unix_time: Option<std::time::Duration>,
+    validate_anchor_time: bool,
+) -> Result<()> {
+    if validate_anchor_time {
+        let time = match unix_time {
+            Some(time) => time,
+            None => std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?,
+        };
+        if !Crypto::is_valid_at(trusted_cert, time)? {
+            return Err("Trust anchor is not valid at the given time".into());
         }
-        let store = store_builder.build();
-        let mut ctx = openssl::x509::X509StoreContext::new()?;
-        let mut chain = Stack::<Certificate>::new()?;
-        for cert in untrusted_chain {
-            chain.push((*cert).to_owned())?;
+    }
+    let mut store_builder = openssl::x509::store::X509StoreBuilder::new()?;
+    store_builder.add_cert(trusted_cert.to_owned())?;
+    store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+    if let Some(unix_time) = unix_time {
+        let mut params = X509VerifyParam::new()?;
+        let unix_time = unix_time
+            .as_secs()
+            .try_into()
+            .map_err(|_| "Unix time does not fit OpenSSL time_t")?;
+        params.set_time(unix_time);
+        store_builder.set_param(&params)?;
+    }
+    let store = store_builder.build();
+    let mut ctx = openssl::x509::X509StoreContext::new()?;
+    let mut chain = Stack::<Certificate>::new()?;
+    for cert in untrusted_chain {
+        chain.push((*cert).to_owned())?;
+    }
+    let mut matches = false;
+    match ctx.init(&store, leaf, &chain, |c| {
+        let valid = c.verify_cert()?;
+        if valid {
+            let anchor = (!untrusted_chain.is_empty()
+                || trusted_cert.to_der()? != leaf.to_der()?)
+            .then_some(trusted_cert);
+            let expected = std::iter::once(leaf)
+                .chain(untrusted_chain.iter().rev().copied())
+                .chain(anchor)
+                .map(|cert| cert.to_der())
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            matches = match c.chain() {
+                Some(path) => {
+                    path.iter()
+                        .map(|cert| cert.to_der())
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                        == expected
+                }
+                None => false,
+            };
         }
-        match ctx.init(&store, leaf, &chain, |c| c.verify_cert()) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err("Certificate verification failed".into()),
-            Err(e) => Err(Box::new(e)),
-        }
+        Ok(valid)
+    }) {
+        Ok(true) if !matches => Err("Verified path differs from supplied path".into()),
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Certificate verification failed".into()),
+        Err(e) => Err(Box::new(e)),
     }
 }
 

@@ -166,12 +166,27 @@ pub trait CryptoBackend: CertificateBackend {
     ) -> Result<()>;
 
     /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
+    /// Intermediates must be supplied in order from the trust anchor toward the leaf,
+    /// not as a pool of candidates for path construction.
     fn verify_chain(
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
         unix_time: Option<Duration>,
     ) -> Result<()>;
+
+    /// Verify a supplied path whose trust anchor need not be self-issued.
+    /// Intermediates are ordered from the trust anchor toward the leaf.
+    /// Windows and WebCrypto use the supplied-anchor policy rather than the
+    /// self-issued-anchor policy of `verify_chain`.
+    fn verify_chain_exact(
+        _trusted_cert: &Self::Certificate,
+        _untrusted_chain: &[&Self::Certificate],
+        _leaf: &Self::Certificate,
+        _unix_time: Option<Duration>,
+    ) -> Result<()> {
+        Err("Backend does not implement exact path validation".into())
+    }
 }
 
 /// Asynchronous API for a cryptographic backend
@@ -193,12 +208,25 @@ pub trait AsyncCryptoBackend: CertificateBackend {
     ) -> impl std::future::Future<Output = Result<()>>;
 
     /// Verify a certificate chain from `trusted_cert` through `untrusted_chain` to `leaf`.
+    /// Intermediates must be supplied in order from the trust anchor toward the leaf,
+    /// not as a pool of candidates for path construction.
     fn verify_chain(
         trusted_cert: &<Self as CertificateBackend>::Certificate,
         untrusted_chain: &[&<Self as CertificateBackend>::Certificate],
         leaf: &<Self as CertificateBackend>::Certificate,
         unix_time: Option<Duration>,
     ) -> impl std::future::Future<Output = Result<()>>;
+
+    /// Asynchronous supplied-anchor validation; intermediates are root-nearest first.
+    /// The trust anchor need not be self-issued, as in `CryptoBackend::verify_chain_exact`.
+    fn verify_chain_exact(
+        _trusted_cert: &Self::Certificate,
+        _untrusted_chain: &[&Self::Certificate],
+        _leaf: &Self::Certificate,
+        _unix_time: Option<Duration>,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        async { Err("Backend does not implement exact path validation".into()) }
+    }
 }
 
 /// Any synchronous `CryptoBackend` also implements `AsyncCryptoBackend` by blocking on the synchronous verification.
@@ -229,6 +257,15 @@ where
         unix_time: Option<Duration>,
     ) -> Result<()> {
         <C as CryptoBackend>::verify_chain(trusted_cert, untrusted_chain, leaf, unix_time)
+    }
+
+    async fn verify_chain_exact(
+        trusted_cert: &Self::Certificate,
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+        unix_time: Option<Duration>,
+    ) -> Result<()> {
+        <C as CryptoBackend>::verify_chain_exact(trusted_cert, untrusted_chain, leaf, unix_time)
     }
 }
 
