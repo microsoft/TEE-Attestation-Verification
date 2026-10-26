@@ -5,9 +5,11 @@
 ### Added
 
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
+- `CborValue::parse_with_limits`, which caps both the nesting depth and the number of entries in any array or map, map keys included. Both caps are checked before space is reserved for a container, and in `Nondet` mode they are also passed to EverCBOR's bounded validator, so the cost of validating untrusted input is bounded by the caps.
 
 ### Changed
 
+- Bump EverCBOR (`cborrs`/`cborrs-nondet`) to project-everest/everparse v2026.10.25, whose non-deterministic validator accepts map depth and map length bounds.
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
 - C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)

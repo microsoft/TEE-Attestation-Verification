@@ -308,6 +308,65 @@ fn explicit_depth_limit_is_honoured() {
     assert!(value.to_bytes_with_depth::<Det>(1).is_err());
 }
 
+/// The container length limit applies to arrays and maps at every level,
+/// map keys included, in both modes.
+#[test]
+fn explicit_container_len_limit_is_honoured() {
+    let documents: [&[u8]; 4] = [
+        &[0x83, 0x01, 0x02, 0x03],                   // [1, 2, 3]
+        &[0xa3, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03], // {1: 1, 2: 2, 3: 3}
+        &[0xa1, 0x01, 0x83, 0x01, 0x02, 0x03],       // {1: [1, 2, 3]}
+        &[0xa1, 0x83, 0x01, 0x02, 0x03, 0x01],       // {[1, 2, 3]: 1}
+    ];
+    for document in documents {
+        assert!(CborValue::parse_with_limits::<Nondet>(document, 2, 3).is_ok());
+        assert!(CborValue::parse_with_limits::<Det>(document, 2, 3).is_ok());
+        assert!(CborValue::parse_with_limits::<Nondet>(document, 2, 2).is_err());
+        assert!(CborValue::parse_with_limits::<Det>(document, 2, 2).is_err());
+    }
+
+    // In Nondet mode, EverCBOR's bounded validator rejects an over-long map
+    // before any item is produced, so the error is the generic parse failure.
+    // Arrays are outside its bound, so the tree walk rejects those and names
+    // the limit, as it does for everything in Det mode.
+    let wide_map = documents[1];
+    let wide_array = documents[0];
+    assert_eq!(
+        CborValue::parse_with_limits::<Nondet>(wide_map, 2, 2).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+    for err in [
+        CborValue::parse_with_limits::<Nondet>(wide_array, 2, 2).unwrap_err(),
+        CborValue::parse_with_limits::<Det>(wide_map, 2, 2).unwrap_err(),
+    ] {
+        assert_eq!(err, "Maximum CBOR container length exceeded");
+    }
+}
+
+/// EverCBOR's map depth bound counts empty maps and ignores arrays and tags,
+/// so it is offset by one to never reject what the tree walk accepts.
+#[test]
+fn nondet_map_depth_bound_matches_the_tree_walk() {
+    // {1: {}} needs a budget of 1: the empty map is a leaf.
+    let empty_leaf: &[u8] = &[0xa1, 0x01, 0xa0];
+    assert!(CborValue::parse_with_depth::<Nondet>(empty_leaf, 1).is_ok());
+    assert!(CborValue::parse_with_depth::<Nondet>(empty_leaf, 0).is_err());
+
+    // {1: {2: {3: 0}}} needs a budget of 3. One level short, EverCBOR's
+    // offset bound still admits it and the tree walk names the limit; two
+    // levels short, EverCBOR rejects it before any item is produced.
+    let chain: &[u8] = &[0xa1, 0x01, 0xa1, 0x02, 0xa1, 0x03, 0x00];
+    assert!(CborValue::parse_with_depth::<Nondet>(chain, 3).is_ok());
+    assert_eq!(
+        CborValue::parse_with_depth::<Nondet>(chain, 2).unwrap_err(),
+        "Maximum CBOR nesting depth exceeded"
+    );
+    assert_eq!(
+        CborValue::parse_with_depth::<Nondet>(chain, 1).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+}
+
 // --- Accessor: array index ---
 
 #[test]

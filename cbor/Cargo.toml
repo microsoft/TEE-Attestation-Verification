@@ -10,6 +10,6 @@ authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
 [dependencies]
-# project-everest/everparse tag v2026.07.02 resolves to this pinned commit.
-cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
-cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
+# project-everest/everparse tag v2026.10.25 resolves to this pinned commit.
+cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "0c66529b49884f5ccf7f229c02d58ca37f7ad376" }
+cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "0c66529b49884f5ccf7f229c02d58ca37f7ad376" }

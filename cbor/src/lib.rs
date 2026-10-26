@@ -21,6 +21,12 @@
 //! invalid UTF-8, duplicate map keys, and integers outside the range of
 //! `i64`.
 //!
+//! Parsing bounds the nesting depth, and [`CborValue::parse_with_limits`]
+//! additionally bounds the number of entries in any array or map. Both
+//! limits are checked before any space is reserved for a container, and in
+//! [`Nondet`] mode they are also handed to EverCBOR's bounded validator, so
+//! the cost of validating untrusted input is bounded by the limits.
+//!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
 //! the value. [`CborValue::into_owned`] detaches a value from its input.
@@ -43,6 +49,12 @@ use std::borrow::Cow;
 /// input.
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
 
+/// Container length limit meaning no limit beyond the input length.
+///
+/// Parsing has already rejected any container whose declared length is not
+/// backed by items present in the input, so this never rejects anything.
+const UNBOUNDED_CONTAINER_LEN: usize = usize::MAX;
+
 /// Bound passed to EverCBOR's serialized-size estimator.
 const SIZE_BOUND: usize = usize::MAX;
 
@@ -54,6 +66,16 @@ const SIZE_BOUND: usize = usize::MAX;
 /// fail as the vector grows.
 fn reserve_for(declared: u64) -> usize {
     usize::try_from(declared).unwrap_or(0)
+}
+
+/// Rejects a container of `declared` length that exceeds `max_len`.
+///
+/// Called before any space is reserved for the container's children.
+fn check_container_len(declared: u64, max_len: usize) -> Result<(), String> {
+    if declared > u64::try_from(max_len).unwrap_or(u64::MAX) {
+        return Err("Maximum CBOR container length exceeded".to_string());
+    }
+    Ok(())
 }
 
 /// Arena of `Box<[T]>` chunks holding EverCBOR child nodes.
@@ -110,8 +132,16 @@ pub enum RawView<'a, B> {
 pub trait Backend<'a>: Sized + Copy {
     type MapEntry: Copy;
 
-    fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])>;
-    fn destruct(item: Self) -> RawView<'a, Self>;
+    /// Parse the first item of `input`, handing EverCBOR whichever of the
+    /// two limits its validator supports.
+    fn parse(
+        input: &'a [u8],
+        max_depth: usize,
+        max_container_len: usize,
+    ) -> Option<(Self, &'a [u8])>;
+    /// Peel one layer, rejecting an array or map longer than
+    /// `max_container_len` before reserving space for its children.
+    fn destruct(item: Self, max_container_len: usize) -> Result<RawView<'a, Self>, String>;
     fn to_vec(item: Self) -> Result<Vec<u8>, String>;
 
     fn mk_int64(negative: bool, magnitude: u64) -> Self;
@@ -125,7 +155,7 @@ pub trait Backend<'a>: Sized + Copy {
 }
 
 mod det_backend {
-    use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
+    use super::{check_container_len, reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
     use cborrs::cbordet as api;
 
     /// Serializes into a fresh buffer.
@@ -158,12 +188,18 @@ mod det_backend {
     impl<'a> Backend<'a> for api::CborDet<'a> {
         type MapEntry = api::CborDetMapEntry<'a>;
 
-        fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])> {
+        /// The deterministic validator takes no bounds, so both limits are
+        /// enforced by the tree walk alone.
+        fn parse(
+            input: &'a [u8],
+            _max_depth: usize,
+            _max_container_len: usize,
+        ) -> Option<(Self, &'a [u8])> {
             api::cbor_det_parse(input)
         }
 
-        fn destruct(item: Self) -> RawView<'a, Self> {
-            match api::cbor_det_destruct(item) {
+        fn destruct(item: Self, max_container_len: usize) -> Result<RawView<'a, Self>, String> {
+            Ok(match api::cbor_det_destruct(item) {
                 api::CborDetView::Int64 { kind, value } => RawView::Int64 {
                     negative: matches!(kind, api::CborDetIntKind::NegInt64),
                     magnitude: value,
@@ -171,14 +207,16 @@ mod det_backend {
                 api::CborDetView::ByteString { payload } => RawView::ByteString(payload),
                 api::CborDetView::TextString { payload } => RawView::TextString(payload),
                 api::CborDetView::Array { _0: array } => {
-                    let mut items =
-                        Vec::with_capacity(reserve_for(api::cbor_det_get_array_length(array)));
+                    let declared = api::cbor_det_get_array_length(array);
+                    check_container_len(declared, max_container_len)?;
+                    let mut items = Vec::with_capacity(reserve_for(declared));
                     items.extend(array);
                     RawView::Array(items)
                 }
                 api::CborDetView::Map { _0: map } => {
-                    let mut entries =
-                        Vec::with_capacity(reserve_for(api::cbor_det_get_map_length(map)));
+                    let declared = api::cbor_det_get_map_length(map);
+                    check_container_len(declared, max_container_len)?;
+                    let mut entries = Vec::with_capacity(reserve_for(declared));
                     entries.extend(map.into_iter().map(|e| {
                         (
                             api::cbor_det_map_entry_key(e),
@@ -189,7 +227,7 @@ mod det_backend {
                 }
                 api::CborDetView::Tagged { tag, payload } => RawView::Tagged { tag, payload },
                 api::CborDetView::SimpleValue { _0: value } => RawView::Simple(value),
-            }
+            })
         }
 
         fn to_vec(item: Self) -> Result<Vec<u8>, String> {
@@ -236,8 +274,9 @@ mod det_backend {
 }
 
 mod nondet_backend {
-    use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
+    use super::{check_container_len, reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
     use cborrs_nondet::cbornondet as api;
+    use cborrs_nondet::cbornondetver as verified;
 
     /// See the deterministic counterpart for the note on the elided lifetime.
     fn to_vec(item: api::CborNondet) -> Result<Vec<u8>, String> {
@@ -267,12 +306,38 @@ mod nondet_backend {
     impl<'a> Backend<'a> for api::CborNondet<'a> {
         type MapEntry = api::CborNondetMapEntry<'a>;
 
-        fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])> {
+        /// Validates within the limits before parsing.
+        ///
+        /// The unbounded validator's duplicate-key check costs time quadratic
+        /// in map length and exponential in map nesting, so untrusted input
+        /// goes through the bounded validator first. That validator runs in
+        /// time linear in the input for fixed bounds, and once it accepts,
+        /// the unbounded validator's work is bounded by the same limits.
+        fn parse(
+            input: &'a [u8],
+            max_depth: usize,
+            max_container_len: usize,
+        ) -> Option<(Self, &'a [u8])> {
+            // EverCBOR measures map nesting only: every map, empty or not,
+            // counts one level, while arrays and tags are transparent. A value
+            // that fits `max_depth` here has map depth at most `max_depth + 1`,
+            // so this bound never rejects an input the tree walk would accept.
+            let map_depth_bound = max_depth.saturating_add(1);
+            // The bounded entry point is only exposed through the verified
+            // layer, whose result type cannot be named or matched from another
+            // crate. Its result is compared against the failure value instead,
+            // and the item is then taken from the safe parser.
+            let rejected = verified::cbor_nondet_parse_bounded(0, 0, &[]);
+            if verified::cbor_nondet_parse_bounded(map_depth_bound, max_container_len, input)
+                == rejected
+            {
+                return None;
+            }
             api::cbor_nondet_parse(None, false, input)
         }
 
-        fn destruct(item: Self) -> RawView<'a, Self> {
-            match api::cbor_nondet_destruct(item) {
+        fn destruct(item: Self, max_container_len: usize) -> Result<RawView<'a, Self>, String> {
+            Ok(match api::cbor_nondet_destruct(item) {
                 api::CborNondetView::Int64 { kind, value } => RawView::Int64 {
                     negative: matches!(kind, api::CborNondetIntKind::NegInt64),
                     magnitude: value,
@@ -280,14 +345,16 @@ mod nondet_backend {
                 api::CborNondetView::ByteString { payload } => RawView::ByteString(payload),
                 api::CborNondetView::TextString { payload } => RawView::TextString(payload),
                 api::CborNondetView::Array { _0: array } => {
-                    let mut items =
-                        Vec::with_capacity(reserve_for(api::cbor_nondet_get_array_length(array)));
+                    let declared = api::cbor_nondet_get_array_length(array);
+                    check_container_len(declared, max_container_len)?;
+                    let mut items = Vec::with_capacity(reserve_for(declared));
                     items.extend(array);
                     RawView::Array(items)
                 }
                 api::CborNondetView::Map { _0: map } => {
-                    let mut entries =
-                        Vec::with_capacity(reserve_for(api::cbor_nondet_get_map_length(map)));
+                    let declared = api::cbor_nondet_get_map_length(map);
+                    check_container_len(declared, max_container_len)?;
+                    let mut entries = Vec::with_capacity(reserve_for(declared));
                     entries.extend(map.into_iter().map(|e| {
                         (
                             api::cbor_nondet_map_entry_key(e),
@@ -298,7 +365,7 @@ mod nondet_backend {
                 }
                 api::CborNondetView::Tagged { tag, payload } => RawView::Tagged { tag, payload },
                 api::CborNondetView::SimpleValue { _0: value } => RawView::Simple(value),
-            }
+            })
         }
 
         fn to_vec(item: Self) -> Result<Vec<u8>, String> {
@@ -430,7 +497,7 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse CBOR bytes in the given [`Mode`], up to
-    /// [`MAX_CBOR_NESTING_DEPTH`].
+    /// [`MAX_CBOR_NESTING_DEPTH`] and with no limit on container length.
     ///
     /// The entire input must be consumed; trailing bytes are rejected. Byte
     /// and text payloads in the result borrow from `bytes`.
@@ -439,16 +506,36 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse CBOR bytes in the given [`Mode`], rejecting inputs nested deeper
-    /// than `max_depth`.
+    /// than `max_depth`, with no limit on container length.
     pub fn parse_with_depth<M: Mode>(bytes: &'a [u8], max_depth: usize) -> Result<Self, String> {
-        let (item, remainder) = <M::Item<'a>>::parse(bytes).ok_or("Failed to parse CBOR bytes")?;
+        Self::parse_with_limits::<M>(bytes, max_depth, UNBOUNDED_CONTAINER_LEN)
+    }
+
+    /// Parse CBOR bytes in the given [`Mode`], rejecting inputs nested deeper
+    /// than `max_depth` or containing an array or map with more than
+    /// `max_container_len` entries, at any level, keys included.
+    ///
+    /// Both limits are checked before any space is reserved for a container.
+    /// In [`Nondet`] mode they are also handed to EverCBOR's bounded
+    /// validator, which bounds the cost of validating untrusted input before
+    /// any item is produced. Input it rejects fails with the generic parse
+    /// error, whether malformed or over a limit; input that passes it but
+    /// exceeds a limit under this crate's stricter accounting fails naming
+    /// the limit.
+    pub fn parse_with_limits<M: Mode>(
+        bytes: &'a [u8],
+        max_depth: usize,
+        max_container_len: usize,
+    ) -> Result<Self, String> {
+        let (item, remainder) = <M::Item<'a>>::parse(bytes, max_depth, max_container_len)
+            .ok_or("Failed to parse CBOR bytes")?;
         if !remainder.is_empty() {
             return Err(format!(
                 "Trailing bytes: {} unconsumed byte(s)",
                 remainder.len()
             ));
         }
-        Self::from_raw::<M::Item<'a>>(item, max_depth)
+        Self::from_raw::<M::Item<'a>>(item, max_depth, max_container_len)
     }
 
     /// Parse leniently, accepting any well-formed definite-length encoding.
@@ -677,8 +764,12 @@ impl<'a> CborValue<'a> {
             .ok_or_else(|| "Maximum CBOR nesting depth exceeded".to_string())
     }
 
-    fn from_raw<B: Backend<'a>>(item: B, budget: usize) -> Result<Self, String> {
-        Ok(match B::destruct(item) {
+    fn from_raw<B: Backend<'a>>(
+        item: B,
+        budget: usize,
+        max_container_len: usize,
+    ) -> Result<Self, String> {
+        Ok(match B::destruct(item, max_container_len)? {
             RawView::Int64 {
                 negative,
                 magnitude,
@@ -691,7 +782,7 @@ impl<'a> CborValue<'a> {
                 CborValue::Array(
                     children
                         .into_iter()
-                        .map(|c| Self::from_raw::<B>(c, child_budget))
+                        .map(|c| Self::from_raw::<B>(c, child_budget, max_container_len))
                         .collect::<Result<_, _>>()?,
                 )
             }
@@ -702,8 +793,8 @@ impl<'a> CborValue<'a> {
                         .into_iter()
                         .map(|(k, v)| {
                             Ok((
-                                Self::from_raw::<B>(k, child_budget)?,
-                                Self::from_raw::<B>(v, child_budget)?,
+                                Self::from_raw::<B>(k, child_budget, max_container_len)?,
+                                Self::from_raw::<B>(v, child_budget, max_container_len)?,
                             ))
                         })
                         .collect::<Result<_, String>>()?,
@@ -714,6 +805,7 @@ impl<'a> CborValue<'a> {
                 payload: Box::new(Self::from_raw::<B>(
                     payload,
                     Self::child_budget(budget, 1)?,
+                    max_container_len,
                 )?),
             },
         })
