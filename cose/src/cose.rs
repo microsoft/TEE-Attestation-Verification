@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
+use cbor::CborValue;
 #[cfg(async_crypto)]
 use crypto::AsyncCryptoBackend;
 #[cfg(sync_crypto)]
@@ -14,6 +14,20 @@ use crypto::{
 // COSE_Sign1 Sig_structure context string.
 // RFC 9052, Section 4.4: https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
+
+/// Nesting depth accepted when parsing COSE structures from untrusted input.
+///
+/// A COSE_Sign1 envelope with its headers nests a handful of levels; this is
+/// far above that while still bounding the parser's stack use.
+pub const MAX_COSE_NESTING_DEPTH: usize = 64;
+
+/// Entries accepted in any map when parsing COSE structures from untrusted
+/// input, header maps and CWT claims included.
+///
+/// Header maps hold a few dozen labels at most; this is far above that while
+/// still bounding the validator's duplicate-key check, which costs time
+/// quadratic in the number of entries.
+pub const MAX_COSE_MAP_LEN: usize = 1000;
 
 // RFC 9052, Section 4.2: tagged COSE_Sign1 is CBOR tag 18.
 pub const COSE_SIGN1_TAG: u64 = 18;
@@ -218,7 +232,8 @@ fn protected_header_alg(phdr: &[u8]) -> Result<Option<i64>, String> {
         return Ok(None);
     }
 
-    let protected = CborValue::parse_nondet_bounded(phdr, MAX_CBOR_NESTING_DEPTH, usize::MAX)?;
+    let protected =
+        CborValue::parse_nondet_bounded(phdr, MAX_COSE_NESTING_DEPTH, MAX_COSE_MAP_LEN)?;
     for (key, value) in protected.iter_map()? {
         if key == &CborValue::Int(COSE_HEADER_ALG) {
             return match value {
@@ -456,6 +471,38 @@ mod tests {
         assert_eq!(
             cose_verify1(&key, algorithm, &[0x80], b"", b"").unwrap_err(),
             "Expected Map, got \"Array\""
+        );
+    }
+
+    /// A protected header map is parsed within `MAX_COSE_MAP_LEN`, so one
+    /// entry past it fails as unparseable before any signature work.
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_bounds_protected_header_map_length() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        let header = |entries: usize| {
+            CborValue::Map(
+                (0..entries as i64)
+                    .map(|label| (CborValue::Int(label), CborValue::Int(0)))
+                    .collect(),
+            )
+            .to_bytes_det()
+            .unwrap()
+        };
+
+        // Within the bound the header parses, so verification reaches the
+        // protected alg (0 here) and rejects it on that ground.
+        let within = header(MAX_COSE_MAP_LEN);
+        assert!(cose_verify1(&key, algorithm, &within, b"", b"")
+            .unwrap_err()
+            .contains("does not match supplied alg"));
+
+        let over = header(MAX_COSE_MAP_LEN + 1);
+        assert_eq!(
+            cose_verify1(&key, algorithm, &over, b"", b"").unwrap_err(),
+            "Failed to parse CBOR bytes"
         );
     }
 

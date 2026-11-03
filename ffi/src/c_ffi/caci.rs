@@ -159,8 +159,8 @@ pub unsafe extern "C" fn tav_verify_caci_uvm_endorsement(
             .map_err(TavError::from)?;
         let value = ::cbor::CborValue::parse_nondet_bounded(
             uvm_endorsement,
-            ::cbor::MAX_CBOR_NESTING_DEPTH,
-            usize::MAX,
+            cose::MAX_COSE_NESTING_DEPTH,
+            cose::MAX_COSE_MAP_LEN,
         )
         .map_err(|message| {
             TavError::new(
