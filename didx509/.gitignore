@@ -1,0 +1,4 @@
+/target/
+/fuzz/differential/target/
+/fuzz/differential/failures/
+__pycache__/
