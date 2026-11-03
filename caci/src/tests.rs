@@ -986,7 +986,7 @@ fn measurement_hex_upper(report: AttestationReport) -> String {
 fn endorsement_protected_header(endorsement: &CborValue<'_>) -> CborValue<'static> {
     let sign1 = cose::cose_sign1(endorsement).unwrap();
     let protected = parse::required_bstr(sign1.array_at(0).unwrap(), "protected").unwrap();
-    CborValue::parse_nondet(&protected).unwrap().into_owned()
+    parse::parse_cbor(&protected).unwrap().into_owned()
 }
 
 fn endorsement_payload(endorsement: &CborValue<'_>) -> serde_json::Value {
@@ -1014,7 +1014,7 @@ fn replace_cose_feed<'a>(mut endorsement: CborValue<'a>, feed: &str) -> CborValu
         CborValue::ByteString(protected) => protected.to_vec(),
         other => panic!("expected protected header byte string, got {other:?}"),
     };
-    let mut protected_header = CborValue::parse_nondet(&protected).unwrap();
+    let mut protected_header = parse::parse_cbor(&protected).unwrap();
     let protected_entries = match &mut protected_header {
         CborValue::Map(entries) => entries,
         other => panic!("expected protected header map, got {other:?}"),

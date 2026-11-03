@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use cbor::CborValue;
+use cbor::{CborValue, MAX_CBOR_NESTING_DEPTH};
 #[cfg(async_crypto)]
 use crypto::AsyncCryptoBackend;
 #[cfg(sync_crypto)]
@@ -218,7 +218,7 @@ fn protected_header_alg(phdr: &[u8]) -> Result<Option<i64>, String> {
         return Ok(None);
     }
 
-    let protected = CborValue::parse_nondet(phdr)?;
+    let protected = CborValue::parse_nondet_bounded(phdr, MAX_CBOR_NESTING_DEPTH, usize::MAX)?;
     for (key, value) in protected.iter_map()? {
         if key == &CborValue::Int(COSE_HEADER_ALG) {
             return match value {

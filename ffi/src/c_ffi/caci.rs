@@ -157,7 +157,12 @@ pub unsafe extern "C" fn tav_verify_caci_uvm_endorsement(
         }?;
         synchronous::verify_uvm_endorsement(uvm_endorsement, trusted_didx509)
             .map_err(TavError::from)?;
-        let value = ::cbor::CborValue::parse_nondet(uvm_endorsement).map_err(|message| {
+        let value = ::cbor::CborValue::parse_nondet_bounded(
+            uvm_endorsement,
+            ::cbor::MAX_CBOR_NESTING_DEPTH,
+            usize::MAX,
+        )
+        .map_err(|message| {
             TavError::new(
                 TavErrorCode::CaciCose,
                 format!("failed to materialize verified UVM CBOR: {message}"),

@@ -22,8 +22,9 @@ prefer OpenSSL. WASM targets prefer WebCrypto.
 
 ## Parsing and verification
 
-Use `CborValue::parse_nondet` to parse a COSE_Sign1 envelope. COSE_Sign1 is
-encoded as CBOR tag 18 over an array:
+Use `CborValue::parse_nondet_bounded` to parse a COSE_Sign1 envelope, bounding
+the nesting depth and the number of entries per map to what the expected
+envelope needs. COSE_Sign1 is encoded as CBOR tag 18 over an array:
 
 ```text
 [
@@ -57,7 +58,9 @@ use tee_attestation_verification_cose::{
     SignatureKeyAlgorithm,
 };
 
-let envelope = CborValue::parse_nondet(cose_sign1)?;
+// A COSE_Sign1 envelope nests a few levels and its header maps hold a handful
+// of entries; bounding both caps the cost of validating untrusted input.
+let envelope = CborValue::parse_nondet_bounded(cose_sign1, 8, 64)?;
 let sign1 = match envelope {
     CborValue::Tagged { tag: 18, payload } => *payload,
     _ => return Err("expected COSE_Sign1 tag".into()),

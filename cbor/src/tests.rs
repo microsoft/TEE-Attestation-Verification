@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// `parse_nondet` and `from_bytes` stay supported until removed, so the tests
+// written against them keep running unchanged. Tests of the map length bound
+// use `parse_nondet_bounded` directly.
+#![allow(deprecated)]
+
 use super::*;
 
 /// Serializing, reparsing, and reserializing must be a fixed point.
@@ -306,6 +311,126 @@ fn explicit_depth_limit_is_honoured() {
     let value = CborValue::parse_nondet(&bytes).unwrap();
     assert!(value.to_bytes_with_depth::<Det>(2).is_ok());
     assert!(value.to_bytes_with_depth::<Det>(1).is_err());
+}
+
+/// The map length bound applies to maps at every level, keys included.
+/// EverCBOR bounds maps only, so arrays pass regardless of their length.
+#[test]
+fn nondet_map_len_bound_is_honoured() {
+    let maps: [&[u8]; 3] = [
+        &[0xa3, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03], // {1: 1, 2: 2, 3: 3}
+        &[0x81, 0xa3, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03], // [{1: 1, 2: 2, 3: 3}]
+        &[0xa1, 0xa3, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x00], // {{1: 1, 2: 2, 3: 3}: 0}
+    ];
+    for document in maps {
+        assert!(CborValue::parse_nondet_bounded(document, 3, 3).is_ok());
+        assert_eq!(
+            CborValue::parse_nondet_bounded(document, 3, 2).unwrap_err(),
+            "Failed to parse CBOR bytes"
+        );
+    }
+
+    let wide_array: &[u8] = &[0x83, 0x01, 0x02, 0x03];
+    assert!(CborValue::parse_nondet_bounded(wide_array, 1, 0).is_ok());
+
+    // An empty map has no entries, so it fits a bound of 0.
+    assert!(CborValue::parse_nondet_bounded(&[0xa0], 0, 0).is_ok());
+    assert!(CborValue::parse_nondet_bounded(&[0xa1, 0x01, 0x01], 1, 0).is_err());
+}
+
+/// EverCBOR's map depth bound counts empty maps and ignores arrays and tags,
+/// so it is offset by one to never reject what the tree walk accepts.
+#[test]
+fn nondet_map_depth_bound_matches_the_tree_walk() {
+    // {1: {}} needs a budget of 1: the empty map is a leaf.
+    let empty_leaf: &[u8] = &[0xa1, 0x01, 0xa0];
+    assert!(CborValue::parse_nondet_bounded(empty_leaf, 1, 1).is_ok());
+    assert!(CborValue::parse_nondet_bounded(empty_leaf, 0, 1).is_err());
+
+    // [[[{}]]] needs a budget of 3, and only the empty map counts for EverCBOR.
+    let arrays_over_map: &[u8] = &[0x81, 0x81, 0x81, 0xa0];
+    assert!(CborValue::parse_nondet_bounded(arrays_over_map, 3, 0).is_ok());
+    assert_eq!(
+        CborValue::parse_nondet_bounded(arrays_over_map, 2, 0).unwrap_err(),
+        "Maximum CBOR nesting depth exceeded"
+    );
+
+    // {1: {2: {3: 0}}} needs a budget of 3. One level short, EverCBOR's
+    // offset bound still admits it and the tree walk names the limit; two
+    // levels short, EverCBOR rejects it before any item is produced. The
+    // generic parsers hand EverCBOR the same depth bound.
+    let chain: &[u8] = &[0xa1, 0x01, 0xa1, 0x02, 0xa1, 0x03, 0x00];
+    assert!(CborValue::parse_nondet_bounded(chain, 3, 1).is_ok());
+    assert!(CborValue::parse_with_depth::<Nondet>(chain, 3).is_ok());
+    for err in [
+        CborValue::parse_nondet_bounded(chain, 2, 1).unwrap_err(),
+        CborValue::parse_with_depth::<Nondet>(chain, 2).unwrap_err(),
+    ] {
+        assert_eq!(err, "Maximum CBOR nesting depth exceeded");
+    }
+    for err in [
+        CborValue::parse_nondet_bounded(chain, 1, 1).unwrap_err(),
+        CborValue::parse_with_depth::<Nondet>(chain, 1).unwrap_err(),
+    ] {
+        assert_eq!(err, "Failed to parse CBOR bytes");
+    }
+}
+
+/// The parsers without a map length bound keep accepting maps of any length.
+#[test]
+fn unbounded_parsers_accept_maps_of_any_length() {
+    const WIDTH: usize = 100;
+    let value = CborValue::Map(
+        (0..WIDTH as i64)
+            .map(|i| (CborValue::Int(i), CborValue::Int(i)))
+            .collect(),
+    );
+    let document = value.to_bytes_det().unwrap();
+
+    for parsed in [
+        CborValue::parse_nondet(&document).unwrap(),
+        CborValue::parse_det(&document).unwrap(),
+        CborValue::parse::<Nondet>(&document).unwrap(),
+        CborValue::parse_with_depth::<Nondet>(&document, 1).unwrap(),
+        CborValue::from_bytes(&document).unwrap(),
+        CborValue::parse_nondet_bounded(&document, 1, WIDTH).unwrap(),
+    ] {
+        assert_eq!(parsed, value);
+    }
+    assert!(CborValue::parse_nondet_bounded(&document, 1, WIDTH - 1).is_err());
+}
+
+/// Within the bounds, the bounded validator accepts exactly what the
+/// unbounded one did: the same documents parse to the same values and the
+/// same malformed documents are rejected.
+#[test]
+fn bounded_validation_preserves_acceptance_within_bounds() {
+    let document = CborValue::Map(vec![
+        (CborValue::Int(1), CborValue::text("one")),
+        (CborValue::text("two"), CborValue::bytes(vec![2, 2])),
+        (
+            CborValue::Array(vec![CborValue::Int(3)]),
+            CborValue::Tagged {
+                tag: 3,
+                payload: Box::new(CborValue::Map(vec![])),
+            },
+        ),
+        (CborValue::Int(-4), CborValue::Simple(22)),
+    ])
+    .to_bytes_det()
+    .unwrap();
+    assert_eq!(
+        CborValue::parse_nondet_bounded(&document, 3, 4).unwrap(),
+        CborValue::parse_det(&document).unwrap(),
+    );
+
+    let duplicate_keys: &[u8] = &[0xa2, 0x01, 0x01, 0x01, 0x02];
+    let truncated: &[u8] = &[0xa2, 0x01, 0x01, 0x02];
+    let indefinite: &[u8] = &[0x9f, 0x01, 0xff];
+    for malformed in [duplicate_keys, truncated, indefinite] {
+        assert!(CborValue::parse_nondet_bounded(malformed, 2, 2).is_err());
+        assert!(CborValue::parse_nondet_bounded(malformed, 2, usize::MAX).is_err());
+    }
 }
 
 // --- Accessor: array index ---

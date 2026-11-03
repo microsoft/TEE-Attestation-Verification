@@ -33,7 +33,9 @@ use std::collections::BTreeSet;
 use didx509::verify_didx509_root;
 #[cfg(async_crypto)]
 use didx509::verify_didx509_root_async;
-use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
+use parse::{
+    parse_attestation, parse_cbor, parse_x5chain_certs, required_bstr, required_int, required_text,
+};
 
 pub use attestation::snp;
 pub use cose::CborValue;
@@ -137,7 +139,7 @@ pub mod synchronous {
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        let parsed = parse_cbor(uvm_endorsement)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -145,7 +147,7 @@ pub mod synchronous {
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
 
-        let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+        let protected_header = parse_cbor(&protected)?;
         let x5chain = parse::parse_x5chain(
             protected_header
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
@@ -366,7 +368,7 @@ pub mod asynchronous {
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        let parsed = parse_cbor(uvm_endorsement)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // Sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -374,7 +376,7 @@ pub mod asynchronous {
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
 
-        let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+        let protected_header = parse_cbor(&protected)?;
         let x5chain = parse::parse_x5chain(
             protected_header
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
@@ -568,7 +570,7 @@ fn verify_caci_attestation_impl(
     let sign1 = cose::cose_sign1(uvm_endorsement).map_err(AciError::Cose)?;
     let payload = parse::cose_payload(sign1)?;
     let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
-    let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+    let protected_header = parse_cbor(&protected)?;
 
     let content_type = protected_header
         .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
