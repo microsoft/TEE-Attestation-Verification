@@ -30,7 +30,7 @@ jobs:
       - name: Test with OpenSSL backend
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_openssl -- --nocapture
 
-      - name: Check compliant default dependencies
+      - name: Check default dependencies
         run: scripts/check-crypto-default-dependencies.sh
 
       - name: Test compliant default
