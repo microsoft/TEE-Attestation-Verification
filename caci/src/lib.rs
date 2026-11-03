@@ -16,8 +16,8 @@
 //!    measurement matches the attestation report measurement.
 //!
 
-mod didx509;
 mod parse;
+mod uvm;
 
 use attestation::snp::report::{AttestationReport, TcbVersionForGeneration, TcbVersionRaw};
 use attestation::snp::verify::{ChainVerification, VerificationError};
@@ -29,11 +29,7 @@ use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
 use crypto::{CryptoBackend, KeyBackend};
 use std::collections::BTreeSet;
 
-#[cfg(sync_crypto)]
-use didx509::verify_didx509_root;
-#[cfg(async_crypto)]
-use didx509::verify_didx509_root_async;
-use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
+use parse::{parse_attestation, required_bstr, required_int, required_text};
 
 pub use attestation::snp;
 pub use cose::CborValue;
@@ -131,8 +127,14 @@ pub mod synchronous {
 
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
-    /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`.
+    /// This verifies the COSE_Sign1 signature and validates both `trusted_didx509`
+    /// and the protected issuer DID against the exact `x5chain`, including their
+    /// predicates. Both DIDs must share a prefix, but their predicates may differ.
+    ///
+    /// Certificate validity uses protected `signingtime` or CWT `iat`, or the
+    /// current time if absent. Signed time is not independent timestamp proof.
+    /// Full RFC 5280 processing is disabled; the DID crate's default signature,
+    /// path, time, extension, fingerprint, and predicate checks still apply.
     pub fn verify_uvm_endorsement<'a>(
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
@@ -152,87 +154,16 @@ pub mod synchronous {
                 .map_err(AciError::Cose)?,
         )?;
 
-        let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
-        let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        let content_type = protected_header
-            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
-            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
-            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
-            .and_then(|value| required_text(value, "protected content type"))?;
-        match content_type.as_str() {
-            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
-            "application/json"
-                if protected_header.map_at_str("iss").is_ok()
-                    && protected_header.map_at_str("signingtime").is_ok() =>
-            {
-                let issuer = required_text(
-                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-                    "iss",
-                )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
-
-                let signing_time = protected_header
-                    .map_at_str("signingtime")
-                    .ok()
-                    .map(parse::parse_signing_time)
-                    .transpose()?;
-                <crypto::Crypto as CryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            "application/octet-stream"
-                if protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .is_ok() =>
-            {
-                let cwt_claims = protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .map_err(AciError::Cose)?;
-                let issuer = required_text(
-                    cwt_claims
-                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
-                        .map_err(AciError::Cose)?,
-                    "CWT iss",
-                )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
-
-                let signing_time = cwt_claims
-                    .map_at_int(cose::CWT_CLAIMS_IAT)
-                    .ok()
-                    .map(|iat| {
-                        let iat = match iat {
-                            CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat").map_err(|_| ())
-                            }
-                            CborValue::Int(iat) => Ok(*iat),
-                            _ => Err(()),
-                        }
-                        .and_then(|iat| iat.try_into().map_err(|_| ()))
-                        .map(std::time::Duration::from_secs)
-                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
-                        Ok(iat)
-                    })
-                    .transpose()?;
-                <crypto::Crypto as CryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            other => {
-                return Err(AciError::Measurement(format!(
-                    "unsupported ACI payload content type {other}"
-                )));
-            }
-        }
+        let (issuer, time) = uvm::issuer_and_time(&protected_header)?;
+        uvm::verify_dids(trusted_didx509, &issuer, &x5chain, time)?;
 
         // Verify signature
+        let leaf = crypto::Crypto::from_der(
+            x5chain
+                .first()
+                .ok_or_else(|| AciError::Certificate("x5chain is empty".into()))?,
+        )
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
             protected_header
                 .map_at_int(cose::COSE_HEADER_ALG)
@@ -358,10 +289,17 @@ pub mod asynchronous {
 
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
-    /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
+    /// This verifies the COSE_Sign1 signature and validates both `trusted_didx509`
+    /// and the protected issuer DID against the exact `x5chain`, including their
+    /// predicates. Both DIDs must share a prefix, but their predicates may differ.
+    /// This is stage 2 of the ACI flow;
     /// call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
+    ///
+    /// Certificate validity uses protected `signingtime` or CWT `iat`, or the
+    /// current time if absent. Signed time is not independent timestamp proof.
+    /// Full RFC 5280 processing is disabled; the DID crate's default signature,
+    /// path, time, extension, fingerprint, and predicate checks still apply.
     pub async fn verify_uvm_endorsement<'a>(
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
@@ -380,89 +318,16 @@ pub mod asynchronous {
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
                 .map_err(AciError::Cose)?,
         )?;
-        let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
-        let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        let content_type = protected_header
-            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
-            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
-            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
-            .and_then(|value| required_text(value, "protected content type"))?;
-        match content_type.as_str() {
-            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
-            "application/json"
-                if protected_header.map_at_str("iss").is_ok()
-                    && protected_header.map_at_str("signingtime").is_ok() =>
-            {
-                let issuer = required_text(
-                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-                    "iss",
-                )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
-
-                let signing_time = protected_header
-                    .map_at_str("signingtime")
-                    .ok()
-                    .map(parse::parse_signing_time)
-                    .transpose()?;
-                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .await
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            "application/octet-stream"
-                if protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .is_ok() =>
-            {
-                let cwt_claims = protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .map_err(AciError::Cose)?;
-                let issuer = required_text(
-                    cwt_claims
-                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
-                        .map_err(AciError::Cose)?,
-                    "CWT iss",
-                )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
-
-                let signing_time = cwt_claims
-                    .map_at_int(cose::CWT_CLAIMS_IAT)
-                    .ok()
-                    .map(|iat| {
-                        let iat = match iat {
-                            CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat").map_err(|_| ())
-                            }
-                            CborValue::Int(iat) => Ok(*iat),
-                            _ => Err(()),
-                        }
-                        .and_then(|iat| iat.try_into().map_err(|_| ()))
-                        .map(std::time::Duration::from_secs)
-                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
-                        Ok(iat)
-                    })
-                    .transpose()?;
-                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .await
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            other => {
-                return Err(AciError::Measurement(format!(
-                    "unsupported ACI payload content type {other}"
-                )));
-            }
-        }
+        let (issuer, time) = uvm::issuer_and_time(&protected_header)?;
+        uvm::verify_dids_async(trusted_didx509, &issuer, &x5chain, time).await?;
 
         // Verify signature
+        let leaf = crypto::Crypto::from_der(
+            x5chain
+                .first()
+                .ok_or_else(|| AciError::Certificate("x5chain is empty".into()))?,
+        )
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
             protected_header
                 .map_at_int(cose::COSE_HEADER_ALG)
@@ -694,7 +559,7 @@ pub enum AciError {
     AttestationVerification(VerificationError),
     /// Certificate parsing or verification failed.
     Certificate(String),
-    /// DID x509 parsing or root pinning failed.
+    /// DID x509 parsing, issuer linkage, fingerprint, or predicate verification failed.
     DidX509(String),
     /// COSE envelope/header parsing failed.
     Cose(String),
