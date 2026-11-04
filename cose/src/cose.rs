@@ -28,16 +28,15 @@ pub const MAX_COSE_MAP_LEN: usize = 64;
 /// Bytes accepted when parsing a COSE structure from untrusted input.
 ///
 /// Duplicate-key detection compares map keys pairwise, so its cost grows with
-/// the square of the number of entries within any map bounds; the size cap
-/// bounds it. Real endorsements are about 10 KiB, mostly certificates. An
-/// adversarial input filling this cap with nested map keys costs several
-/// seconds of CPU.
+/// the square of the number of entries; the size cap bounds it. Real
+/// endorsements are about 10 KiB, mostly certificates; an adversarial input
+/// of this size made of nested map keys costs several seconds of CPU.
 pub const MAX_COSE_INPUT_LEN: usize = 64 * 1024;
 
 /// Parse untrusted CBOR within the COSE bounds: at most [`MAX_COSE_INPUT_LEN`]
 /// bytes, then [`CborValue::parse_nondet_bounded`] under
 /// [`MAX_COSE_NESTING_DEPTH`] and [`MAX_COSE_MAP_LEN`]. Protected headers are
-/// parsed this way; parse COSE_Sign1 envelopes the same way.
+/// parsed this way; use it for COSE_Sign1 envelopes too.
 pub fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, String> {
     if bytes.len() > MAX_COSE_INPUT_LEN {
         return Err(format!(

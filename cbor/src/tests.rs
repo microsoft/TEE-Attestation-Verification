@@ -311,8 +311,8 @@ fn explicit_depth_limit_is_honoured() {
     assert!(value.to_bytes_with_depth::<Det>(1).is_err());
 }
 
-/// The map length bound applies to maps at every level, keys included.
-/// EverCBOR bounds maps only, so arrays pass regardless of their length.
+/// The map length bound applies to maps at every level, keys included;
+/// arrays of any length pass.
 #[test]
 fn nondet_map_len_bound_is_honoured() {
     let maps: [&[u8]; 3] = [
@@ -336,8 +336,9 @@ fn nondet_map_len_bound_is_honoured() {
     assert!(CborValue::parse_nondet_bounded(&[0xa1, 0x01, 0x01], 1, 0).is_err());
 }
 
-/// EverCBOR's map depth bound counts empty maps and ignores arrays and tags,
-/// so it is offset by one to never reject what the tree walk accepts.
+/// EverCBOR's depth is the number of maps on a path, an empty map counting as
+/// one, with arrays and tags adding nothing; offset by one, its bound accepts
+/// everything the tree walk accepts.
 #[test]
 fn nondet_map_depth_bound_matches_the_tree_walk() {
     // {1: {}} needs a budget of 1: the empty map is a leaf.
@@ -374,9 +375,9 @@ fn nondet_map_depth_bound_matches_the_tree_walk() {
     }
 }
 
-/// The parsers without a map length bound keep accepting maps of any length.
+/// The other parsers accept maps of any length.
 #[test]
-fn unbounded_parsers_accept_maps_of_any_length() {
+fn other_parsers_accept_maps_of_any_length() {
     const WIDTH: usize = 100;
     let value = CborValue::Map(
         (0..WIDTH as i64)
@@ -398,9 +399,8 @@ fn unbounded_parsers_accept_maps_of_any_length() {
     assert!(CborValue::parse_nondet_bounded(&document, 1, WIDTH - 1).is_err());
 }
 
-/// Within the bounds, the bounded validator accepts exactly what the
-/// unbounded one did: the same documents parse to the same values and the
-/// same malformed documents are rejected.
+/// Within the bounds, valid documents parse to the same values as in `Det`
+/// mode and malformed ones are rejected.
 #[test]
 fn bounded_validation_preserves_acceptance_within_bounds() {
     let document = CborValue::Map(vec![
