@@ -461,20 +461,32 @@ pub unsafe extern "C" fn tav_cbor_det_serialize(
 
 // --- Parsing ---
 
+unsafe fn parse_with(
+    data: *const u8,
+    len: usize,
+    out: *mut *mut TavCborHandle,
+    parser: impl FnOnce(&'static [u8]) -> Result<CborValue<'static>, String>,
+) -> Result<(), TavError> {
+    unsafe { owned_out_ptr(out, "out") }?;
+    let bytes = unsafe { borrowed(data, len) }.ok_or_else(|| {
+        TavError::new(TavErrorCode::CborDecodeFailed, "Invalid CBOR input buffer")
+    })?;
+    let value = parser(bytes).map_err(|e| TavError::new(TavErrorCode::CborDecodeFailed, e))?;
+    unsafe { *out = into_handle(value) };
+    Ok(())
+}
+
 unsafe fn parse<M: Mode>(
     data: *const u8,
     len: usize,
     max_depth: usize,
     out: *mut *mut TavCborHandle,
 ) -> Result<(), TavError> {
-    unsafe { owned_out_ptr(out, "out") }?;
-    let bytes = unsafe { borrowed(data, len) }.ok_or_else(|| {
-        TavError::new(TavErrorCode::CborDecodeFailed, "Invalid CBOR input buffer")
-    })?;
-    let value = CborValue::parse_with_depth::<M>(bytes, capped(max_depth))
-        .map_err(|e| TavError::new(TavErrorCode::CborDecodeFailed, e))?;
-    unsafe { *out = into_handle(value) };
-    Ok(())
+    unsafe {
+        parse_with(data, len, out, |bytes| {
+            CborValue::parse_with_depth::<M>(bytes, capped(max_depth))
+        })
+    }
 }
 
 /// Parse a complete document, borrowing byte and text payloads from `data`.
@@ -492,6 +504,26 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse(
     out: *mut *mut TavCborHandle,
 ) -> *mut TavError {
     into_result(|| unsafe { parse::<Nondet>(data, len, max_depth, out) })
+}
+
+/// Parse like `tav_cbor_nondet_parse`, also rejecting any map with more than
+/// `max_map_len` entries, map keys included.
+///
+/// # Safety
+/// Same requirements as `tav_cbor_nondet_parse`.
+#[no_mangle]
+pub unsafe extern "C" fn tav_cbor_nondet_parse_bounded(
+    data: *const u8,
+    len: usize,
+    max_depth: usize,
+    max_map_len: usize,
+    out: *mut *mut TavCborHandle,
+) -> *mut TavError {
+    into_result(|| unsafe {
+        parse_with(data, len, out, |bytes| {
+            CborValue::parse_nondet_bounded(bytes, capped(max_depth), max_map_len)
+        })
+    })
 }
 
 /// Parse, requiring deterministic encoding.

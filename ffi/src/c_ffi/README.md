@@ -76,7 +76,8 @@ in either order. Caller-owned input must remain alive while either uses it.
 ```c
 TavCborHandle *root = NULL;
 TavCborHandle *child = NULL;
-TavError *error = tav_cbor_nondet_parse(cbor, cbor_len, TAV_CBOR_MAX_DEPTH, &root);
+TavError *error = tav_cbor_nondet_parse_bounded(
+	cbor, cbor_len, TAV_CBOR_DEFAULT_MAX_DEPTH, TAV_CBOR_DEFAULT_MAX_MAP_LEN, &root);
 if (error == NULL) {
 	error = tav_cbor_array_at(root, 0, &child);
 }

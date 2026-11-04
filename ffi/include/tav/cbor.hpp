@@ -25,6 +25,8 @@
 // - MAX_DEPTH limits parsing and serialization, not builders. Callers must
 //   bound the depth they build. Copying, materializing, or destroying an
 //   extremely deep Value can exhaust the process stack and abort.
+// - nondet_parse defaults to DEFAULT_MAX_DEPTH and DEFAULT_MAX_MAP_LEN, the
+//   bounds for untrusted input.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -42,6 +44,10 @@ namespace tav::cbor
 {
 /// Ceiling on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
+
+/// Bounds nondet_parse applies to untrusted input by default.
+constexpr size_t DEFAULT_MAX_DEPTH = TAV_CBOR_DEFAULT_MAX_DEPTH;
+constexpr size_t DEFAULT_MAX_MAP_LEN = TAV_CBOR_DEFAULT_MAX_MAP_LEN;
 
 /// Value kinds. INVALID is reported for an empty Value.
 enum class Kind : int
@@ -96,7 +102,7 @@ Value make_map(std::vector<MapItem>&& entries);
 Value make_tagged(uint64_t tag, Value&& payload);
 Value shallow_copy(const Value& value);
 Value deep_copy(const Value& value);
-Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth);
+Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth, size_t max_map_len);
 Value det_parse(std::span<const uint8_t> raw, size_t max_depth);
 
 /// An owning value. Moving transfers the handle and empties the source.
@@ -241,7 +247,7 @@ private:
     friend Value make_tagged(uint64_t, Value&&);
     friend Value shallow_copy(const Value&);
     friend Value deep_copy(const Value&);
-    friend Value nondet_parse(std::span<const uint8_t>, size_t);
+    friend Value nondet_parse(std::span<const uint8_t>, size_t, size_t);
     friend Value det_parse(std::span<const uint8_t>, size_t);
 
     /// Holds handles being handed to a container constructor.
@@ -298,15 +304,6 @@ private:
 
     using Encoder =
       TavError* (*)(const TavCborHandle*, size_t, TavByteBuffer**);
-    using Parser =
-      TavError* (*)(const uint8_t*, size_t, size_t, TavCborHandle**);
-
-    static Value parse_with(Parser parser, std::span<const uint8_t> raw, size_t max_depth)
-    {
-        TavCborHandle* out = nullptr;
-        tav::check(parser(raw.data(), raw.size(), max_depth, &out));
-        return Value(out);
-    }
 
     explicit Value(TavCborHandle* handle) : handle_(handle) {}
 
@@ -393,16 +390,24 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 
 /// Borrows raw, which must outlive the returned value.
 ///
-/// Map keys use RFC 8949 equivalence, including order-independent map comparison.
-inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
+/// Rejects input nested deeper than max_depth or holding a map with more than
+/// max_map_len entries, map keys included. Map keys use RFC 8949 equivalence,
+/// including order-independent map comparison.
+inline Value nondet_parse(
+  std::span<const uint8_t> raw,
+  size_t max_depth = DEFAULT_MAX_DEPTH,
+  size_t max_map_len = DEFAULT_MAX_MAP_LEN)
 {
-    return Value::parse_with(tav_cbor_nondet_parse, raw, max_depth);
+    return Value::construct([&](auto out) {
+        return tav_cbor_nondet_parse_bounded(raw.data(), raw.size(), max_depth, max_map_len, out);
+    });
 }
 
 /// Borrows raw, and requires deterministic encoding.
 inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
 {
-    return Value::parse_with(tav_cbor_det_parse, raw, max_depth);
+    return Value::construct(
+      [&](auto out) { return tav_cbor_det_parse(raw.data(), raw.size(), max_depth, out); });
 }
 
 /// Copy a value, keeping the payload ownership the source had.

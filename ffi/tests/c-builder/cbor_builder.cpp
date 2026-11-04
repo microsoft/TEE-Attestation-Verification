@@ -733,6 +733,57 @@ TEST_CASE("cbor handle: serialization stops one level past the depth ceiling")
     CHECK_NOTHROW((void)shallow_copy(past_ceiling));
 }
 
+TEST_CASE("cbor handle: nondet_parse bounds depth and map length by default")
+{
+    static_assert(DEFAULT_MAX_DEPTH == TAV_CBOR_DEFAULT_MAX_DEPTH);
+    static_assert(DEFAULT_MAX_MAP_LEN == TAV_CBOR_DEFAULT_MAX_MAP_LEN);
+    static_assert(DEFAULT_MAX_DEPTH <= MAX_DEPTH);
+
+    // Each 0x81 opens a one-element array, so the run gives that many levels.
+    auto nest = [](size_t levels) {
+        std::vector<uint8_t> document(levels, 0x81);
+        document.push_back(0x01);
+        return document;
+    };
+    CHECK_NOTHROW((void)nondet_parse(nest(DEFAULT_MAX_DEPTH)));
+    CHECK_THROWS_AS((void)nondet_parse(nest(DEFAULT_MAX_DEPTH + 1)), Exception);
+    CHECK_NOTHROW((void)nondet_parse(nest(DEFAULT_MAX_DEPTH + 1), DEFAULT_MAX_DEPTH + 1));
+
+    // {0: 0, 1: 0, ...} in preferred encoding, so det_parse accepts it too.
+    auto flat_map = [](size_t entries) {
+        std::vector<uint8_t> document = {0xb8, static_cast<uint8_t>(entries)};
+        for (size_t key = 0; key < entries; ++key)
+        {
+            if (key >= 24)
+            {
+                document.push_back(0x18);
+            }
+            document.push_back(static_cast<uint8_t>(key));
+            document.push_back(0x00);
+        }
+        return document;
+    };
+    CHECK(nondet_parse(flat_map(DEFAULT_MAX_MAP_LEN)).size() == DEFAULT_MAX_MAP_LEN);
+    try
+    {
+        (void)nondet_parse(flat_map(DEFAULT_MAX_MAP_LEN + 1));
+        FAIL("a map past the default length parsed");
+    }
+    catch (const Exception& error)
+    {
+        CHECK(error.code() == ErrorCode::CBOR_DECODE_FAILED);
+    }
+    CHECK(
+      nondet_parse(flat_map(DEFAULT_MAX_MAP_LEN + 1), DEFAULT_MAX_DEPTH, DEFAULT_MAX_MAP_LEN + 1)
+        .size() == DEFAULT_MAX_MAP_LEN + 1);
+    CHECK(det_parse(flat_map(DEFAULT_MAX_MAP_LEN + 1)).size() == DEFAULT_MAX_MAP_LEN + 1);
+
+    // Map keys count too: {{0: 0, 1: 0}: 0} holds a two-entry map.
+    const std::vector<uint8_t> map_key = {0xa1, 0xa2, 0x00, 0x00, 0x01, 0x00, 0x00};
+    CHECK_THROWS_AS((void)nondet_parse(map_key, DEFAULT_MAX_DEPTH, 1), Exception);
+    CHECK(nondet_parse(map_key, DEFAULT_MAX_DEPTH, 2).size() == 1);
+}
+
 TEST_CASE("cbor handle: every key a map holds can be looked up")
 {
     const std::vector<uint8_t> bytes_key = {0x01};

@@ -21,6 +21,11 @@
 //! invalid UTF-8, duplicate map keys, and integers outside the range of
 //! `i64`.
 //!
+//! [`CborValue::parse_nondet_bounded`] additionally bounds the number of
+//! entries in any map and hands both bounds to EverCBOR's bounded validator,
+//! which caps its stack use and, since it detects duplicate keys by comparing
+//! map entries pairwise, the work it spends per map.
+//!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
 //! the value. [`CborValue::into_owned`] detaches a value from its input.
@@ -29,9 +34,11 @@
 //! discarding the width of the original head, so a non-preferred encoding is
 //! re-serialized in its preferred form.
 //!
-//! [`CborValue::from_bytes`] and [`CborValue::to_bytes`] are deprecated. They
-//! keep the pre-[`Mode`] behaviour: parse in [`Nondet`] mode into an owned
-//! value, and serialize in [`Det`] mode.
+//! [`CborValue::parse_nondet`] is deprecated in favour of
+//! [`CborValue::parse_nondet_bounded`]. [`CborValue::from_bytes`] and
+//! [`CborValue::to_bytes`] are deprecated. They keep the pre-[`Mode`]
+//! behaviour: parse in [`Nondet`] mode into an owned value, and serialize in
+//! [`Det`] mode.
 
 use std::borrow::Cow;
 
@@ -42,6 +49,9 @@ use std::borrow::Cow;
 /// leaf. This bounds the recursion depth reached while walking untrusted
 /// input.
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
+
+/// Map length bound larger than any input can hold.
+const UNBOUNDED_MAP_LEN: usize = usize::MAX;
 
 /// Bound passed to EverCBOR's serialized-size estimator.
 const SIZE_BOUND: usize = usize::MAX;
@@ -110,7 +120,9 @@ pub enum RawView<'a, B> {
 pub trait Backend<'a>: Sized + Copy {
     type MapEntry: Copy;
 
-    fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])>;
+    /// Parse the first item of `input` within the bounds EverCBOR's validator
+    /// takes.
+    fn parse(input: &'a [u8], max_depth: usize, max_map_len: usize) -> Option<(Self, &'a [u8])>;
     fn destruct(item: Self) -> RawView<'a, Self>;
     fn to_vec(item: Self) -> Result<Vec<u8>, String>;
 
@@ -158,7 +170,13 @@ mod det_backend {
     impl<'a> Backend<'a> for api::CborDet<'a> {
         type MapEntry = api::CborDetMapEntry<'a>;
 
-        fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])> {
+        /// `cbor_det_parse` takes only the input; the tree walk bounds the
+        /// depth.
+        fn parse(
+            input: &'a [u8],
+            _max_depth: usize,
+            _max_map_len: usize,
+        ) -> Option<(Self, &'a [u8])> {
             api::cbor_det_parse(input)
         }
 
@@ -267,8 +285,17 @@ mod nondet_backend {
     impl<'a> Backend<'a> for api::CborNondet<'a> {
         type MapEntry = api::CborNondetMapEntry<'a>;
 
-        fn parse(input: &'a [u8]) -> Option<(Self, &'a [u8])> {
-            api::cbor_nondet_parse(None, false, input)
+        fn parse(
+            input: &'a [u8],
+            max_depth: usize,
+            max_map_len: usize,
+        ) -> Option<(Self, &'a [u8])> {
+            // EverCBOR's depth is the number of maps on a path to a leaf, an
+            // empty map counting as one, with arrays and tags adding nothing;
+            // this crate counts every non-empty container. A value within
+            // `max_depth` here has EverCBOR depth at most `max_depth + 1`.
+            let map_depth_bound = max_depth.saturating_add(1);
+            api::cbor_nondet_parse_bounded(map_depth_bound, max_map_len, input)
         }
 
         fn destruct(item: Self) -> RawView<'a, Self> {
@@ -440,8 +467,44 @@ impl<'a> CborValue<'a> {
 
     /// Parse CBOR bytes in the given [`Mode`], rejecting inputs nested deeper
     /// than `max_depth`.
+    ///
+    /// For untrusted input in [`Nondet`] mode,
+    /// [`CborValue::parse_nondet_bounded`] also bounds map length.
     pub fn parse_with_depth<M: Mode>(bytes: &'a [u8], max_depth: usize) -> Result<Self, String> {
-        let (item, remainder) = <M::Item<'a>>::parse(bytes).ok_or("Failed to parse CBOR bytes")?;
+        Self::parse_bounded::<M>(bytes, max_depth, UNBOUNDED_MAP_LEN)
+    }
+
+    /// Parse leniently, rejecting inputs nested deeper than `max_depth` or
+    /// containing a map with more than `max_map_len` entries at any level,
+    /// map keys included.
+    ///
+    /// Both bounds go to EverCBOR's bounded validator, which fails with the
+    /// generic parse error as soon as either is exceeded and uses stack
+    /// proportional to `max_depth`. It detects duplicate keys by comparing
+    /// map entries pairwise, so `max_map_len` also bounds the work it spends
+    /// per map; keys that are themselves maps multiply that work by their own
+    /// entry count.
+    ///
+    /// EverCBOR measures depth as the number of maps on a path to a leaf, an
+    /// empty map counting as one, with arrays and tags adding nothing. That is
+    /// at most this crate's depth plus one, so EverCBOR receives
+    /// `max_depth + 1` and accepts every input the tree walk, which enforces
+    /// `max_depth`, accepts.
+    pub fn parse_nondet_bounded(
+        bytes: &'a [u8],
+        max_depth: usize,
+        max_map_len: usize,
+    ) -> Result<Self, String> {
+        Self::parse_bounded::<Nondet>(bytes, max_depth, max_map_len)
+    }
+
+    fn parse_bounded<M: Mode>(
+        bytes: &'a [u8],
+        max_depth: usize,
+        max_map_len: usize,
+    ) -> Result<Self, String> {
+        let (item, remainder) = <M::Item<'a>>::parse(bytes, max_depth, max_map_len)
+            .ok_or("Failed to parse CBOR bytes")?;
         if !remainder.is_empty() {
             return Err(format!(
                 "Trailing bytes: {} unconsumed byte(s)",
@@ -452,6 +515,7 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse leniently, accepting any well-formed definite-length encoding.
+    #[deprecated(note = "use `parse_nondet_bounded`, which bounds map length")]
     pub fn parse_nondet(bytes: &'a [u8]) -> Result<Self, String> {
         Self::parse::<Nondet>(bytes)
     }
@@ -462,9 +526,11 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse leniently into a value that borrows nothing from `bytes`.
-    #[deprecated(note = "renamed to `parse_nondet`, which borrows from `bytes` instead of copying")]
+    #[deprecated(
+        note = "use `parse_nondet_bounded`, which bounds map length and borrows from `bytes`"
+    )]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(CborValue::parse_nondet(bytes)?.into_owned())
+        Ok(CborValue::parse::<Nondet>(bytes)?.into_owned())
     }
 
     /// Serialize in the given [`Mode`], rejecting values nested deeper than

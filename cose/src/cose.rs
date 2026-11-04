@@ -15,6 +15,24 @@ use crypto::{
 // RFC 9052, Section 4.4: https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 
+/// Nesting depth accepted when parsing COSE structures from untrusted input:
+/// far above the handful of levels a COSE_Sign1 and its headers use, while
+/// bounding the parser's stack.
+pub const MAX_COSE_NESTING_DEPTH: usize = 64;
+
+/// Entries accepted in any map when parsing COSE structures from untrusted
+/// input, header maps and CWT claims included: a few times the labels a real
+/// header holds. Duplicate-key detection compares the entries of a map
+/// pairwise, so this also bounds the work spent per map.
+pub const MAX_COSE_MAP_LEN: usize = 64;
+
+/// Parse untrusted CBOR with [`CborValue::parse_nondet_bounded`] under
+/// [`MAX_COSE_NESTING_DEPTH`] and [`MAX_COSE_MAP_LEN`]. Protected headers are
+/// parsed this way; use it for COSE_Sign1 envelopes too.
+pub fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, String> {
+    CborValue::parse_nondet_bounded(bytes, MAX_COSE_NESTING_DEPTH, MAX_COSE_MAP_LEN)
+}
+
 // RFC 9052, Section 4.2: tagged COSE_Sign1 is CBOR tag 18.
 pub const COSE_SIGN1_TAG: u64 = 18;
 pub const COSE_SIGN1_PROTECTED: usize = 0;
@@ -218,7 +236,7 @@ fn protected_header_alg(phdr: &[u8]) -> Result<Option<i64>, String> {
         return Ok(None);
     }
 
-    let protected = CborValue::parse_nondet(phdr)?;
+    let protected = parse_cbor(phdr)?;
     for (key, value) in protected.iter_map()? {
         if key == &CborValue::Int(COSE_HEADER_ALG) {
             return match value {
@@ -456,6 +474,36 @@ mod tests {
         assert_eq!(
             cose_verify1(&key, algorithm, &[0x80], b"", b"").unwrap_err(),
             "Expected Map, got \"Array\""
+        );
+    }
+
+    /// A protected header map one entry over `MAX_COSE_MAP_LEN` fails to parse.
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_bounds_protected_header_map_length() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        let header = |entries: usize| {
+            CborValue::Map(
+                (0..entries as i64)
+                    .map(|label| (CborValue::Int(label), CborValue::Int(0)))
+                    .collect(),
+            )
+            .to_bytes_det()
+            .unwrap()
+        };
+
+        // At the bound the header parses and verification reaches its alg (0).
+        let within = header(MAX_COSE_MAP_LEN);
+        assert!(cose_verify1(&key, algorithm, &within, b"", b"")
+            .unwrap_err()
+            .contains("does not match supplied alg"));
+
+        let over = header(MAX_COSE_MAP_LEN + 1);
+        assert_eq!(
+            cose_verify1(&key, algorithm, &over, b"", b"").unwrap_err(),
+            "Failed to parse CBOR bytes"
         );
     }
 

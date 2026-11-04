@@ -12,6 +12,11 @@ pub(crate) fn parse_attestation(attestation: &[u8]) -> Result<AttestationReport,
         .map_err(|e| AciError::InvalidAttestation(format!("{e:?}")))
 }
 
+/// Parse UVM endorsement CBOR within the COSE bounds.
+pub(crate) fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, AciError> {
+    cose::parse_cbor(bytes).map_err(AciError::Cose)
+}
+
 pub(crate) fn cose_payload(sign1: &CborValue) -> Result<Vec<u8>, AciError> {
     required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")
 }

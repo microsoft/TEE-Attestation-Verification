@@ -559,6 +559,93 @@ fn serialization_honours_the_depth_ceiling() {
     unsafe { tav_cbor_free(handle) };
 }
 
+// --- Bounded parsing ---
+
+fn decode_bounded(
+    bytes: &[u8],
+    max_depth: usize,
+    max_map_len: usize,
+) -> Result<*mut TavCborHandle, String> {
+    let mut out = ptr::null_mut();
+    let error = unsafe {
+        tav_cbor_nondet_parse_bounded(
+            bytes.as_ptr(),
+            bytes.len(),
+            max_depth,
+            max_map_len,
+            &mut out,
+        )
+    };
+    if !error.is_null() {
+        let error = unsafe { Box::from_raw(error) };
+        assert_eq!(error.code(), TavErrorCode::CborDecodeFailed);
+        assert!(out.is_null());
+        return Err(error.message());
+    }
+    Ok(out)
+}
+
+/// `{0: 0, 1: 0, ...}` with `entries` entries.
+fn flat_map(entries: usize) -> Vec<u8> {
+    let mut document = vec![0xb8, entries as u8];
+    for key in 0..entries as u8 {
+        document.extend([0x18, key, 0x00]);
+    }
+    document
+}
+
+#[test]
+fn bounded_parsing_honours_the_map_length() {
+    let at_bound = flat_map(cose::MAX_COSE_MAP_LEN);
+    let handle = decode_bounded(
+        &at_bound,
+        cose::MAX_COSE_NESTING_DEPTH,
+        cose::MAX_COSE_MAP_LEN,
+    )
+    .unwrap();
+    let mut size = 0;
+    assert!(unsafe { tav_cbor_size(handle, &mut size) }.is_null());
+    assert_eq!(size, cose::MAX_COSE_MAP_LEN);
+    unsafe { tav_cbor_free(handle) };
+
+    let over = flat_map(cose::MAX_COSE_MAP_LEN + 1);
+    assert_eq!(
+        decode_bounded(&over, cose::MAX_COSE_NESTING_DEPTH, cose::MAX_COSE_MAP_LEN).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+    let handle = decode_bounded(
+        &over,
+        cose::MAX_COSE_NESTING_DEPTH,
+        cose::MAX_COSE_MAP_LEN + 1,
+    )
+    .unwrap();
+    unsafe { tav_cbor_free(handle) };
+
+    // Keys are maps too: {{0: 0, 1: 0}: 0} holds a two-entry map.
+    let map_key = [0xa1, 0xa2, 0x00, 0x00, 0x01, 0x00, 0x00];
+    assert!(decode_bounded(&map_key, cose::MAX_COSE_NESTING_DEPTH, 1).is_err());
+    let handle = decode_bounded(&map_key, cose::MAX_COSE_NESTING_DEPTH, 2).unwrap();
+    unsafe { tav_cbor_free(handle) };
+
+    // The depth-only parser leaves map length unbounded.
+    let handle = decode(&over, cose::MAX_COSE_NESTING_DEPTH, false).unwrap();
+    unsafe { tav_cbor_free(handle) };
+}
+
+#[test]
+fn bounded_parsing_honours_the_depth_and_its_ceiling() {
+    let document = [0x81, 0x81, 0x81, 0x81, 0x01];
+    assert!(decode_bounded(&document, 2, cose::MAX_COSE_MAP_LEN)
+        .unwrap_err()
+        .contains("Maximum CBOR nesting depth"));
+    let handle = decode_bounded(&document, 4, cose::MAX_COSE_MAP_LEN).unwrap();
+    unsafe { tav_cbor_free(handle) };
+
+    let mut nested = vec![0x81u8; MAX_DEPTH_LIMIT + 1];
+    nested.push(0x01);
+    assert!(decode_bounded(&nested, usize::MAX, usize::MAX).is_err());
+}
+
 // --- Inspection ---
 
 #[test]
@@ -906,7 +993,15 @@ fn freeing_null_is_a_no_op() {
 
 #[test]
 fn output_parameters_are_cleared_on_failure() {
-    for parser in [tav_cbor_nondet_parse, tav_cbor_det_parse] {
+    unsafe extern "C" fn bounded(
+        data: *const u8,
+        len: usize,
+        max_depth: usize,
+        out: *mut *mut TavCborHandle,
+    ) -> *mut TavError {
+        unsafe { tav_cbor_nondet_parse_bounded(data, len, max_depth, cose::MAX_COSE_MAP_LEN, out) }
+    }
+    for parser in [tav_cbor_nondet_parse, tav_cbor_det_parse, bounded] {
         let mut value = ptr::dangling_mut();
         assert_eq!(
             status(unsafe { parser([0xff].as_ptr(), 1, 16, &mut value) }),
@@ -1058,18 +1153,30 @@ fn c_header_kinds_match_rust() {
 }
 
 #[test]
-fn c_header_publishes_the_depth_ceiling() {
+fn c_header_publishes_the_depth_ceiling_and_the_cose_bounds() {
     let header = include_str!("../../include/tav/cbor.h");
-    let declared = header.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("#define TAV_CBOR_MAX_DEPTH ")
-            .and_then(|v| v.trim().parse::<usize>().ok())
-    });
-    assert_eq!(
-        declared,
-        Some(MAX_DEPTH_LIMIT),
-        "TAV_CBOR_MAX_DEPTH must match the Rust constant"
-    );
+    let defined = |name: &str| {
+        header.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("#define ")?
+                .strip_prefix(name)?
+                .strip_prefix(' ')?
+                .trim()
+                .parse::<usize>()
+                .ok()
+        })
+    };
+    for (name, value) in [
+        ("TAV_CBOR_MAX_DEPTH", MAX_DEPTH_LIMIT),
+        ("TAV_CBOR_DEFAULT_MAX_DEPTH", cose::MAX_COSE_NESTING_DEPTH),
+        ("TAV_CBOR_DEFAULT_MAX_MAP_LEN", cose::MAX_COSE_MAP_LEN),
+    ] {
+        assert_eq!(
+            defined(name),
+            Some(value),
+            "{name} must match the Rust constant"
+        );
+    }
 }
 
 #[test]

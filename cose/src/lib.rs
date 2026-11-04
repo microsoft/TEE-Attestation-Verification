@@ -18,20 +18,21 @@
 //!
 //! COSE_Sign1 is CBOR tag 18 over an array containing protected-header bytes,
 //! an unprotected-header map, payload, and signature. Parse the envelope with
-//! [`CborValue::parse_nondet`], import the signer public key through the active
-//! backend, then pass the envelope components to the verifier.
+//! [`parse_cbor`], which applies the bounds this crate uses for protected
+//! headers, import the signer public key through the active backend, then pass
+//! the envelope components to the verifier.
 //!
 //! ```no_run
 //! use tee_attestation_verification_cose::{
-//!     synchronous as tav_cose, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
-//!     SignatureKeyAlgorithm,
+//!     parse_cbor, synchronous as tav_cose, CborValue, Key, KeyBackend,
+//!     RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 //! };
 //!
 //! # fn example(
 //! #     cose_sign1: &[u8],
 //! #     signer_spki_der: &[u8],
 //! # ) -> Result<(), Box<dyn std::error::Error>> {
-//! let envelope = CborValue::parse_nondet(cose_sign1)?;
+//! let envelope = parse_cbor(cose_sign1)?;
 //! let sign1 = match envelope {
 //!     CborValue::Tagged { tag: 18, payload } => *payload,
 //!     _ => return Err("expected COSE_Sign1 tag".into()),
