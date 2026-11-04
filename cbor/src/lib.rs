@@ -23,10 +23,15 @@
 //!
 //! [`CborValue::parse_nondet_bounded`] additionally bounds the number of
 //! entries in any map. Both of its bounds are handed to EverCBOR's bounded
-//! validator, so the cost of validating untrusted input is bounded by them.
-//! The other parsers leave map length unbounded; in [`Nondet`] mode they
-//! still hand the depth bound to that validator. EverCBOR exposes no bounded
-//! validator for [`Det`] parsing.
+//! validator, which fails as soon as either is exceeded and uses stack
+//! proportional to the depth bound. Within the bounds, duplicate-key
+//! detection still compares map keys pairwise, and keys that are themselves
+//! maps multiply that through the nesting, so its cost grows with the square
+//! of the number of entries in the input whatever the bounds. Callers
+//! parsing untrusted input must cap its size as well. The other parsers
+//! leave map length unbounded; in [`Nondet`] mode they still hand the depth
+//! bound to that validator. EverCBOR exposes no bounded validator for
+//! [`Det`] parsing.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -293,11 +298,12 @@ mod nondet_backend {
 
         /// Validates within the bounds while parsing.
         ///
-        /// The unbounded validator's duplicate-key check costs time quadratic
-        /// in map length and exponential in map nesting, so the input goes
-        /// through EverCBOR's bounded validator instead. For fixed bounds it
-        /// runs in time linear in the input and uses stack proportional to
-        /// the depth bound, failing as soon as either bound is exceeded.
+        /// EverCBOR's bounded validator fails as soon as either bound is
+        /// exceeded and uses stack proportional to the depth bound, where the
+        /// unbounded validator recursed through nested map keys without
+        /// limit. Within the bounds it still runs the same pairwise
+        /// duplicate-key check, whose cost grows with the square of the number
+        /// of map entries in the input.
         fn parse(
             input: &'a [u8],
             max_depth: usize,
@@ -493,11 +499,13 @@ impl<'a> CborValue<'a> {
     ///
     /// Both bounds are handed to EverCBOR's bounded validator, which fails as
     /// soon as either is exceeded, so input it rejects fails with the generic
-    /// parse error whether malformed or over a bound. For fixed bounds,
-    /// validating untrusted input takes time linear in its size and stack
-    /// proportional to `max_depth`, where the unbounded validator's
-    /// duplicate-key check costs time quadratic in map length and exponential
-    /// in map nesting.
+    /// parse error whether malformed or over a bound. Its stack use is
+    /// proportional to `max_depth`. Within the bounds it still detects
+    /// duplicate keys by comparing them pairwise, and keys that are
+    /// themselves maps multiply that work through the nesting, so the cost
+    /// grows with the square of the number of map entries in the input
+    /// whatever the bounds. Untrusted input therefore also needs a size cap,
+    /// which this crate leaves to the caller.
     ///
     /// EverCBOR counts map nesting only, every map, empty or not, and ignores
     /// arrays and tags, whereas this crate counts non-empty containers of any

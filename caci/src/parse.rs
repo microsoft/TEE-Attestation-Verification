@@ -3,7 +3,7 @@
 
 use crate::AciError;
 use attestation::snp::report::{AttestationReport, TryFromBytes};
-use cose::{CborValue, MAX_COSE_MAP_LEN, MAX_COSE_NESTING_DEPTH};
+use cose::CborValue;
 use crypto::CertificateBackend;
 
 // https://github.com/microsoft/confidential-aci-examples/blob/main/docs/Confidential_ACI_SCHEME.md#reference-info-base64
@@ -13,10 +13,9 @@ pub(crate) fn parse_attestation(attestation: &[u8]) -> Result<AttestationReport,
 }
 
 /// Parse a COSE_Sign1 envelope or header from UVM endorsement bytes, within
-/// the COSE parsing bounds.
+/// the COSE input bounds.
 pub(crate) fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, AciError> {
-    CborValue::parse_nondet_bounded(bytes, MAX_COSE_NESTING_DEPTH, MAX_COSE_MAP_LEN)
-        .map_err(AciError::Cose)
+    cose::parse_cbor(bytes).map_err(AciError::Cose)
 }
 
 pub(crate) fn cose_payload(sign1: &CborValue) -> Result<Vec<u8>, AciError> {

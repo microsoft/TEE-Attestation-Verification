@@ -11,13 +11,9 @@ use cose::signature_key_algorithm_for_cose_alg;
 use crate::cbor_view::NativeCborValue;
 use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
 
-/// Parse leniently within the COSE parsing bounds.
+/// Parse leniently within the COSE input bounds.
 fn parse_nondet(bytes: &[u8]) -> Result<cose::CborValue<'_>, String> {
-    cose::CborValue::parse_nondet_bounded(
-        bytes,
-        cose::MAX_COSE_NESTING_DEPTH,
-        cose::MAX_COSE_MAP_LEN,
-    )
+    cose::parse_cbor(bytes)
 }
 
 /// JavaScript wrapper around an independently owned immutable CBOR view.

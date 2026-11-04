@@ -22,9 +22,10 @@ prefer OpenSSL. WASM targets prefer WebCrypto.
 
 ## Parsing and verification
 
-Use `CborValue::parse_nondet_bounded` to parse a COSE_Sign1 envelope under
-`MAX_COSE_NESTING_DEPTH` and `MAX_COSE_MAP_LEN`, the bounds this crate applies
-to protected headers. COSE_Sign1 is encoded as CBOR tag 18 over an array:
+Use `parse_cbor` to parse a COSE_Sign1 envelope. It applies the input size,
+nesting depth and map length bounds this crate uses for protected headers
+(`MAX_COSE_INPUT_LEN`, `MAX_COSE_NESTING_DEPTH`, `MAX_COSE_MAP_LEN`). COSE_Sign1
+is encoded as CBOR tag 18 over an array:
 
 ```text
 [
@@ -54,12 +55,11 @@ context.
 
 ```rust
 use tee_attestation_verification_cose::{
-    synchronous as tav, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
-    SignatureKeyAlgorithm, MAX_COSE_MAP_LEN, MAX_COSE_NESTING_DEPTH,
+    parse_cbor, synchronous as tav, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
+    SignatureKeyAlgorithm,
 };
 
-let envelope =
-    CborValue::parse_nondet_bounded(cose_sign1, MAX_COSE_NESTING_DEPTH, MAX_COSE_MAP_LEN)?;
+let envelope = parse_cbor(cose_sign1)?;
 let sign1 = match envelope {
     CborValue::Tagged { tag: 18, payload } => *payload,
     _ => return Err("expected COSE_Sign1 tag".into()),
