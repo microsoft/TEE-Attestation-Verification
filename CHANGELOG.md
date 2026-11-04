@@ -5,20 +5,20 @@
 ### Added
 
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
-- `CborValue::parse_nondet_bounded`, which caps both the nesting depth and the number of entries in any map, map keys included, and hands both caps to EverCBOR's bounded validator (`cbor_nondet_parse_bounded`), which fails as soon as either is exceeded and bounds its stack use. Within the caps, duplicate-key detection still compares map keys pairwise, so its cost grows with the square of the number of entries in the input; callers must cap input size as well. EverCBOR exposes no bounded validator for deterministic parsing, so there is no `Det` counterpart. (#172)
-- `parse_cbor` in the COSE crate, which parses untrusted CBOR within `MAX_COSE_INPUT_LEN` (64 KiB), `MAX_COSE_NESTING_DEPTH` (64), and `MAX_COSE_MAP_LEN` (64). The size cap is what bounds the validator's duplicate-key work, since nested map keys keep it quadratic in the number of entries inside the other two bounds. (#172)
+- `CborValue::parse_nondet_bounded`, which caps the nesting depth and the number of entries in any map, keys included, through EverCBOR's bounded validator (`cbor_nondet_parse_bounded`). The caps bound the validator's stack use; its duplicate-key check stays quadratic in the number of map entries, so untrusted input also needs a size cap. (#172)
+- `parse_cbor` in the COSE crate, which parses untrusted CBOR within `MAX_COSE_INPUT_LEN` (64 KiB), `MAX_COSE_NESTING_DEPTH` (64), and `MAX_COSE_MAP_LEN` (64). (#172)
 
 ### Changed
 
-- Bump EverCBOR (`cborrs`/`cborrs-nondet`) to project-everest/everparse v2026.10.27, whose non-deterministic Rust API exposes bounded parsing (project-everest/everparse#345, project-everest/everparse#350). All `Nondet` parsing now goes through the bounded validator, with its map depth bound set to the nesting depth plus one, since EverCBOR counts maps only, empty ones included. A map chain nested deeper than that is rejected by the validator with the generic parse error rather than the nesting depth error. (#172)
-- COSE protected headers, CACI UVM endorsements and their headers, and the WASM COSE API's `CborValue.from_bytes` and `CoseSign1.protected_header` are parsed with `parse_cbor`, so input over 64 KiB or containing a map with more than 64 entries is now rejected. The depth bound is unchanged. (#172)
+- Bump EverCBOR (`cborrs`/`cborrs-nondet`) to project-everest/everparse v2026.10.27, whose non-deterministic Rust API exposes bounded parsing (project-everest/everparse#345, project-everest/everparse#350). All `Nondet` parsing goes through the bounded validator with the nesting depth plus one as its map depth bound, since EverCBOR counts maps only, empty ones included; a map chain nested deeper than that fails with the generic parse error. (#172)
+- COSE protected headers, CACI UVM endorsements and their headers, and the WASM COSE API's `CborValue.from_bytes` and `CoseSign1.protected_header` are parsed with `parse_cbor`, so input over 64 KiB or a map with more than 64 entries is rejected. (#172)
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
 - C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)
 
 ### Deprecated
 
-- `CborValue::parse_nondet`, which leaves map length unbounded, in favour of `parse_nondet_bounded`. It is otherwise unchanged, and the deprecation note on `from_bytes` now points at `parse_nondet_bounded` too. The C ABI's generic `tav_cbor_nondet_parse` keeps map length unbounded, as it carries no such parameter. (#172)
+- `CborValue::parse_nondet`, in favour of `parse_nondet_bounded`; the `from_bytes` note points there too. The C ABI's `tav_cbor_nondet_parse` takes `max_depth` only. (#172)
 
 ### Removed
 

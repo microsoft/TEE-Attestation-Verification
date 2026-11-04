@@ -15,37 +15,29 @@ use crypto::{
 // RFC 9052, Section 4.4: https://www.rfc-editor.org/rfc/rfc9052.html#section-4.4
 const SIG_STRUCTURE1_CONTEXT: &str = "Signature1";
 
-/// Nesting depth accepted when parsing COSE structures from untrusted input.
-///
-/// A COSE_Sign1 envelope with its headers nests a handful of levels; this is
-/// far above that while still bounding the parser's stack use.
+/// Nesting depth accepted when parsing COSE structures from untrusted input:
+/// far above the handful of levels a COSE_Sign1 and its headers use, while
+/// bounding the parser's stack.
 pub const MAX_COSE_NESTING_DEPTH: usize = 64;
 
 /// Entries accepted in any map when parsing COSE structures from untrusted
-/// input, header maps and CWT claims included.
-///
-/// Header maps hold a few dozen labels at most. Duplicate-key detection
-/// compares keys pairwise, so this also caps that work per map at a few
-/// thousand comparisons when keys are scalars.
+/// input, header maps and CWT claims included: a few times the labels a real
+/// header holds.
 pub const MAX_COSE_MAP_LEN: usize = 64;
 
 /// Bytes accepted when parsing a COSE structure from untrusted input.
 ///
-/// The map bounds alone do not cap the cost of duplicate-key detection: keys
-/// that are themselves maps multiply the pairwise comparisons through the
-/// nesting, so the work grows with the square of the number of entries in the
-/// input whatever the bounds. Input size is the lever that bounds it. Real
-/// endorsements are around 10 KiB, mostly certificates; an adversarial input
-/// filling this cap with nested map keys costs several seconds of CPU.
+/// Duplicate-key detection compares map keys pairwise, so its cost grows with
+/// the square of the number of entries within any map bounds; the size cap
+/// bounds it. Real endorsements are about 10 KiB, mostly certificates. An
+/// adversarial input filling this cap with nested map keys costs several
+/// seconds of CPU.
 pub const MAX_COSE_INPUT_LEN: usize = 64 * 1024;
 
-/// Parse untrusted CBOR within the COSE bounds.
-///
-/// Rejects input longer than [`MAX_COSE_INPUT_LEN`] before parsing, then
-/// parses leniently with [`CborValue::parse_nondet_bounded`] under
-/// [`MAX_COSE_NESTING_DEPTH`] and [`MAX_COSE_MAP_LEN`]. This is how this
-/// crate parses protected headers, and how COSE_Sign1 envelopes should be
-/// parsed before they are handed to it.
+/// Parse untrusted CBOR within the COSE bounds: at most [`MAX_COSE_INPUT_LEN`]
+/// bytes, then [`CborValue::parse_nondet_bounded`] under
+/// [`MAX_COSE_NESTING_DEPTH`] and [`MAX_COSE_MAP_LEN`]. Protected headers are
+/// parsed this way; parse COSE_Sign1 envelopes the same way.
 pub fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, String> {
     if bytes.len() > MAX_COSE_INPUT_LEN {
         return Err(format!(
@@ -500,8 +492,7 @@ mod tests {
         );
     }
 
-    /// A protected header map is parsed within `MAX_COSE_MAP_LEN`, so one
-    /// entry past it fails as unparseable before any signature work.
+    /// A protected header map one entry over `MAX_COSE_MAP_LEN` fails to parse.
     #[test]
     #[cfg(sync_crypto)]
     fn cose_verify1_bounds_protected_header_map_length() {
@@ -518,8 +509,7 @@ mod tests {
             .unwrap()
         };
 
-        // Within the bound the header parses, so verification reaches the
-        // protected alg (0 here) and rejects it on that ground.
+        // At the bound the header parses and verification reaches its alg (0).
         let within = header(MAX_COSE_MAP_LEN);
         assert!(cose_verify1(&key, algorithm, &within, b"", b"")
             .unwrap_err()
@@ -552,25 +542,21 @@ mod tests {
         .unwrap()
     }
 
-    /// Nested map keys inside the depth and map length bounds still cost the
-    /// validator time quadratic in the number of entries, so the input size
-    /// cap has to reject a large one before it is parsed.
+    /// A large header of nested map keys inside the depth and map length
+    /// bounds is rejected by the size cap before it reaches the validator.
     #[test]
     #[cfg(sync_crypto)]
     fn cose_verify1_caps_protected_header_size() {
         let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
         let key = key(P256_SPKI, algorithm);
 
-        // Small enough to parse: the header has no alg, so verification
-        // proceeds to the (empty, invalid) signature.
+        // Small enough to parse; with no alg, verification reaches the signature.
         let small = nested_key_header(16, 16);
         assert_eq!(
             cose_verify1(&key, algorithm, &small, b"", b"").unwrap_err(),
             "Expected 64 byte ECDSA signature, got 0"
         );
 
-        // Within MAX_COSE_MAP_LEN and MAX_COSE_NESTING_DEPTH, but over the
-        // size cap: rejected by it, not by the parser.
         let large = nested_key_header(400, MAX_COSE_MAP_LEN);
         assert!(large.len() > MAX_COSE_INPUT_LEN);
         let err = cose_verify1(&key, algorithm, &large, b"", b"").unwrap_err();

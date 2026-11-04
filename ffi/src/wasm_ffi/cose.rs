@@ -11,11 +11,6 @@ use cose::signature_key_algorithm_for_cose_alg;
 use crate::cbor_view::NativeCborValue;
 use crypto::{AsyncCryptoBackend, AsyncKeyBackend};
 
-/// Parse leniently within the COSE input bounds.
-fn parse_nondet(bytes: &[u8]) -> Result<cose::CborValue<'_>, String> {
-    cose::parse_cbor(bytes)
-}
-
 /// JavaScript wrapper around an independently owned immutable CBOR view.
 #[wasm_bindgen]
 #[derive(Clone)]
@@ -43,7 +38,7 @@ impl CborValue {
 impl CborValue {
     /// Parse a CBOR document from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<CborValue, String> {
-        parse_nondet(bytes).map(CborValue::from_native)
+        cose::parse_cbor(bytes).map(CborValue::from_native)
     }
 
     /// Serialize this value as deterministic CBOR bytes.
@@ -221,7 +216,7 @@ impl CoseSign1 {
 
     pub fn protected_header(&self) -> Result<CborValue, String> {
         let protected = borrowed_bytes(self.as_native().array_at(0)?, "protected")?;
-        parse_nondet(protected).map(CborValue::from_native)
+        cose::parse_cbor(protected).map(CborValue::from_native)
     }
 }
 

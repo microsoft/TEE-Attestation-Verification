@@ -18,11 +18,9 @@
 //!
 //! COSE_Sign1 is CBOR tag 18 over an array containing protected-header bytes,
 //! an unprotected-header map, payload, and signature. Parse the envelope with
-//! [`parse_cbor`], which applies the input size, nesting depth and map length
-//! bounds this crate uses for protected headers ([`MAX_COSE_INPUT_LEN`],
-//! [`MAX_COSE_NESTING_DEPTH`], [`MAX_COSE_MAP_LEN`]), import the signer public
-//! key through the active backend, then pass the envelope components to the
-//! verifier.
+//! [`parse_cbor`], which applies the bounds this crate uses for protected
+//! headers, import the signer public key through the active backend, then pass
+//! the envelope components to the verifier.
 //!
 //! ```no_run
 //! use tee_attestation_verification_cose::{

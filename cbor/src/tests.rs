@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// `parse_nondet` and `from_bytes` stay supported until removed, so the tests
-// written against them keep running unchanged. Tests of the map length bound
-// use `parse_nondet_bounded` directly.
+// The deprecated parsers stay supported, so their tests keep running.
 #![allow(deprecated)]
 
 use super::*;

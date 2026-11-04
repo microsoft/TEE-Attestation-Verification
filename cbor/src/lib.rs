@@ -22,16 +22,11 @@
 //! `i64`.
 //!
 //! [`CborValue::parse_nondet_bounded`] additionally bounds the number of
-//! entries in any map. Both of its bounds are handed to EverCBOR's bounded
-//! validator, which fails as soon as either is exceeded and uses stack
-//! proportional to the depth bound. Within the bounds, duplicate-key
-//! detection still compares map keys pairwise, and keys that are themselves
-//! maps multiply that through the nesting, so its cost grows with the square
-//! of the number of entries in the input whatever the bounds. Callers
-//! parsing untrusted input must cap its size as well. The other parsers
-//! leave map length unbounded; in [`Nondet`] mode they still hand the depth
-//! bound to that validator. EverCBOR exposes no bounded validator for
-//! [`Det`] parsing.
+//! entries in any map, handing both bounds to EverCBOR's bounded validator.
+//! That bounds the validator's stack use, not its duplicate-key work, which
+//! stays quadratic in the number of map entries; untrusted input also needs
+//! a size cap. The other parsers leave map length unbounded, and EverCBOR
+//! exposes no bounded validator for [`Det`] parsing.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -57,10 +52,7 @@ use std::borrow::Cow;
 /// input.
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
 
-/// Map length bound meaning no bound beyond the input length.
-///
-/// A map's entries have to be present in the input, so this never rejects
-/// anything.
+/// Map length bound no input can reach, so no map is rejected.
 const UNBOUNDED_MAP_LEN: usize = usize::MAX;
 
 /// Bound passed to EverCBOR's serialized-size estimator.
@@ -180,9 +172,8 @@ mod det_backend {
     impl<'a> Backend<'a> for api::CborDet<'a> {
         type MapEntry = api::CborDetMapEntry<'a>;
 
-        /// This EverCBOR release exposes no bounded deterministic validator,
-        /// so the bounds are not enforced here; the tree walk still bounds the
-        /// nesting depth.
+        /// EverCBOR has no bounded deterministic validator; the tree walk
+        /// bounds the depth.
         fn parse(
             input: &'a [u8],
             _max_depth: usize,
@@ -296,23 +287,13 @@ mod nondet_backend {
     impl<'a> Backend<'a> for api::CborNondet<'a> {
         type MapEntry = api::CborNondetMapEntry<'a>;
 
-        /// Validates within the bounds while parsing.
-        ///
-        /// EverCBOR's bounded validator fails as soon as either bound is
-        /// exceeded and uses stack proportional to the depth bound, where the
-        /// unbounded validator recursed through nested map keys without
-        /// limit. Within the bounds it still runs the same pairwise
-        /// duplicate-key check, whose cost grows with the square of the number
-        /// of map entries in the input.
         fn parse(
             input: &'a [u8],
             max_depth: usize,
             max_map_len: usize,
         ) -> Option<(Self, &'a [u8])> {
-            // EverCBOR measures map nesting only: every map, empty or not,
-            // counts one level, while arrays and tags are transparent. A value
-            // that fits `max_depth` here has map depth at most `max_depth + 1`,
-            // so this bound never rejects an input the tree walk would accept.
+            // EverCBOR counts map nesting only, empty maps included, so a value
+            // within `max_depth` here has map depth at most `max_depth + 1`.
             let map_depth_bound = max_depth.saturating_add(1);
             api::cbor_nondet_parse_bounded(map_depth_bound, max_map_len, input)
         }
@@ -494,27 +475,21 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse leniently, rejecting inputs nested deeper than `max_depth` or
-    /// containing a map with more than `max_map_len` entries, at any level,
-    /// map keys included. Arrays are not bounded.
+    /// containing a map with more than `max_map_len` entries at any level,
+    /// map keys included. EverCBOR's length bound covers maps.
     ///
-    /// Both bounds are handed to EverCBOR's bounded validator, which fails as
-    /// soon as either is exceeded, so input it rejects fails with the generic
-    /// parse error whether malformed or over a bound. Its stack use is
-    /// proportional to `max_depth`. Within the bounds it still detects
-    /// duplicate keys by comparing them pairwise, and keys that are
-    /// themselves maps multiply that work through the nesting, so the cost
-    /// grows with the square of the number of map entries in the input
-    /// whatever the bounds. Untrusted input therefore also needs a size cap,
-    /// which this crate leaves to the caller.
+    /// Both bounds go to EverCBOR's bounded validator, which fails with the
+    /// generic parse error as soon as either is exceeded and uses stack
+    /// proportional to `max_depth`. Within the bounds it detects duplicate
+    /// keys by comparing them pairwise, so its cost grows with the square of
+    /// the number of map entries in the input; untrusted input also needs a
+    /// size cap, which is left to the caller.
     ///
-    /// EverCBOR counts map nesting only, every map, empty or not, and ignores
-    /// arrays and tags, whereas this crate counts non-empty containers of any
-    /// kind. The depth bound handed to EverCBOR is therefore offset by one so
-    /// it never rejects an input the tree walk would accept; the tree walk
-    /// enforces `max_depth` as for every other parser.
-    ///
-    /// This EverCBOR release exposes no bounded deterministic validator, so
-    /// there is no [`Det`] counterpart.
+    /// EverCBOR counts map nesting only, empty maps included, so the depth
+    /// bound handed to it is offset by one and never rejects an input the
+    /// tree walk, which enforces `max_depth` as for every parser, would
+    /// accept. There is no [`Det`] counterpart: EverCBOR exposes no bounded
+    /// deterministic validator.
     pub fn parse_nondet_bounded(
         bytes: &'a [u8],
         max_depth: usize,
@@ -552,7 +527,7 @@ impl<'a> CborValue<'a> {
 
     /// Parse leniently into a value that borrows nothing from `bytes`.
     #[deprecated(
-        note = "use `parse_nondet_bounded`, which bounds map length and borrows from `bytes` instead of copying"
+        note = "use `parse_nondet_bounded`, which bounds map length and borrows from `bytes`"
     )]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         Ok(CborValue::parse::<Nondet>(bytes)?.into_owned())
