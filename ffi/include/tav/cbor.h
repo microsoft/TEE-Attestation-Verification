@@ -73,6 +73,14 @@ typedef struct TavCborHandle TavCborHandle;
 #define TAV_CBOR_MAX_DEPTH 256
 
 /*
+ * Bounds for parsing untrusted input with tav_cbor_nondet_parse_bounded, and
+ * the defaults of the C++ wrapper's nondet_parse. They are the bounds the
+ * library applies to COSE structures.
+ */
+#define TAV_CBOR_DEFAULT_MAX_DEPTH 64
+#define TAV_CBOR_DEFAULT_MAX_MAP_LEN 64
+
+/*
  * Value kinds, named for use with tav_cbor_kind. The enum type itself is not
  * used in any signature, because a C enum has implementation-defined width.
  */
@@ -144,6 +152,18 @@ TavError* tav_cbor_nondet_parse(
   const uint8_t* data,
   size_t len,
   size_t max_depth,
+  TavCborHandle** out_value);
+
+/*
+ * Like tav_cbor_nondet_parse, also rejecting any map with more than
+ * max_map_len entries, map keys included. Duplicate-key detection compares
+ * map entries pairwise, so max_map_len bounds the work spent per map.
+ */
+TavError* tav_cbor_nondet_parse_bounded(
+  const uint8_t* data,
+  size_t len,
+  size_t max_depth,
+  size_t max_map_len,
   TavCborHandle** out_value);
 
 /* Requires deterministic encoding. */

@@ -23,8 +23,8 @@
 //!
 //! [`CborValue::parse_nondet_bounded`] additionally bounds the number of
 //! entries in any map and hands both bounds to EverCBOR's bounded validator,
-//! which caps its stack use. Its duplicate-key check is quadratic in the
-//! number of map entries, so untrusted input also needs a size cap.
+//! which caps its stack use and, since it detects duplicate keys by comparing
+//! map entries pairwise, the work it spends per map.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -481,8 +481,9 @@ impl<'a> CborValue<'a> {
     /// Both bounds go to EverCBOR's bounded validator, which fails with the
     /// generic parse error as soon as either is exceeded and uses stack
     /// proportional to `max_depth`. It detects duplicate keys by comparing
-    /// them pairwise, so its cost grows with the square of the number of map
-    /// entries in the input; cap the size of untrusted input as well.
+    /// map entries pairwise, so `max_map_len` also bounds the work it spends
+    /// per map; keys that are themselves maps multiply that work by their own
+    /// entry count.
     ///
     /// EverCBOR measures depth as the number of maps on a path to a leaf, an
     /// empty map counting as one, with arrays and tags adding nothing. That is

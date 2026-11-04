@@ -22,28 +22,14 @@ pub const MAX_COSE_NESTING_DEPTH: usize = 64;
 
 /// Entries accepted in any map when parsing COSE structures from untrusted
 /// input, header maps and CWT claims included: a few times the labels a real
-/// header holds.
+/// header holds. Duplicate-key detection compares the entries of a map
+/// pairwise, so this also bounds the work spent per map.
 pub const MAX_COSE_MAP_LEN: usize = 64;
 
-/// Bytes accepted when parsing a COSE structure from untrusted input.
-///
-/// Duplicate-key detection compares map keys pairwise, so its cost grows with
-/// the square of the number of entries; the size cap bounds it. Real
-/// endorsements are about 10 KiB, mostly certificates; an adversarial input
-/// of this size made of nested map keys costs several seconds of CPU.
-pub const MAX_COSE_INPUT_LEN: usize = 64 * 1024;
-
-/// Parse untrusted CBOR within the COSE bounds: at most [`MAX_COSE_INPUT_LEN`]
-/// bytes, then [`CborValue::parse_nondet_bounded`] under
+/// Parse untrusted CBOR with [`CborValue::parse_nondet_bounded`] under
 /// [`MAX_COSE_NESTING_DEPTH`] and [`MAX_COSE_MAP_LEN`]. Protected headers are
 /// parsed this way; use it for COSE_Sign1 envelopes too.
 pub fn parse_cbor(bytes: &[u8]) -> Result<CborValue<'_>, String> {
-    if bytes.len() > MAX_COSE_INPUT_LEN {
-        return Err(format!(
-            "CBOR input of {} bytes exceeds the {MAX_COSE_INPUT_LEN} byte limit",
-            bytes.len()
-        ));
-    }
     CborValue::parse_nondet_bounded(bytes, MAX_COSE_NESTING_DEPTH, MAX_COSE_MAP_LEN)
 }
 
@@ -519,47 +505,6 @@ mod tests {
             cose_verify1(&key, algorithm, &over, b"", b"").unwrap_err(),
             "Failed to parse CBOR bytes"
         );
-    }
-
-    /// `{K_0: 0, ..., K_{n-1}: 0}` with `K_i = {0: 0, ..., m-2: 0, m+i: 0}`:
-    /// every key is a distinct `m`-entry map, so duplicate-key detection
-    /// compares `n^2` pairs of maps, each `m^2` entries deep.
-    fn nested_key_header(keys: usize, key_entries: usize) -> Vec<u8> {
-        let m = key_entries as i64;
-        CborValue::Map(
-            (0..keys as i64)
-                .map(|i| {
-                    let mut key: Vec<_> = (0..m - 1)
-                        .map(|label| (CborValue::Int(label), CborValue::Int(0)))
-                        .collect();
-                    key.push((CborValue::Int(m + i), CborValue::Int(0)));
-                    (CborValue::Map(key), CborValue::Int(0))
-                })
-                .collect(),
-        )
-        .to_bytes_det()
-        .unwrap()
-    }
-
-    /// A large header of nested map keys inside the depth and map length
-    /// bounds is rejected by the size cap before it reaches the validator.
-    #[test]
-    #[cfg(sync_crypto)]
-    fn cose_verify1_caps_protected_header_size() {
-        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
-        let key = key(P256_SPKI, algorithm);
-
-        // Small enough to parse; with no alg, verification reaches the signature.
-        let small = nested_key_header(16, 16);
-        assert_eq!(
-            cose_verify1(&key, algorithm, &small, b"", b"").unwrap_err(),
-            "Expected 64 byte ECDSA signature, got 0"
-        );
-
-        let large = nested_key_header(400, MAX_COSE_MAP_LEN);
-        assert!(large.len() > MAX_COSE_INPUT_LEN);
-        let err = cose_verify1(&key, algorithm, &large, b"", b"").unwrap_err();
-        assert!(err.contains("exceeds the"), "{err}");
     }
 
     #[test]

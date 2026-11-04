@@ -5,13 +5,15 @@
 ### Added
 
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
-- `CborValue::parse_nondet_bounded`, which caps the nesting depth and the number of entries in any map, keys included, through EverCBOR's bounded validator (`cbor_nondet_parse_bounded`). The validator's duplicate-key check is quadratic in the number of map entries, so untrusted input also needs a size cap. (#172)
-- `parse_cbor` in the COSE crate, which parses untrusted CBOR within `MAX_COSE_INPUT_LEN` (64 KiB), `MAX_COSE_NESTING_DEPTH` (64), and `MAX_COSE_MAP_LEN` (64). (#172)
+- `CborValue::parse_nondet_bounded`, which caps the nesting depth and the number of entries in any map, keys included, through EverCBOR's bounded validator (`cbor_nondet_parse_bounded`). The validator detects duplicate keys by comparing map entries pairwise, so the map length bound also caps the work spent per map. (#172)
+- `parse_cbor` in the COSE crate, which parses untrusted CBOR within `MAX_COSE_NESTING_DEPTH` (64) and `MAX_COSE_MAP_LEN` (64). (#172)
+- `tav_cbor_nondet_parse_bounded` in the C ABI, taking a map length bound next to the depth, with `TAV_CBOR_DEFAULT_MAX_DEPTH` and `TAV_CBOR_DEFAULT_MAX_MAP_LEN` (both 64) for untrusted input. (#172)
 
 ### Changed
 
 - Bump EverCBOR (`cborrs`/`cborrs-nondet`) to project-everest/everparse v2026.10.27, whose non-deterministic Rust API exposes bounded parsing (project-everest/everparse#345, project-everest/everparse#350). All `Nondet` parsing goes through the bounded validator with the nesting depth plus one as its depth bound, since EverCBOR counts the maps on a path, an empty map included, and skips arrays and tags; a map chain nested deeper than that fails with the generic parse error. (#172)
-- COSE protected headers, CACI UVM endorsements and their headers, and the WASM COSE API's `CborValue.from_bytes` and `CoseSign1.protected_header` are parsed with `parse_cbor`, so input over 64 KiB or a map with more than 64 entries is rejected. (#172)
+- COSE protected headers, CACI UVM endorsements and their headers, and the WASM COSE API's `CborValue.from_bytes` and `CoseSign1.protected_header` are parsed with `parse_cbor`, so a map with more than 64 entries is rejected. (#172)
+- `tav::cbor::nondet_parse` takes `max_depth` and `max_map_len`, defaulting to `DEFAULT_MAX_DEPTH` (64, previously `MAX_DEPTH`, 256) and `DEFAULT_MAX_MAP_LEN` (64), and parses through `tav_cbor_nondet_parse_bounded`. (#172)
 - Native CBOR, COSE, and CACI use `TavCborHandle` and the generic API in `tav/cbor.h`. C++ CBOR failures use `tav::Exception` and `tav::ErrorCode`.
 - C# CBOR bindings use the C API's `TavCborHandle` handles while preserving owned input and the 64-level parsing/serialization limit. CBOR failures now report generic CBOR error codes instead of COSE codes. COSE verification retains its COSE error codes.
 - SNP verification rejects reports that are not VCEK-signed (VLEK, `None`, or reserved `SIGNING_KEY`), requires the hardware ID extension in the VCEK, and matches TCB and hardware ID extension values against exact DER INTEGER, raw, or OCTET STRING encodings only. (#147)

@@ -198,6 +198,33 @@ static void parsing_and_serialization(void)
     CHECK(value == NULL);
     expect(tav_cbor_nondet_parse(noncanonical, 2, 16, &value), TAV_ERROR_OK);
     tav_cbor_free(value);
+
+    /* Bounded parsing also rejects maps longer than max_map_len: {0: 0, 1: 0}. */
+    const uint8_t two_entries[] = {0xa2, 0x00, 0x00, 0x01, 0x00};
+    expect(
+      tav_cbor_nondet_parse_bounded(
+        two_entries, sizeof(two_entries), TAV_CBOR_DEFAULT_MAX_DEPTH, 1, &value),
+      TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
+    expect(
+      tav_cbor_nondet_parse_bounded(
+        two_entries,
+        sizeof(two_entries),
+        TAV_CBOR_DEFAULT_MAX_DEPTH,
+        TAV_CBOR_DEFAULT_MAX_MAP_LEN,
+        &value),
+      TAV_ERROR_OK);
+    size_t size = 0;
+    expect(tav_cbor_size(value, &size), TAV_ERROR_OK);
+    CHECK(size == 2);
+    tav_cbor_free(value);
+    expect(
+      tav_cbor_nondet_parse_bounded(two_entries, sizeof(two_entries), 0, 2, &value),
+      TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
+    expect(
+      tav_cbor_nondet_parse_bounded(two_entries, sizeof(two_entries), 16, 2, NULL),
+      TAV_ERROR_INVALID_ARGUMENT);
 }
 
 static void nulls_and_rejected_batches(void)

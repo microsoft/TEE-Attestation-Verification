@@ -22,8 +22,8 @@ prefer OpenSSL. WASM targets prefer WebCrypto.
 
 ## Parsing and verification
 
-Use `parse_cbor` to parse a COSE_Sign1 envelope; it applies the input size,
-nesting depth and map length bounds this crate uses for protected headers.
+Use `parse_cbor` to parse a COSE_Sign1 envelope; it applies the nesting
+depth and map length bounds this crate uses for protected headers.
 COSE_Sign1 is encoded as CBOR tag 18 over an array:
 
 ```text
