@@ -450,6 +450,8 @@ mod tests {
         let mut root = TestCertificate::ca("Root", "Root");
         root.key_usage = Some(KeyUsage {
             key_cert_sign: false,
+            digital_signature: false,
+            key_agreement: false,
         });
         let leaf = TestCertificate::leaf("Leaf", "Root");
         let path = [&root, &leaf];
@@ -505,6 +507,8 @@ mod tests {
                 }),
                 key_usage: Some(KeyUsage {
                     key_cert_sign: true,
+                    digital_signature: false,
+                    key_agreement: false,
                 }),
                 extensions,
             }

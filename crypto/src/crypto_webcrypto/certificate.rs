@@ -13,7 +13,7 @@ use x509_cert::{
     time::Time,
 };
 
-use super::{
+use crate::{
     BasicConstraints, KeyUsage, Result, RsaPkcs1v15SignatureKeyAlgorithm,
     RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
 };
@@ -139,6 +139,8 @@ impl Certificate {
             .get_extension::<X509KeyUsage>()?
             .map(|(_, key_usage)| KeyUsage {
                 key_cert_sign: key_usage.key_cert_sign(),
+                digital_signature: key_usage.digital_signature(),
+                key_agreement: key_usage.key_agreement(),
             }))
     }
 
@@ -301,9 +303,9 @@ mod test {
         RsaPkcs1v15SignatureKeyAlgorithm, RsaPssSignatureKeyAlgorithm, SignatureKeyAlgorithm,
     };
 
-    const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
-    const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
-    const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
+    const MILAN_ARK: &[u8] = include_bytes!("../test_data/milan_ark.pem");
+    const MILAN_ASK: &[u8] = include_bytes!("../test_data/milan_ask.pem");
+    const MILAN_VCEK: &[u8] = include_bytes!("../test_data/milan_vcek.pem");
 
     fn cert(pem: &[u8]) -> Certificate {
         Certificate::from_pem(pem).unwrap()
