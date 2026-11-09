@@ -16,41 +16,6 @@ pub(crate) fn cose_payload(sign1: &CborValue) -> Result<Vec<u8>, AciError> {
     required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")
 }
 
-pub(crate) fn parse_x5chain_certs(
-    x5chain: &[Vec<u8>],
-) -> Result<
-    (
-        crypto::Certificate,
-        Vec<crypto::Certificate>,
-        crypto::Certificate,
-    ),
-    AciError,
-> {
-    if x5chain.is_empty() {
-        return Err(AciError::Certificate(
-            "x5chain must contain at least one certificate".to_string(),
-        ));
-    }
-
-    let leaf =
-        crypto::Crypto::from_der(&x5chain[0]).map_err(|e| AciError::Certificate(e.to_string()))?;
-    let root = crypto::Crypto::from_der(x5chain.last().unwrap())
-        .map_err(|e| AciError::Certificate(e.to_string()))?;
-    let intermediate_certs = if x5chain.len() > 1 {
-        &x5chain[1..x5chain.len() - 1]
-    } else {
-        &[]
-    };
-    let intermediates = intermediate_certs
-        .iter()
-        .map(|cert| {
-            crypto::Crypto::from_der(cert).map_err(|e| AciError::Certificate(e.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok((root, intermediates, leaf))
-}
-
 pub(crate) mod json {
     use super::*;
 

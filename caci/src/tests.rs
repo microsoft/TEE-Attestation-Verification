@@ -6,6 +6,8 @@ use super::*;
 use crate::parse;
 use crypto::base64::base64_standard_decode;
 
+mod did;
+
 const HOST_AMD_CERT_BASE64: &str = include_str!("../tests/fixtures/host-amd-cert.base64");
 const REFERENCE_INFO_BASE64: &str = include_str!("../tests/fixtures/reference-info.base64");
 const REPORT_HEX: &str = include_str!("../tests/fixtures/report.hex");
@@ -148,7 +150,7 @@ mod synchronous {
 
             match crate::synchronous::verify_uvm_endorsement(&reference_info, "not-a-did") {
                 Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+                    assert_contains(&actual, "trusted DID: invalid did:x509 identifier:")
                 }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
@@ -157,10 +159,9 @@ mod synchronous {
                 &reference_info,
                 "did:x509:0:sha256:wrong",
             ) {
-                Err(AciError::DidX509(actual)) => assert_eq!(
-                    actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
-                ),
+                Err(AciError::DidX509(actual)) => {
+                    assert_contains(&actual, "trusted DID: invalid did:x509 identifier:")
+                }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
@@ -519,7 +520,7 @@ mod asynchronous {
 
             match crate::asynchronous::verify_uvm_endorsement(&reference_info, "not-a-did").await {
                 Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+                    assert_contains(&actual, "trusted DID: invalid did:x509 identifier:")
                 }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
@@ -530,10 +531,9 @@ mod asynchronous {
             )
             .await
             {
-                Err(AciError::DidX509(actual)) => assert_eq!(
-                    actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
-                ),
+                Err(AciError::DidX509(actual)) => {
+                    assert_contains(&actual, "trusted DID: invalid did:x509 identifier:")
+                }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
