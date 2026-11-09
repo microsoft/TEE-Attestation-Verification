@@ -202,6 +202,14 @@ impl Key {
 }
 
 impl AsyncCryptoBackend for Crypto {
+    async fn verify_chain_exact(
+        trusted_cert: &Self::Certificate,
+        untrusted_chain: &[&Self::Certificate],
+        leaf: &Self::Certificate,
+        unix_time: Option<Duration>,
+    ) -> Result<()> {
+        verify_chain_path(trusted_cert, untrusted_chain, leaf, unix_time, true).await
+    }
     type Key = Key;
     type Signature = Signature;
 
@@ -248,24 +256,42 @@ impl AsyncCryptoBackend for Crypto {
         leaf: &Self::Certificate,
         unix_time: Option<Duration>,
     ) -> Result<()> {
-        let untrusted_x509 = untrusted_chain
-            .iter()
-            .map(|cert| &cert.inner)
-            .collect::<Vec<_>>();
+        verify_chain_path(trusted_cert, untrusted_chain, leaf, unix_time, false).await
+    }
+}
 
-        x509_policy::verify_certificate_path_async(
-            |issuer, subject| Box::pin(verify_x509_certificate_signature(issuer, subject)),
-            &trusted_cert.inner,
-            &untrusted_x509,
-            &leaf.inner,
-        )
-        .await?;
+async fn verify_chain_path(
+    trusted_cert: &Certificate,
+    untrusted_chain: &[&Certificate],
+    leaf: &Certificate,
+    unix_time: Option<Duration>,
+    exact: bool,
+) -> Result<()> {
+    let untrusted_x509 = untrusted_chain
+        .iter()
+        .map(|cert| &cert.inner)
+        .collect::<Vec<_>>();
 
-        let singleton_path = untrusted_chain.is_empty() && trusted_cert == leaf;
-        let policy_path = std::iter::once(trusted_cert)
-            .chain(untrusted_chain.iter().copied())
-            .chain((!singleton_path).then_some(leaf));
-        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, unix_time.unwrap_or(unix_time_now()?))
+    x509_policy::verify_certificate_path_async(
+        |issuer, subject| Box::pin(verify_x509_certificate_signature(issuer, subject)),
+        &trusted_cert.inner,
+        &untrusted_x509,
+        &leaf.inner,
+    )
+    .await?;
+
+    let singleton_path = untrusted_chain.is_empty() && trusted_cert == leaf;
+    let policy_path = std::iter::once(trusted_cert)
+        .chain(untrusted_chain.iter().copied())
+        .chain((!singleton_path).then_some(leaf));
+    let time = match unix_time {
+        Some(time) => time,
+        None => unix_time_now()?,
+    };
+    if exact {
+        x509_policy::supplied_anchor_policy::<Crypto, _>(policy_path, time)
+    } else {
+        x509_policy::rfc5280_policy::<Crypto, _>(policy_path, time)
     }
 }
 
@@ -283,6 +309,20 @@ async fn verify_x509_certificate_signature(
     subject: &X509Certificate,
 ) -> Result<()> {
     let spki_der = issuer.public_key_spki_der()?;
+    if let Some(digest) = subject.ecdsa_signature_digest()? {
+        let curve = issuer.ec_public_key_algorithm()?;
+        let subtle = subtle_crypto()?;
+        let key = import_spki_key(&subtle, &spki_der, &ecdsa_import_params(curve)?).await?;
+        let signature = ecdsa_der_to_fixed(subject.signature_bytes(), curve)?;
+        return verify_with_subtle(
+            &subtle,
+            &key,
+            &ecdsa_verify_params(digest)?,
+            &signature,
+            &subject.tbs_certificate_der()?,
+        )
+        .await;
+    }
     let algorithm = subject.signature_algorithm()?;
     let key = <Key as AsyncKeyBackend>::from_spki_der(&spki_der, algorithm).await?;
     let data = subject.tbs_certificate_der()?;

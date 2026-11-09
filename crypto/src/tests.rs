@@ -457,6 +457,28 @@ mod sync_tests {
     }
 
     #[test]
+    fn exact_path_rejects_unused_candidates_and_accepts_partial_anchor() {
+        let root = cert(MILAN_ARK);
+        let issuer = cert(MILAN_ASK);
+        let leaf = cert(MILAN_VCEK);
+        let unrelated = cert(GENOA_ASK);
+        let time = Some(Duration::from_secs(1_785_542_400));
+        <Crypto as CryptoBackend>::verify_chain_exact(&root, &[&issuer], &leaf, time).unwrap();
+        <Crypto as CryptoBackend>::verify_chain_exact(&issuer, &[], &leaf, time).unwrap();
+        <Crypto as CryptoBackend>::verify_chain_exact(&root, &[&unrelated, &issuer], &leaf, time)
+            .expect_err("Unused candidates are not part of the validated path");
+        <Crypto as CryptoBackend>::verify_chain_exact(&root, &[&issuer, &issuer], &leaf, time)
+            .expect_err("Repeated candidates are not part of the validated path");
+        <Crypto as CryptoBackend>::verify_chain_exact(
+            &root,
+            &[&issuer],
+            &leaf,
+            Some(Duration::ZERO),
+        )
+        .expect_err("Supplied paths must retain time validation");
+    }
+
+    #[test]
     fn explicit_verification_time_is_used() {
         <Crypto as CryptoBackend>::verify_chain(
             &cert(MILAN_ARK),
@@ -483,6 +505,7 @@ mod sync_tests {
     fn self_signed_target_may_be_its_own_trust_anchor() {
         let target = cert(SELF_SIGNED_LEAF);
         <Crypto as CryptoBackend>::verify_chain(&target, &[], &target, None).unwrap();
+        <Crypto as CryptoBackend>::verify_chain_exact(&target, &[], &target, None).unwrap();
     }
 
     #[test]
@@ -745,6 +768,50 @@ mod async_tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn p384_certificate_signatures_can_use_sha256() {
+        let chain =
+            Crypto::from_pem_chain(include_bytes!("test_data/p384_sha256_chain.pem")).unwrap();
+        assert_eq!(chain.len(), 2);
+        let time = Some(Duration::from_secs(1_789_392_108));
+        <Crypto as AsyncCryptoBackend>::verify_chain(&chain[1], &[], &chain[0], time)
+            .await
+            .unwrap();
+        <Crypto as AsyncCryptoBackend>::verify_chain_exact(&chain[1], &[], &chain[0], time)
+            .await
+            .unwrap();
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    async fn exact_path_rejects_unused_candidates_and_accepts_partial_anchor() {
+        let root = cert(MILAN_ARK);
+        let issuer = cert(MILAN_ASK);
+        let leaf = cert(MILAN_VCEK);
+        let unrelated = cert(GENOA_ASK);
+        let time = Some(Duration::from_secs(1_785_542_400));
+        <Crypto as AsyncCryptoBackend>::verify_chain_exact(&root, &[&issuer], &leaf, time)
+            .await
+            .unwrap();
+        <Crypto as AsyncCryptoBackend>::verify_chain_exact(&issuer, &[], &leaf, time)
+            .await
+            .unwrap();
+        for candidates in [[&unrelated, &issuer], [&issuer, &issuer]] {
+            <Crypto as AsyncCryptoBackend>::verify_chain_exact(&root, &candidates, &leaf, time)
+                .await
+                .expect_err("Every supplied intermediate must belong to the path");
+        }
+        <Crypto as AsyncCryptoBackend>::verify_chain_exact(
+            &root,
+            &[&issuer],
+            &leaf,
+            Some(Duration::ZERO),
+        )
+        .await
+        .expect_err("Supplied paths must retain time validation");
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     async fn untrusted_intermediates_are_required() {
         <Crypto as AsyncCryptoBackend>::verify_chain(
             &cert(MILAN_ARK),
@@ -769,6 +836,9 @@ mod async_tests {
     async fn self_signed_target_may_be_its_own_trust_anchor() {
         let target = cert(SELF_SIGNED_LEAF);
         <Crypto as AsyncCryptoBackend>::verify_chain(&target, &[], &target, None)
+            .await
+            .unwrap();
+        <Crypto as AsyncCryptoBackend>::verify_chain_exact(&target, &[], &target, None)
             .await
             .unwrap();
     }

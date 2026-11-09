@@ -94,6 +94,42 @@ impl Certificate {
     pub fn signature_algorithm(&self) -> Result<SignatureKeyAlgorithm> {
         parse_signature_algorithm(self.inner.signature_algorithm())
     }
+
+    pub fn ecdsa_signature_digest(&self) -> Result<Option<crate::DigestAlgorithm>> {
+        if self.inner.signature_algorithm() != self.inner.tbs_certificate().signature() {
+            return Err("Certificate signature algorithms disagree".into());
+        }
+        let algorithm = self.inner.signature_algorithm();
+        let digest = match algorithm.oid.to_string().as_str() {
+            "1.2.840.10045.4.3.2" => Some(crate::DigestAlgorithm::Sha256),
+            "1.2.840.10045.4.3.3" => Some(crate::DigestAlgorithm::Sha384),
+            "1.2.840.10045.4.3.4" => Some(crate::DigestAlgorithm::Sha512),
+            _ => None,
+        };
+        if digest.is_some() && algorithm.parameters.is_some() {
+            return Err("ECDSA signature parameters must be absent".into());
+        }
+        Ok(digest)
+    }
+
+    pub fn ec_public_key_algorithm(&self) -> Result<crate::EcSignatureKeyAlgorithm> {
+        let spki = self.inner.tbs_certificate().subject_public_key_info();
+        if spki.algorithm.oid.to_string() != "1.2.840.10045.2.1" {
+            return Err("ECDSA issuer must have an EC public key".into());
+        }
+        let curve = spki
+            .algorithm
+            .parameters
+            .as_ref()
+            .ok_or("Missing EC curve")?
+            .decode_as::<ObjectIdentifier>()?;
+        match curve.to_string().as_str() {
+            "1.2.840.10045.3.1.7" => Ok(crate::EcSignatureKeyAlgorithm::P256),
+            "1.3.132.0.34" => Ok(crate::EcSignatureKeyAlgorithm::P384),
+            "1.3.132.0.35" => Ok(crate::EcSignatureKeyAlgorithm::P521),
+            _ => Err("Unsupported EC issuer curve".into()),
+        }
+    }
     pub fn subject_name(&self) -> String {
         self.inner.tbs_certificate().subject().to_string()
     }
