@@ -5,7 +5,7 @@
 ### Added
 
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
-- `CborValue::parse_nondet_bounded`, which parses within a nesting depth and a limit on the key/value pairs in any map (`MAX_CBOR_MAP_ENTRIES`, 256) and rejects any map inside a map key, through EverCBOR's single-pass bounded validator with sort-based duplicate detection. Exposed as `tav_cbor_nondet_parse_bounded` in the C ABI, with `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES`, and `tav::cbor::nondet_parse_bounded` in the C++ wrapper. The existing parsers are unchanged. (#174)
+- `CborValue::parse_nondet_bounded`, which parses within a nesting depth and a limit on the key/value pairs in any map (`MAX_CBOR_MAP_ENTRIES`, 256) and rejects any map inside a map key, through EverCBOR's single-pass bounded validator with sort-based duplicate detection. Exposed as `tav_cbor_nondet_parse_bounded` in the C ABI, with `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` and the entry limit capped at `TAV_CBOR_MAX_MAP_ENTRIES` (1024), and `tav::cbor::nondet_parse_bounded` in the C++ wrapper. The existing parsers are unchanged. (#174)
 
 ### Changed
 

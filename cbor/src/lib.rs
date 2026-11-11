@@ -476,7 +476,8 @@ impl<'a> CborValue<'a> {
     /// EverCBOR checks the bounds in a single pass and finds duplicate keys
     /// by sorting, so validation costs time bounded by the input length and
     /// the bounds, and `3 * (max_depth + 1) * max_map_entries` words of
-    /// scratch. Input over a bound fails with the generic parse error.
+    /// scratch. Input EverCBOR rejects fails with the generic parse error;
+    /// the tree walk names the depth limit when it is the one to reject.
     pub fn parse_nondet_bounded(
         bytes: &'a [u8],
         max_depth: usize,

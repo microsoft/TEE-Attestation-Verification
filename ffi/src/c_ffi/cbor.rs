@@ -26,8 +26,9 @@
 //!
 //! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
 //! whatever depth the caller asks for. `tav_cbor_nondet_parse_bounded` also
-//! caps the entries of every map and rejects maps inside map keys. Builders do
-//! not enforce these limits. Callers must bound the depth they build. Copying,
+//! caps the entries of every map, at most [`MAX_MAP_ENTRIES_LIMIT`] whatever
+//! the caller asks for, and rejects maps inside map keys. Builders do not
+//! enforce these limits. Callers must bound the depth they build. Copying,
 //! materializing, or dropping an extremely deep value can exhaust the process
 //! stack and abort.
 
@@ -57,6 +58,10 @@ pub const KIND_SIMPLE: i32 = 6;
 /// parser and serializer so that deeply nested input cannot overflow the
 /// stack.
 pub const MAX_DEPTH_LIMIT: usize = 256;
+
+/// Ceiling on the map entry limit a caller may request, bounding the scratch
+/// space bounded parsing allocates per call.
+pub const MAX_MAP_ENTRIES_LIMIT: usize = 1024;
 
 /// An opaque, independently owned view into an immutable CBOR document.
 pub type TavCborHandle = CborView;
@@ -509,7 +514,8 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse(
 }
 
 /// Parse like `tav_cbor_nondet_parse`, also rejecting any map with more than
-/// `max_map_entries` entries and any map inside a map key.
+/// `max_map_entries` entries, capped at [`MAX_MAP_ENTRIES_LIMIT`], and any map
+/// inside a map key.
 ///
 /// # Safety
 /// Same requirements as `tav_cbor_nondet_parse`.
@@ -523,7 +529,11 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse_bounded(
 ) -> *mut TavError {
     into_result(|| unsafe {
         parse_with(data, len, out, |bytes| {
-            CborValue::parse_nondet_bounded(bytes, capped(max_depth), max_map_entries)
+            CborValue::parse_nondet_bounded(
+                bytes,
+                capped(max_depth),
+                max_map_entries.min(MAX_MAP_ENTRIES_LIMIT),
+            )
         })
     })
 }

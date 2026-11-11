@@ -73,9 +73,10 @@ typedef struct TavCborHandle TavCborHandle;
 #define TAV_CBOR_MAX_DEPTH 256
 
 /*
- * Default map entry limit for tav_cbor_nondet_parse_bounded, and the C++
- * wrapper's default.
+ * Map entry limits for tav_cbor_nondet_parse_bounded: the ceiling on what a
+ * caller may request, and the C++ wrapper's default.
  */
+#define TAV_CBOR_MAX_MAP_ENTRIES 1024
 #define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 256
 
 /*
@@ -155,8 +156,9 @@ TavError* tav_cbor_nondet_parse(
 /*
  * Like tav_cbor_nondet_parse, also rejecting any map with more than
  * max_map_entries key/value pairs, at any level, and any map inside a map
- * key. Validation then costs time bounded by the input length and the limits,
- * and 3 * (max_depth + 1) * max_map_entries words of scratch per call.
+ * key. max_map_entries is capped at TAV_CBOR_MAX_MAP_ENTRIES. Validation then
+ * costs time bounded by the input length and the limits, and
+ * 3 * (max_depth + 1) * max_map_entries words of scratch per call.
  */
 TavError* tav_cbor_nondet_parse_bounded(
   const uint8_t* data,

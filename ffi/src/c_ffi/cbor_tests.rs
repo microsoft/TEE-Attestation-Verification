@@ -654,6 +654,16 @@ fn bounded_parsing_rejects_maps_inside_keys() {
     unsafe { tav_cbor_free(handle) };
 }
 
+/// However large an entry limit the caller asks for, the ceiling applies.
+#[test]
+fn bounded_parsing_caps_the_map_entry_limit() {
+    let at_ceiling = flat_map(MAX_MAP_ENTRIES_LIMIT);
+    let over_ceiling = flat_map(MAX_MAP_ENTRIES_LIMIT + 1);
+    unsafe { tav_cbor_free(decode_bounded(&at_ceiling, 16, usize::MAX).unwrap()) };
+    assert!(decode_bounded(&over_ceiling, 16, usize::MAX).is_err());
+    unsafe { tav_cbor_free(parse_nondet(&over_ceiling).unwrap()) };
+}
+
 #[test]
 fn bounded_parsing_honours_the_depth_ceiling_and_clears_its_output() {
     let nested = |levels: usize| {
@@ -1273,15 +1283,25 @@ fn c_header_publishes_the_depth_ceiling() {
 }
 
 #[test]
-fn c_header_publishes_the_default_map_entry_limit() {
+fn c_header_publishes_the_map_entry_limits() {
     let header = include_str!("../../include/tav/cbor.h");
-    let declared = header.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("#define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES ")
-            .and_then(|v| v.trim().parse::<usize>().ok())
-    });
+    let defined = |name: &str| {
+        header.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("#define ")?
+                .strip_prefix(name)?
+                .trim()
+                .parse::<usize>()
+                .ok()
+        })
+    };
     assert_eq!(
-        declared,
+        defined("TAV_CBOR_MAX_MAP_ENTRIES "),
+        Some(MAX_MAP_ENTRIES_LIMIT),
+        "TAV_CBOR_MAX_MAP_ENTRIES must match the Rust constant"
+    );
+    assert_eq!(
+        defined("TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES "),
         Some(cbor::MAX_CBOR_MAP_ENTRIES),
         "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES must match the Rust constant"
     );

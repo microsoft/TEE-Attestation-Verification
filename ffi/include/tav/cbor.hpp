@@ -45,7 +45,8 @@ namespace tav::cbor
 /// Ceiling on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
 
-/// Default map entry limit of nondet_parse_bounded.
+/// Ceiling on the map entry limit of nondet_parse_bounded, and its default.
+constexpr size_t MAX_MAP_ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES;
 constexpr size_t DEFAULT_MAX_MAP_ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
 
 /// Value kinds. INVALID is reported for an empty Value.
@@ -407,7 +408,8 @@ inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_D
 }
 
 /// Like nondet_parse, also rejecting any map with more than max_map_entries
-/// entries, at any level, and any map inside a map key.
+/// entries (capped at MAX_MAP_ENTRIES), at any level, and any map inside a
+/// map key.
 inline Value nondet_parse_bounded(
   std::span<const uint8_t> raw,
   size_t max_depth = MAX_DEPTH,

@@ -555,7 +555,7 @@ fn large_fixture(duplicate: bool) -> Vec<u8> {
     // One-byte array and key heads, two-byte map heads.
     const _: () = assert!(FIXTURE_KEY_LEN < 24);
     assert!(map_count + 1 < 24);
-    assert!((24..=u16::MAX as usize).contains(&MAX_CBOR_MAP_ENTRIES));
+    assert!((256..=u16::MAX as usize).contains(&MAX_CBOR_MAP_ENTRIES));
     let mut document = Vec::with_capacity(FIXTURE_LEN);
     document.push(0x80 | (map_count + 1) as u8);
     for map in 0..map_count {
@@ -604,7 +604,9 @@ fn pad(mut document: Vec<u8>) -> Vec<u8> {
     document
 }
 
-/// Generous for a debug build; a quadratic regression would blow it.
+/// Generous for a debug build. The 128 KiB fixtures alone would admit a
+/// pairwise duplicate check (about 1.5 s); the wide map below would not
+/// (about 18 s).
 const FIXTURE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn within_deadline<T>(what: &str, run: impl FnOnce() -> T) -> T {
@@ -644,6 +646,11 @@ fn bounded_parsing_meets_the_deadline() {
     });
     // The nested keys are valid CBOR; the other parsers accept them.
     assert!(CborValue::parse_det(&nested_keys).is_ok());
+
+    // One 4096-entry map: quadratic duplicate detection would take seconds.
+    let wide = flat_map(4096);
+    let parsed = within_deadline("wide map", || bounded(&wide, (1, 4096)).unwrap());
+    assert_eq!(parsed.len().unwrap(), 4096);
 }
 
 // --- Accessor: array index ---

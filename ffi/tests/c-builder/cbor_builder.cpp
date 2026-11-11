@@ -841,6 +841,8 @@ std::vector<uint8_t> nested_key_fixture()
 TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map keys")
 {
     static_assert(DEFAULT_MAX_MAP_ENTRIES == TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES);
+    static_assert(MAX_MAP_ENTRIES == TAV_CBOR_MAX_MAP_ENTRIES);
+    static_assert(DEFAULT_MAX_MAP_ENTRIES <= MAX_MAP_ENTRIES);
 
     const std::vector<uint8_t> at_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES);
     const std::vector<uint8_t> over_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES + 1);
