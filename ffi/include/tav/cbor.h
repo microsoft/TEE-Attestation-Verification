@@ -73,6 +73,12 @@ typedef struct TavCborHandle TavCborHandle;
 #define TAV_CBOR_MAX_DEPTH 256
 
 /*
+ * Default map entry limit for tav_cbor_nondet_parse_bounded, and the C++
+ * wrapper's default.
+ */
+#define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 256
+
+/*
  * Value kinds, named for use with tav_cbor_kind. The enum type itself is not
  * used in any signature, because a C enum has implementation-defined width.
  */
@@ -144,6 +150,19 @@ TavError* tav_cbor_nondet_parse(
   const uint8_t* data,
   size_t len,
   size_t max_depth,
+  TavCborHandle** out_value);
+
+/*
+ * Like tav_cbor_nondet_parse, also rejecting any map with more than
+ * max_map_entries key/value pairs, at any level, and any map inside a map
+ * key. Validation then costs time bounded by the input length and the limits,
+ * and 3 * (max_depth + 1) * max_map_entries words of scratch per call.
+ */
+TavError* tav_cbor_nondet_parse_bounded(
+  const uint8_t* data,
+  size_t len,
+  size_t max_depth,
+  size_t max_map_entries,
   TavCborHandle** out_value);
 
 /* Requires deterministic encoding. */

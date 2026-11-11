@@ -21,6 +21,10 @@
 //! invalid UTF-8, duplicate map keys, and integers outside the range of
 //! `i64`.
 //!
+//! For untrusted input, [`CborValue::parse_nondet_bounded`] also caps the
+//! entries of every map and rejects maps inside map keys, which bounds the
+//! cost of validation by the input length and the caps.
+//!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
 //! the value. [`CborValue::into_owned`] detaches a value from its input.
@@ -42,6 +46,9 @@ use std::borrow::Cow;
 /// leaf. This bounds the recursion depth reached while walking untrusted
 /// input.
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
+
+/// Default map entry limit for [`CborValue::parse_nondet_bounded`].
+pub const MAX_CBOR_MAP_ENTRIES: usize = 256;
 
 /// Bound passed to EverCBOR's serialized-size estimator.
 const SIZE_BOUND: usize = usize::MAX;
@@ -264,6 +271,23 @@ mod nondet_backend {
         to_vec(raw)
     }
 
+    /// Validates within the bounds in a single pass, finding duplicate keys
+    /// by sorting in scratch space sized by the bounds, then parses. Rejects
+    /// maps over `max_map_entries` and maps inside map keys.
+    pub(super) fn parse_bounded(
+        input: &[u8],
+        max_depth: usize,
+        max_map_entries: usize,
+    ) -> Option<(api::CborNondet<'_>, &[u8])> {
+        // EverCBOR counts the maps on a path, a root or empty map included;
+        // this crate counts the root at 0 and charges only containers with
+        // children. So `max_depth + 1` admits what the tree walk admits.
+        let map_depth_bound = max_depth.checked_add(1)?;
+        // A key's map depth is that of the maps inside it: zero rejects any
+        // key holding a map.
+        api::cbor_nondet_parse_bounded_sort_alloc(map_depth_bound, max_map_entries, Some(0), input)
+    }
+
     impl<'a> Backend<'a> for api::CborNondet<'a> {
         type MapEntry = api::CborNondetMapEntry<'a>;
 
@@ -442,13 +466,39 @@ impl<'a> CborValue<'a> {
     /// than `max_depth`.
     pub fn parse_with_depth<M: Mode>(bytes: &'a [u8], max_depth: usize) -> Result<Self, String> {
         let (item, remainder) = <M::Item<'a>>::parse(bytes).ok_or("Failed to parse CBOR bytes")?;
+        Self::from_parsed(item, remainder, max_depth)
+    }
+
+    /// Parse leniently, rejecting inputs nested deeper than `max_depth`, any
+    /// map with more than `max_map_entries` entries, at any level, and any
+    /// map inside a map key.
+    ///
+    /// EverCBOR checks the bounds in a single pass and finds duplicate keys
+    /// by sorting, so validation costs time bounded by the input length and
+    /// the bounds, and `3 * (max_depth + 1) * max_map_entries` words of
+    /// scratch. Input over a bound fails with the generic parse error.
+    pub fn parse_nondet_bounded(
+        bytes: &'a [u8],
+        max_depth: usize,
+        max_map_entries: usize,
+    ) -> Result<Self, String> {
+        let (item, remainder) = nondet_backend::parse_bounded(bytes, max_depth, max_map_entries)
+            .ok_or("Failed to parse CBOR bytes")?;
+        Self::from_parsed(item, remainder, max_depth)
+    }
+
+    fn from_parsed<B: Backend<'a>>(
+        item: B,
+        remainder: &[u8],
+        max_depth: usize,
+    ) -> Result<Self, String> {
         if !remainder.is_empty() {
             return Err(format!(
                 "Trailing bytes: {} unconsumed byte(s)",
                 remainder.len()
             ));
         }
-        Self::from_raw::<M::Item<'a>>(item, max_depth)
+        Self::from_raw::<B>(item, max_depth)
     }
 
     /// Parse leniently, accepting any well-formed definite-length encoding.

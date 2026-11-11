@@ -25,9 +25,11 @@
 //! # Limits
 //!
 //! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
-//! whatever depth the caller asks for. Builders do not enforce this limit.
-//! Callers must bound the depth they build. Copying, materializing, or dropping
-//! an extremely deep value can exhaust the process stack and abort.
+//! whatever depth the caller asks for. `tav_cbor_nondet_parse_bounded` also
+//! caps the entries of every map and rejects maps inside map keys. Builders do
+//! not enforce these limits. Callers must bound the depth they build. Copying,
+//! materializing, or dropping an extremely deep value can exhaust the process
+//! stack and abort.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -461,20 +463,32 @@ pub unsafe extern "C" fn tav_cbor_det_serialize(
 
 // --- Parsing ---
 
+unsafe fn parse_with(
+    data: *const u8,
+    len: usize,
+    out: *mut *mut TavCborHandle,
+    parser: impl FnOnce(&'static [u8]) -> Result<CborValue<'static>, String>,
+) -> Result<(), TavError> {
+    unsafe { owned_out_ptr(out, "out") }?;
+    let bytes = unsafe { borrowed(data, len) }.ok_or_else(|| {
+        TavError::new(TavErrorCode::CborDecodeFailed, "Invalid CBOR input buffer")
+    })?;
+    let value = parser(bytes).map_err(|e| TavError::new(TavErrorCode::CborDecodeFailed, e))?;
+    unsafe { *out = into_handle(value) };
+    Ok(())
+}
+
 unsafe fn parse<M: Mode>(
     data: *const u8,
     len: usize,
     max_depth: usize,
     out: *mut *mut TavCborHandle,
 ) -> Result<(), TavError> {
-    unsafe { owned_out_ptr(out, "out") }?;
-    let bytes = unsafe { borrowed(data, len) }.ok_or_else(|| {
-        TavError::new(TavErrorCode::CborDecodeFailed, "Invalid CBOR input buffer")
-    })?;
-    let value = CborValue::parse_with_depth::<M>(bytes, capped(max_depth))
-        .map_err(|e| TavError::new(TavErrorCode::CborDecodeFailed, e))?;
-    unsafe { *out = into_handle(value) };
-    Ok(())
+    unsafe {
+        parse_with(data, len, out, |bytes| {
+            CborValue::parse_with_depth::<M>(bytes, capped(max_depth))
+        })
+    }
 }
 
 /// Parse a complete document, borrowing byte and text payloads from `data`.
@@ -492,6 +506,26 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse(
     out: *mut *mut TavCborHandle,
 ) -> *mut TavError {
     into_result(|| unsafe { parse::<Nondet>(data, len, max_depth, out) })
+}
+
+/// Parse like `tav_cbor_nondet_parse`, also rejecting any map with more than
+/// `max_map_entries` entries and any map inside a map key.
+///
+/// # Safety
+/// Same requirements as `tav_cbor_nondet_parse`.
+#[no_mangle]
+pub unsafe extern "C" fn tav_cbor_nondet_parse_bounded(
+    data: *const u8,
+    len: usize,
+    max_depth: usize,
+    max_map_entries: usize,
+    out: *mut *mut TavCborHandle,
+) -> *mut TavError {
+    into_result(|| unsafe {
+        parse_with(data, len, out, |bytes| {
+            CborValue::parse_nondet_bounded(bytes, capped(max_depth), max_map_entries)
+        })
+    })
 }
 
 /// Parse, requiring deterministic encoding.

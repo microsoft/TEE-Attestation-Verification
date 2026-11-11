@@ -308,6 +308,344 @@ fn explicit_depth_limit_is_honoured() {
     assert!(value.to_bytes_with_depth::<Det>(1).is_err());
 }
 
+// --- Bounded parsing ---
+
+const DEFAULT_BOUNDS: (usize, usize) = (MAX_CBOR_NESTING_DEPTH, MAX_CBOR_MAP_ENTRIES);
+
+fn bounded(bytes: &[u8], (depth, entries): (usize, usize)) -> Result<CborValue<'_>, String> {
+    CborValue::parse_nondet_bounded(bytes, depth, entries)
+}
+
+/// `{0: 0, 1: 0, ...}` with `entries` entries.
+fn flat_map(entries: usize) -> Vec<u8> {
+    CborValue::Map(
+        (0..entries as i64)
+            .map(|key| (CborValue::Int(key), CborValue::Int(0)))
+            .collect(),
+    )
+    .to_bytes_det()
+    .unwrap()
+}
+
+/// `inner` in a one-element array, a map value, and a tag.
+fn wrapped(inner: &[u8]) -> [Vec<u8>; 3] {
+    [
+        [&[0x81][..], inner].concat(),
+        [&[0xa1, 0x00][..], inner].concat(),
+        [&[0xd8, 0x2a][..], inner].concat(),
+    ]
+}
+
+/// A map at the limit parses; one entry over fails, wherever it sits.
+#[test]
+fn bounded_map_entry_limit_applies_at_every_level() {
+    let (at_limit, over_limit) = (flat_map(3), flat_map(4));
+    assert_eq!(bounded(&at_limit, (4, 3)).unwrap().len().unwrap(), 3);
+    assert_eq!(
+        bounded(&over_limit, (4, 3)).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+    assert!(bounded(&over_limit, (4, 4)).is_ok());
+    for document in wrapped(&at_limit) {
+        assert!(bounded(&document, (4, 3)).is_ok());
+    }
+    for document in wrapped(&over_limit) {
+        assert!(bounded(&document, (4, 3)).is_err());
+        assert!(bounded(&document, (4, 4)).is_ok());
+    }
+
+    let (at_limit, over_limit) = (
+        flat_map(MAX_CBOR_MAP_ENTRIES),
+        flat_map(MAX_CBOR_MAP_ENTRIES + 1),
+    );
+    assert_eq!(
+        bounded(&at_limit, DEFAULT_BOUNDS).unwrap().len().unwrap(),
+        MAX_CBOR_MAP_ENTRIES
+    );
+    assert!(bounded(&over_limit, DEFAULT_BOUNDS).is_err());
+    // The other parsers are unchanged.
+    assert!(CborValue::parse_nondet(&over_limit).is_ok());
+    assert!(CborValue::parse_det(&over_limit).is_ok());
+}
+
+/// Arrays and empty maps are unaffected by the entry limit.
+#[test]
+fn bounded_entry_limit_ignores_arrays_and_empty_maps() {
+    let wide_array = CborValue::Array((0..300).map(CborValue::Int).collect())
+        .to_bytes_det()
+        .unwrap();
+    assert_eq!(bounded(&wide_array, (1, 0)).unwrap().len().unwrap(), 300);
+    assert_eq!(bounded(&[0xa0], (0, 0)).unwrap(), CborValue::Map(vec![]));
+    assert!(bounded(&[0xa1, 0x00, 0x00], (1, 0)).is_err());
+}
+
+/// Maps in map values are fine while each fits the bounds.
+#[test]
+fn bounded_accepts_valid_maps_in_values() {
+    // {0: {0: 0, 1: 0}, 1: {0: {}, 1: [{0: 0}]}}
+    let document = CborValue::Map(vec![
+        (
+            CborValue::Int(0),
+            CborValue::Map(vec![
+                (CborValue::Int(0), CborValue::Int(0)),
+                (CborValue::Int(1), CborValue::Int(0)),
+            ]),
+        ),
+        (
+            CborValue::Int(1),
+            CborValue::Map(vec![
+                (CborValue::Int(0), CborValue::Map(vec![])),
+                (
+                    CborValue::Int(1),
+                    CborValue::Array(vec![CborValue::Map(vec![(
+                        CborValue::Int(0),
+                        CborValue::Int(0),
+                    )])]),
+                ),
+            ]),
+        ),
+    ]);
+    let encoded = document.to_bytes_det().unwrap();
+    assert_eq!(bounded(&encoded, (4, 2)).unwrap(), document);
+    assert_eq!(bounded(&encoded, DEFAULT_BOUNDS).unwrap(), document);
+    assert!(bounded(&encoded, (3, 2)).is_err());
+    assert!(bounded(&encoded, (4, 1)).is_err());
+}
+
+/// A map anywhere inside a key is rejected; the other parsers accept it.
+#[test]
+fn bounded_rejects_maps_inside_keys() {
+    let documents: [&[u8]; 6] = [
+        &[0xa1, 0xa0, 0x00],                         // {{}: 0}
+        &[0xa1, 0xa1, 0x01, 0x02, 0x00],             // {{1: 2}: 0}
+        &[0xa1, 0x81, 0xa0, 0x00],                   // {[{}]: 0}
+        &[0xa1, 0xd8, 0x2a, 0xa0, 0x00],             // {42({}): 0}
+        &[0xa1, 0x00, 0xa1, 0xa1, 0x01, 0x00, 0x00], // {0: {{1: 0}: 0}}
+        &[0x81, 0xa1, 0x82, 0x01, 0xa0, 0x00],       // [{[1, {}]: 0}]
+    ];
+    for document in documents {
+        assert_eq!(
+            bounded(document, (16, 16)).unwrap_err(),
+            "Failed to parse CBOR bytes",
+            "{document:02x?}"
+        );
+        assert!(CborValue::parse_nondet(document).is_ok(), "{document:02x?}");
+        assert!(CborValue::parse_det(document).is_ok(), "{document:02x?}");
+    }
+}
+
+/// Scalars, arrays, and tags holding no map remain valid keys.
+#[test]
+fn bounded_keeps_keys_without_maps() {
+    let document = CborValue::Map(vec![
+        (CborValue::Int(-1), CborValue::Int(0)),
+        (CborValue::Simple(22), CborValue::Int(1)),
+        (CborValue::bytes(vec![0xaa]), CborValue::Int(2)),
+        (CborValue::text("k"), CborValue::Int(3)),
+        (CborValue::Array(vec![]), CborValue::Int(4)),
+        (
+            CborValue::Array(vec![CborValue::Int(1), CborValue::Array(vec![])]),
+            CborValue::Int(5),
+        ),
+        (
+            CborValue::Tagged {
+                tag: 42,
+                payload: Box::new(CborValue::Array(vec![CborValue::text("t")])),
+            },
+            CborValue::Int(6),
+        ),
+    ]);
+    let encoded = document.to_bytes_nondet().unwrap();
+    assert_eq!(bounded(&encoded, (4, 7)).unwrap(), document);
+}
+
+/// EverCBOR counts the maps on a path, an empty one included; this crate
+/// counts the root at zero and charges only containers with children. Offset
+/// by one, EverCBOR's bound admits everything the tree walk admits.
+#[test]
+fn bounded_depth_matches_parse_with_depth() {
+    // {1: {}} needs a budget of 1: the empty map is a leaf. At 0, EverCBOR's
+    // bound of 1 rejects the two maps on the path first.
+    let empty_leaf: &[u8] = &[0xa1, 0x01, 0xa0];
+    assert!(bounded(empty_leaf, (1, 1)).is_ok());
+    assert_eq!(
+        bounded(empty_leaf, (0, 1)).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+
+    // [[[{}]]] needs a budget of 3; EverCBOR counts only the map.
+    let arrays_over_map: &[u8] = &[0x81, 0x81, 0x81, 0xa0];
+    assert!(bounded(arrays_over_map, (3, 0)).is_ok());
+    assert_eq!(
+        bounded(arrays_over_map, (2, 0)).unwrap_err(),
+        "Maximum CBOR nesting depth exceeded"
+    );
+
+    // {1: {2: {3: 0}}} needs a budget of 3. One short, the tree walk names
+    // the limit; two short, EverCBOR rejects first.
+    let chain: &[u8] = &[0xa1, 0x01, 0xa1, 0x02, 0xa1, 0x03, 0x00];
+    assert!(bounded(chain, (3, 1)).is_ok());
+    assert_eq!(
+        bounded(chain, (2, 1)).unwrap_err(),
+        "Maximum CBOR nesting depth exceeded"
+    );
+    assert_eq!(
+        bounded(chain, (1, 1)).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+
+    // Scalars and empty containers fit depth 0, like everywhere else.
+    for document in [&[0x01u8][..], &[0x80], &[0xa0]] {
+        assert!(bounded(document, (0, 0)).is_ok());
+    }
+    // A depth of usize::MAX has no bound one above it.
+    assert!(bounded(&[0x01], (usize::MAX, 1)).is_err());
+}
+
+/// Bounded parsing agrees with the other parsers on valid input and rejects
+/// what they reject.
+#[test]
+fn bounded_agrees_with_the_other_parsers() {
+    let document = CborValue::Map(vec![
+        (CborValue::Int(1), CborValue::text("one")),
+        (CborValue::text("two"), CborValue::bytes(vec![2, 2])),
+        (
+            CborValue::Array(vec![CborValue::Int(3)]),
+            CborValue::Tagged {
+                tag: 3,
+                payload: Box::new(CborValue::Map(vec![])),
+            },
+        ),
+        (CborValue::Int(-4), CborValue::Simple(22)),
+    ])
+    .to_bytes_det()
+    .unwrap();
+    assert_eq!(
+        bounded(&document, (3, 4)).unwrap(),
+        CborValue::parse_det(&document).unwrap()
+    );
+    let malformed: [&[u8]; 5] = [
+        &[0xa2, 0x01, 0x01, 0x01, 0x02], // duplicate keys
+        &[0xa2, 0x01, 0x01, 0x02],       // truncated
+        &[0x9f, 0x01, 0xff],             // indefinite length
+        &[0x62, 0xff, 0xfe],             // invalid UTF-8
+        &[0x01, 0x02],                   // trailing byte
+    ];
+    for document in malformed {
+        assert!(
+            bounded(document, DEFAULT_BOUNDS).is_err(),
+            "{document:02x?}"
+        );
+    }
+}
+
+// --- Performance ---
+
+const FIXTURE_LEN: usize = 128 * 1024;
+
+/// Fixture keys share a long prefix, so comparing two scans most bytes.
+const FIXTURE_KEY_LEN: usize = 23;
+
+/// A 128 KiB array of maps at the default entry limit, padded with a byte
+/// string. Canonical and preferred, so valid in both modes. With `duplicate`,
+/// the last key of the last map repeats that map's first key.
+fn large_fixture(duplicate: bool) -> Vec<u8> {
+    let map_len = 3 + MAX_CBOR_MAP_ENTRIES * (1 + FIXTURE_KEY_LEN + 1);
+    let map_count = (FIXTURE_LEN - 1 - 3) / map_len;
+    // One-byte array and key heads, two-byte map heads.
+    const _: () = assert!(FIXTURE_KEY_LEN < 24);
+    assert!(map_count + 1 < 24);
+    assert!((24..=u16::MAX as usize).contains(&MAX_CBOR_MAP_ENTRIES));
+    let mut document = Vec::with_capacity(FIXTURE_LEN);
+    document.push(0x80 | (map_count + 1) as u8);
+    for map in 0..map_count {
+        document.push(0xb9);
+        document.extend_from_slice(&(MAX_CBOR_MAP_ENTRIES as u16).to_be_bytes());
+        for entry in 0..MAX_CBOR_MAP_ENTRIES {
+            let last_of_last = map + 1 == map_count && entry + 1 == MAX_CBOR_MAP_ENTRIES;
+            let index = if duplicate && last_of_last { 0 } else { entry };
+            document.push(0x40 | FIXTURE_KEY_LEN as u8);
+            document.resize(document.len() + FIXTURE_KEY_LEN - 2, 0xab);
+            document.extend_from_slice(&(index as u16).to_be_bytes());
+            document.push(0x00);
+        }
+    }
+    pad(document)
+}
+
+/// A 128 KiB array holding a map whose two keys are 14 levels of nested maps,
+/// identical except at the deepest value, padded with a byte string.
+/// Comparing the keys scans both subtrees, re-sorting every nested map.
+fn nested_key_fixture() -> Vec<u8> {
+    fn tree(depth: usize, leaf: u8) -> Vec<u8> {
+        if depth == 0 {
+            return vec![leaf];
+        }
+        let mut out = vec![0xa2];
+        out.extend(tree(depth - 1, 0));
+        out.push(0x00);
+        out.extend(tree(depth - 1, 1));
+        out.push(leaf);
+        out
+    }
+    let mut document = vec![0x82];
+    document.extend(tree(14, 0));
+    pad(document)
+}
+
+/// Appends a byte string that brings `document` to [`FIXTURE_LEN`].
+fn pad(mut document: Vec<u8>) -> Vec<u8> {
+    let padding = FIXTURE_LEN - document.len() - 3;
+    assert!((256..=u16::MAX as usize).contains(&padding));
+    document.push(0x59);
+    document.extend_from_slice(&(padding as u16).to_be_bytes());
+    document.resize(document.len() + padding, 0);
+    assert_eq!(document.len(), FIXTURE_LEN);
+    document
+}
+
+/// Generous for a debug build; a quadratic regression would blow it.
+const FIXTURE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn within_deadline<T>(what: &str, run: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let result = run();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed <= FIXTURE_DEADLINE,
+        "{what} took {elapsed:?}, over {FIXTURE_DEADLINE:?}"
+    );
+    result
+}
+
+/// The fixtures parse, or are rejected, in time.
+#[test]
+#[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
+fn bounded_parsing_meets_the_deadline() {
+    let fixture = large_fixture(false);
+    let control = large_fixture(true);
+    let nested_keys = nested_key_fixture();
+
+    let parsed = within_deadline("fixture", || bounded(&fixture, DEFAULT_BOUNDS).unwrap());
+    assert_eq!(parsed, CborValue::parse_det(&fixture).unwrap());
+    let maps = parsed.len().unwrap() - 1;
+    assert!(maps >= 16, "fixture holds {maps} maps");
+    for map in 0..maps {
+        assert_eq!(
+            parsed.array_at(map).unwrap().len().unwrap(),
+            MAX_CBOR_MAP_ENTRIES
+        );
+    }
+    within_deadline("duplicate control", || {
+        assert!(bounded(&control, DEFAULT_BOUNDS).is_err())
+    });
+    within_deadline("nested keys", || {
+        assert!(bounded(&nested_keys, DEFAULT_BOUNDS).is_err())
+    });
+    // The nested keys are valid CBOR; the other parsers accept them.
+    assert!(CborValue::parse_det(&nested_keys).is_ok());
+}
+
 // --- Accessor: array index ---
 
 #[test]
