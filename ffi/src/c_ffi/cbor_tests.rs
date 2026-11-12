@@ -749,6 +749,15 @@ fn fixture(duplicate: bool, nested_keys: bool) -> Vec<u8> {
     document
 }
 
+/// The `cbor` crate's deep-array fixture: 8 KiB of one-element arrays nested
+/// around a zero. Shorter than the others because the tree walk skips over
+/// the rest of the input at every level down to the depth limit.
+fn deep_array_fixture() -> Vec<u8> {
+    let mut document = vec![0x81; 8 * 1024 - 1];
+    document.push(0x00);
+    document
+}
+
 /// The fixtures parse, or are rejected, in time through the C ABI.
 #[test]
 #[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
@@ -759,12 +768,19 @@ fn bounded_parsing_meets_the_deadline_through_the_abi() {
         fixture(true, false),
         fixture(false, true),
     );
+    let deep_arrays = deep_array_fixture();
     let entries = cbor::MAX_CBOR_MAP_ENTRIES;
 
     let start = std::time::Instant::now();
     let handle = decode_bounded(&valid, MAX_DEPTH_LIMIT, entries).unwrap();
     assert!(decode_bounded(&control, MAX_DEPTH_LIMIT, entries).is_err());
     assert!(decode_bounded(&nested_keys, MAX_DEPTH_LIMIT, entries).is_err());
+    // At the default depth: the walk costs a pass over the input per level.
+    assert!(
+        decode_bounded(&deep_arrays, cbor::MAX_CBOR_NESTING_DEPTH, entries)
+            .unwrap_err()
+            .contains("Maximum CBOR nesting depth")
+    );
     let elapsed = start.elapsed();
     assert!(elapsed <= DEADLINE, "took {elapsed:?}");
 
@@ -1289,6 +1305,25 @@ fn c_header_publishes_the_depth_ceiling() {
         Some(MAX_DEPTH_LIMIT),
         "TAV_CBOR_MAX_DEPTH must match the Rust constant"
     );
+}
+
+#[test]
+fn c_header_publishes_the_default_depth() {
+    let header = include_str!("../../include/tav/cbor.h");
+    let declared: Vec<usize> = header
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("#define TAV_CBOR_DEFAULT_MAX_DEPTH ")
+                .map(|v| v.trim().parse().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        [cbor::MAX_CBOR_NESTING_DEPTH],
+        "TAV_CBOR_DEFAULT_MAX_DEPTH must match the Rust constant"
+    );
+    const _: () = assert!(cbor::MAX_CBOR_NESTING_DEPTH <= MAX_DEPTH_LIMIT);
 }
 
 #[test]

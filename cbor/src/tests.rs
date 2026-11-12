@@ -614,6 +614,18 @@ fn pad(mut document: Vec<u8>) -> Vec<u8> {
     document
 }
 
+/// The deep-array fixture is shorter than the others: the tree walk skips
+/// over the rest of the input at every level down to the depth limit, so a
+/// 128 KiB one takes about 4 s at the default depth in a debug build.
+const DEEP_ARRAY_FIXTURE_LEN: usize = 8 * 1024;
+
+/// One-element arrays nested around a zero, far past any depth limit.
+fn deep_array_fixture() -> Vec<u8> {
+    let mut document = vec![0x81; DEEP_ARRAY_FIXTURE_LEN - 1];
+    document.push(0x00);
+    document
+}
+
 /// Generous for a debug build. The 128 KiB fixtures alone would admit a
 /// pairwise duplicate check (about 1.5 s); the wide map below would not
 /// (about 18 s).
@@ -661,6 +673,17 @@ fn bounded_parsing_meets_the_deadline() {
     let wide = flat_map(4096);
     let parsed = within_deadline("wide map", || bounded(&wide, (1, 4096)).unwrap());
     assert_eq!(parsed.len().unwrap(), 4096);
+
+    // Nested arrays, which the validator does not bound. The depth limit
+    // stops the tree walk after a pass over the input for each level; with
+    // no limit it would take about 16 s.
+    let deep_arrays = deep_array_fixture();
+    within_deadline("deep arrays", || {
+        assert_eq!(
+            bounded(&deep_arrays, DEFAULT_BOUNDS).unwrap_err(),
+            "Maximum CBOR nesting depth exceeded"
+        )
+    });
 }
 
 // --- Accessor: array index ---

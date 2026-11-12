@@ -709,7 +709,7 @@ TEST_CASE("cbor handle: shallow_copy keeps a borrowed payload borrowed")
     CHECK(copied.as_bytes().data() == buffer.data());
 }
 
-TEST_CASE("cbor handle: serialization stops one level past the depth ceiling")
+TEST_CASE("cbor handle: serialization stops one level past the depth limit")
 {
     auto nest = [](size_t levels) {
         Value v = make_signed(1);
@@ -722,12 +722,23 @@ TEST_CASE("cbor handle: serialization stops one level past the depth ceiling")
         return v;
     };
 
+    // The default depth applies unless the caller asks for more.
+    const Value at_default = nest(DEFAULT_MAX_DEPTH);
+    CHECK_NOTHROW((void)at_default.det_serialize());
+    CHECK_NOTHROW((void)at_default.nondet_serialize());
+    const Value past_default = nest(DEFAULT_MAX_DEPTH + 1);
+    CHECK_THROWS_AS((void)past_default.det_serialize(), Exception);
+    CHECK_THROWS_AS((void)past_default.nondet_serialize(), Exception);
+    CHECK_NOTHROW((void)past_default.det_serialize(DEFAULT_MAX_DEPTH + 1));
+    CHECK_NOTHROW((void)past_default.nondet_serialize(DEFAULT_MAX_DEPTH + 1));
+
     const Value at_ceiling = nest(MAX_DEPTH);
-    CHECK_NOTHROW((void)at_ceiling.det_serialize());
+    CHECK_NOTHROW((void)at_ceiling.det_serialize(MAX_DEPTH));
     CHECK_NOTHROW((void)deep_copy(at_ceiling));
 
     const Value past_ceiling = nest(MAX_DEPTH + 1);
-    CHECK_THROWS_AS((void)past_ceiling.det_serialize(), Exception);
+    CHECK_THROWS_AS((void)past_ceiling.det_serialize(MAX_DEPTH), Exception);
+    CHECK_THROWS_AS((void)past_ceiling.det_serialize(MAX_DEPTH + 1), Exception);
 
     // Copying carries no depth limit of its own, so it still succeeds.
     CHECK_NOTHROW((void)deep_copy(past_ceiling));
@@ -836,6 +847,16 @@ std::vector<uint8_t> nested_key_fixture()
     return pad(std::move(document));
 }
 
+// 8 KiB of one-element arrays nested around a zero. Shorter than the other
+// fixtures because the tree walk skips over the rest of the input at every
+// level down to the depth limit.
+std::vector<uint8_t> deep_array_fixture()
+{
+    std::vector<uint8_t> document(8 * 1024 - 1, 0x81);
+    document.push_back(0x00);
+    return document;
+}
+
 } // namespace
 
 TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map keys")
@@ -887,29 +908,66 @@ TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map ke
     const std::vector<uint8_t> array_key{0xa1, 0x82, 1, 0xd2, 2, 7};
     CHECK(nondet_parse_bounded(array_key).det_serialize() == array_key);
 
-    // Empty containers fit depth 0 and an entry limit of 0; the depth default
-    // is the ceiling.
+    // Empty containers fit depth 0 and an entry limit of 0.
     CHECK(nondet_parse_bounded(std::vector<uint8_t>{0xa0}, 0, 0).size() == 0);
     CHECK(nondet_parse_bounded(std::vector<uint8_t>{0x80}, 0, 0).size() == 0);
-    std::vector<uint8_t> deep(MAX_DEPTH, 0x81);
-    deep.push_back(0x01);
-    CHECK_NOTHROW((void)nondet_parse_bounded(deep));
-    deep.insert(deep.begin(), 0x81);
-    expect_error([&] { (void)nondet_parse_bounded(deep); }, ErrorCode::CBOR_DECODE_FAILED);
 }
 
-TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on 128 KiB fixtures")
+TEST_CASE("cbor handle: parsing defaults to DEFAULT_MAX_DEPTH and stops at MAX_DEPTH")
+{
+    static_assert(DEFAULT_MAX_DEPTH == TAV_CBOR_DEFAULT_MAX_DEPTH);
+    static_assert(MAX_DEPTH == TAV_CBOR_MAX_DEPTH);
+    static_assert(DEFAULT_MAX_DEPTH <= MAX_DEPTH);
+
+    // One-element arrays nested `levels` deep around a 1.
+    auto nested = [](size_t levels) {
+        std::vector<uint8_t> document(levels, 0x81);
+        document.push_back(0x01);
+        return document;
+    };
+
+    const std::vector<uint8_t> at_default = nested(DEFAULT_MAX_DEPTH);
+    CHECK_NOTHROW((void)nondet_parse(at_default));
+    CHECK_NOTHROW((void)nondet_parse_bounded(at_default));
+    CHECK_NOTHROW((void)det_parse(at_default));
+
+    const std::vector<uint8_t> past_default = nested(DEFAULT_MAX_DEPTH + 1);
+    expect_error([&] { (void)nondet_parse(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse_bounded(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)det_parse(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
+    CHECK_NOTHROW((void)nondet_parse(past_default, DEFAULT_MAX_DEPTH + 1));
+    CHECK_NOTHROW((void)nondet_parse_bounded(past_default, DEFAULT_MAX_DEPTH + 1));
+    CHECK_NOTHROW((void)det_parse(past_default, DEFAULT_MAX_DEPTH + 1));
+
+    // Asking for more than the ceiling still stops at the ceiling.
+    const std::vector<uint8_t> at_ceiling = nested(MAX_DEPTH);
+    CHECK_NOTHROW((void)nondet_parse(at_ceiling, MAX_DEPTH));
+    CHECK_NOTHROW((void)nondet_parse_bounded(at_ceiling, MAX_DEPTH));
+    CHECK_NOTHROW((void)det_parse(at_ceiling, MAX_DEPTH));
+    const std::vector<uint8_t> past_ceiling = nested(MAX_DEPTH + 1);
+    expect_error(
+      [&] { (void)nondet_parse(past_ceiling, MAX_DEPTH + 1); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error(
+      [&] { (void)nondet_parse_bounded(past_ceiling, MAX_DEPTH + 1); },
+      ErrorCode::CBOR_DECODE_FAILED);
+    expect_error(
+      [&] { (void)det_parse(past_ceiling, MAX_DEPTH + 1); }, ErrorCode::CBOR_DECODE_FAILED);
+}
+
+TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial fixtures")
 {
     using Clock = std::chrono::steady_clock;
     constexpr auto deadline = std::chrono::seconds(2);
     const std::vector<uint8_t> fixture = large_fixture(false);
     const std::vector<uint8_t> control = large_fixture(true);
     const std::vector<uint8_t> nested_keys = nested_key_fixture();
+    const std::vector<uint8_t> deep_arrays = deep_array_fixture();
 
     const auto start = Clock::now();
     const Value parsed = nondet_parse_bounded(fixture);
     expect_error([&] { (void)nondet_parse_bounded(control); }, ErrorCode::CBOR_DECODE_FAILED);
     expect_error([&] { (void)nondet_parse_bounded(nested_keys); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse_bounded(deep_arrays); }, ErrorCode::CBOR_DECODE_FAILED);
     const auto elapsed = Clock::now() - start;
     CHECK(elapsed <= deadline);
 

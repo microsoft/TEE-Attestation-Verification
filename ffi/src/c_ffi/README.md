@@ -76,7 +76,7 @@ in either order. Caller-owned input must remain alive while either uses it.
 ```c
 TavCborHandle *root = NULL;
 TavCborHandle *child = NULL;
-TavError *error = tav_cbor_nondet_parse(cbor, cbor_len, TAV_CBOR_MAX_DEPTH, &root);
+TavError *error = tav_cbor_nondet_parse(cbor, cbor_len, TAV_CBOR_DEFAULT_MAX_DEPTH, &root);
 if (error == NULL) {
 	error = tav_cbor_array_at(root, 0, &child);
 }
@@ -102,11 +102,11 @@ bounds validation time by the input length and the limits;
 No parser bounds the input length, and parsing can cost time proportional to
 the depth limit times the input length: bound the length of untrusted input
 before parsing it. Each non-deterministic parse also allocates scratch sized by
-its limits, so a depth of 64 with the default entry limit is recommended for
-untrusted input; `cbor.h` gives the sizes. COSE and CACI verification bound
-what they parse themselves: protected headers at
-`TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements at
-`TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 64 KiB.
+its limits, so `TAV_CBOR_DEFAULT_MAX_DEPTH` (64) with the default entry limit is
+recommended for untrusted input; `cbor.h` gives the sizes. The C++ wrapper
+defaults to both. COSE and CACI verification bound what they parse themselves:
+protected headers at `TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements
+at `TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 64 KiB.
 
 ## SNP verification
 

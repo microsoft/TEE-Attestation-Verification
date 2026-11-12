@@ -73,6 +73,13 @@ typedef struct TavCborHandle TavCborHandle;
 #define TAV_CBOR_MAX_DEPTH 256
 
 /*
+ * Default nesting depth: the limit the C++ wrapper applies unless told
+ * otherwise, and the one COSE and CACI verification parse within. Recommended
+ * for untrusted input.
+ */
+#define TAV_CBOR_DEFAULT_MAX_DEPTH 64
+
+/*
  * Non-deterministic parsing rejects maps with more than
  * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES key/value pairs, at any level, and maps
  * inside map keys; tav_cbor_nondet_parse_bounded takes the entry limit
@@ -82,11 +89,11 @@ typedef struct TavCborHandle TavCborHandle;
  * Every non-deterministic parse allocates and zeroes
  * 3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever the
  * input length; tav_cbor_nondet_parse uses TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES for
- * max_map_entries. On a 64-bit target that is about 0.4 MB at a depth of 64
- * with TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES, and about 6.3 MB at TAV_CBOR_MAX_DEPTH
- * with TAV_CBOR_MAX_MAP_ENTRIES. For untrusted input, a depth of 64 with
- * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES is recommended: COSE and CACI verification
- * parse within those limits.
+ * max_map_entries. On a 64-bit target that is about 0.4 MB at
+ * TAV_CBOR_DEFAULT_MAX_DEPTH with TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES, and about
+ * 6.3 MB at TAV_CBOR_MAX_DEPTH with TAV_CBOR_MAX_MAP_ENTRIES. For untrusted
+ * input, the two defaults are recommended: COSE and CACI verification parse
+ * within them.
  *
  * No parser bounds the input length. Parsing can cost time proportional to
  * max_depth times the input length, deeply nested arrays being the worst

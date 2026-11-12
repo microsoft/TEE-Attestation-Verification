@@ -283,7 +283,7 @@ static void cose_interoperability(void)
     TavCborHandle* sign1 = NULL;
     TavCborHandle* payload = NULL;
     size_t size = 0;
-    expect(tav_cbor_nondet_parse(input, sizeof(input), 64, &root), TAV_ERROR_OK);
+    expect(tav_cbor_nondet_parse(input, sizeof(input), TAV_CBOR_DEFAULT_MAX_DEPTH, &root), TAV_ERROR_OK);
     expect(tav_validate_cose_sign1(root, &sign1), TAV_ERROR_OK);
     tav_cbor_free(root);
     expect(tav_cbor_size(sign1, &size), TAV_ERROR_OK);

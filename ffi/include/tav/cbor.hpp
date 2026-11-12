@@ -22,8 +22,9 @@
 // Failures throw tav::Exception with the C ABI's tav::ErrorCode and message.
 //
 // Nesting:
-// - MAX_DEPTH limits parsing and serialization, not builders. Callers must
-//   bound the depth they build. Copying, materializing, or destroying an
+// - max_depth defaults to DEFAULT_MAX_DEPTH for parsing and serialization, and
+//   can be raised to MAX_DEPTH, the ceiling. Neither limits builders. Callers
+//   must bound the depth they build. Copying, materializing, or destroying an
 //   extremely deep Value can exhaust the process stack and abort.
 // - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
 //   and maps inside map keys; nondet_parse_bounded takes the entry limit
@@ -33,11 +34,11 @@
 // - No parser bounds the input length, and parsing can cost time proportional
 //   to max_depth times the input length, deeply nested arrays being the worst
 //   case. Bound the length of untrusted input before parsing it.
-// - max_depth defaults to MAX_DEPTH, the ceiling. Every nondet parse allocates
-//   and zeroes 3 * (max_depth + 1) * max_map_entries size_t words of scratch,
-//   whatever the input length: about 1.6 MB at the defaults on a 64-bit
-//   target. A max_depth of 64 with DEFAULT_MAX_MAP_ENTRIES, about 0.4 MB, is
-//   recommended for untrusted input.
+// - Every nondet parse allocates and zeroes
+//   3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever
+//   the input length: about 0.4 MB at the defaults on a 64-bit target, and
+//   about 6.3 MB at MAX_DEPTH with MAX_MAP_ENTRIES. The defaults are the
+//   recommended limits for untrusted input.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -55,6 +56,9 @@ namespace tav::cbor
 {
 /// Ceiling on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
+
+/// Nesting depth parsing and serialization allow unless told otherwise.
+constexpr size_t DEFAULT_MAX_DEPTH = TAV_CBOR_DEFAULT_MAX_DEPTH;
 
 /// Ceiling on the map entry limit of nondet_parse_bounded, and the limit
 /// nondet_parse applies.
@@ -237,13 +241,13 @@ public:
     }
 
     [[nodiscard]] std::vector<uint8_t> nondet_serialize(
-      size_t max_depth = MAX_DEPTH) const
+      size_t max_depth = DEFAULT_MAX_DEPTH) const
     {
         return encode(tav_cbor_nondet_serialize, max_depth);
     }
 
     /// Deterministic encoding.
-    [[nodiscard]] std::vector<uint8_t> det_serialize(size_t max_depth = MAX_DEPTH) const
+    [[nodiscard]] std::vector<uint8_t> det_serialize(size_t max_depth = DEFAULT_MAX_DEPTH) const
     {
         return encode(tav_cbor_det_serialize, max_depth);
     }
@@ -415,9 +419,9 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 ///
 /// Rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries and maps inside
 /// map keys. Map keys use RFC 8949 equivalence. For untrusted input, bound
-/// raw.size() and prefer a max_depth of 64; see the notes at the top of this
+/// raw.size() and keep the default limits; see the notes at the top of this
 /// header.
-inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
+inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = DEFAULT_MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_nondet_parse, raw, max_depth);
 }
@@ -425,7 +429,7 @@ inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_D
 /// nondet_parse with an explicit map entry limit, capped at MAX_MAP_ENTRIES.
 inline Value nondet_parse_bounded(
   std::span<const uint8_t> raw,
-  size_t max_depth = MAX_DEPTH,
+  size_t max_depth = DEFAULT_MAX_DEPTH,
   size_t max_map_entries = DEFAULT_MAX_MAP_ENTRIES)
 {
     return Value::construct([&](auto out) {
@@ -434,7 +438,7 @@ inline Value nondet_parse_bounded(
 }
 
 /// Borrows raw, and requires deterministic encoding.
-inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
+inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = DEFAULT_MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_det_parse, raw, max_depth);
 }
