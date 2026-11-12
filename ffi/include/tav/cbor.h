@@ -77,7 +77,22 @@ typedef struct TavCborHandle TavCborHandle;
  * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES key/value pairs, at any level, and maps
  * inside map keys; tav_cbor_nondet_parse_bounded takes the entry limit
  * explicitly, capped at TAV_CBOR_MAX_MAP_ENTRIES. Deterministic parsing and
- * serialization apply neither. Bounding the input length is the caller's job.
+ * serialization apply neither.
+ *
+ * Every non-deterministic parse allocates and zeroes
+ * 3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever the
+ * input length; tav_cbor_nondet_parse uses TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES for
+ * max_map_entries. On a 64-bit target that is about 0.4 MB at a depth of 64
+ * with TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES, and about 6.3 MB at TAV_CBOR_MAX_DEPTH
+ * with TAV_CBOR_MAX_MAP_ENTRIES. For untrusted input, a depth of 64 with
+ * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES is recommended: COSE and CACI verification
+ * parse within those limits.
+ *
+ * No parser bounds the input length. Parsing can cost time proportional to
+ * max_depth times the input length, deeply nested arrays being the worst
+ * case, so bound the length of untrusted input before parsing it. COSE and
+ * CACI verification bound what they parse themselves; see tav/cose.h and
+ * tav/caci.h.
  */
 #define TAV_CBOR_MAX_MAP_ENTRIES 1024
 #define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 256
@@ -147,6 +162,8 @@ TavError* tav_cbor_det_serialize(
 /*
  * Parsing. On success writes an owning handle through out_value. The returned
  * tree borrows byte and text payloads from data, which must outlive it.
+ * Bound the length of untrusted data first, as described with the limits
+ * above.
  *
  * Map keys use RFC 8949 equivalence, including order-independent map
  * comparison for keys parsed deterministically.
@@ -159,9 +176,8 @@ TavError* tav_cbor_nondet_parse(
 
 /*
  * tav_cbor_nondet_parse with an explicit map entry limit, capped at
- * TAV_CBOR_MAX_MAP_ENTRIES. Non-deterministic parsing validates within the
- * limits in a single pass, costing time bounded by the input length and the
- * limits, and 3 * (max_depth + 1) * max_map_entries words of scratch per call.
+ * TAV_CBOR_MAX_MAP_ENTRIES. Raising max_map_entries raises the scratch each
+ * call allocates, as described with the limits above.
  */
 TavError* tav_cbor_nondet_parse_bounded(
   const uint8_t* data,

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers.Binary;
+
 namespace TeeAttestationVerification.Tests;
 
 public sealed class CaciTests
@@ -123,6 +125,39 @@ public sealed class CaciTests
                 input.UvmFeed,
                 input.MinimumSvn));
         Assert.Contains("Duplicate minimum TCB CPUID 0x00a00f11", error.Message);
+    }
+
+    [Fact]
+    public void UvmEndorsementOverTheLengthLimitIsRejectedUnparsed()
+    {
+        int limit = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/caci.h", "TAV_CACI_MAX_UVM_ENDORSEMENT_LEN");
+
+        // At the limit the document reaches the parser, which finds a byte
+        // string where a COSE_Sign1 belongs.
+        VerifyException atLimit = Assert.Throws<VerifyException>(() =>
+            AttestationVerifier.VerifyUvmEndorsement(
+                ByteStringDocument(limit), FixtureData.TrustedDidX509));
+        Assert.Equal(ErrorCode.CaciCose, atLimit.Code);
+        Assert.Contains("expected tagged COSE_Sign1 envelope", atLimit.Message);
+
+        // A byte longer, the length alone rejects it.
+        VerifyException overLimit = Assert.Throws<VerifyException>(() =>
+            AttestationVerifier.VerifyUvmEndorsement(
+                ByteStringDocument(limit + 1), FixtureData.TrustedDidX509));
+        Assert.Equal(ErrorCode.CaciCose, overLimit.Code);
+        Assert.Contains(
+            $"UVM endorsement is {limit + 1} bytes, over the {limit}-byte limit",
+            overLimit.Message);
+    }
+
+    // A CBOR byte string of zeros, length bytes long in all.
+    private static byte[] ByteStringDocument(int length)
+    {
+        byte[] document = new byte[length];
+        document[0] = 0x5a;
+        BinaryPrimitives.WriteUInt32BigEndian(document.AsSpan(1), (uint)(length - 5));
+        return document;
     }
 
     private static ReadOnlyMemory<byte>[] PolicyDigests(byte[][] policies) =>

@@ -28,6 +28,16 @@
 // - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
 //   and maps inside map keys; nondet_parse_bounded takes the entry limit
 //   explicitly. det_parse and serialization apply neither.
+//
+// Untrusted input:
+// - No parser bounds the input length, and parsing can cost time proportional
+//   to max_depth times the input length, deeply nested arrays being the worst
+//   case. Bound the length of untrusted input before parsing it.
+// - max_depth defaults to MAX_DEPTH, the ceiling. Every nondet parse allocates
+//   and zeroes 3 * (max_depth + 1) * max_map_entries size_t words of scratch,
+//   whatever the input length: about 1.6 MB at the defaults on a 64-bit
+//   target. A max_depth of 64 with DEFAULT_MAX_MAP_ENTRIES, about 0.4 MB, is
+//   recommended for untrusted input.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -404,7 +414,9 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 /// Borrows raw, which must outlive the returned value.
 ///
 /// Rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries and maps inside
-/// map keys. Map keys use RFC 8949 equivalence.
+/// map keys. Map keys use RFC 8949 equivalence. For untrusted input, bound
+/// raw.size() and prefer a max_depth of 64; see the notes at the top of this
+/// header.
 inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_nondet_parse, raw, max_depth);

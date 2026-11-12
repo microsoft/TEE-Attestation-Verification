@@ -31,6 +31,13 @@
 //! at most [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these limits. Callers must bound the depth they build. Copying,
 //! materializing, or dropping an extremely deep value can exhaust the process
 //! stack and abort.
+//!
+//! No parser bounds the input length. Parsing can cost time proportional to
+//! the depth limit times the input length, so callers bound the length of
+//! untrusted input. Each non-deterministic parse also allocates scratch sized
+//! by its limits, whatever the input length, so a depth of
+//! [`cbor::MAX_CBOR_NESTING_DEPTH`] with [`cbor::MAX_CBOR_MAP_ENTRIES`] is
+//! recommended for untrusted input.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -517,6 +524,9 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse(
 
 /// Parse like `tav_cbor_nondet_parse` with an explicit map entry limit,
 /// capped at [`MAX_MAP_ENTRIES_LIMIT`].
+///
+/// Each call allocates and zeroes `3 * (max_depth + 1) * max_map_entries`
+/// words of scratch, whatever the input length.
 ///
 /// # Safety
 /// Same requirements as `tav_cbor_nondet_parse`.

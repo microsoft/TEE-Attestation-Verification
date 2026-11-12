@@ -99,6 +99,15 @@ Non-deterministic parsing caps the entries of every map at
 bounds validation time by the input length and the limits;
 `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly.
 
+No parser bounds the input length, and parsing can cost time proportional to
+the depth limit times the input length: bound the length of untrusted input
+before parsing it. Each non-deterministic parse also allocates scratch sized by
+its limits, so a depth of 64 with the default entry limit is recommended for
+untrusted input; `cbor.h` gives the sizes. COSE and CACI verification bound
+what they parse themselves: protected headers at
+`TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements at
+`TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 64 KiB.
+
 ## SNP verification
 
 ```c

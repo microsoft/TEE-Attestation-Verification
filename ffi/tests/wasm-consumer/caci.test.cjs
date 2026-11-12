@@ -12,6 +12,7 @@ const test = require('node:test');
 const {
   pkg,
   TRUSTED_DIDX509,
+  cHeaderLimit,
   loadMilanInputs,
   loadCaciInputs,
   assertStringError,
@@ -63,6 +64,29 @@ test('verify_uvm_endorsement returns a CBOR payload and rejects an untrusted roo
       'did:x509:0:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA::eku:1.3.6.1.4.1.311.76.59.1.2',
     ),
     /DID x509 policy error: issuer DID prefix .* does not match trusted DID prefix/,
+  );
+});
+
+test('verify_uvm_endorsement rejects an endorsement over the length limit unparsed', async () => {
+  const limit = cHeaderLimit('caci.h', 'TAV_CACI_MAX_UVM_ENDORSEMENT_LEN');
+  // A CBOR byte string of zeros, `length` bytes long in all.
+  const byteStringDocument = (length) => {
+    const document = new Uint8Array(length);
+    document[0] = 0x5a;
+    new DataView(document.buffer).setUint32(1, length - 5);
+    return document;
+  };
+
+  // At the limit the document reaches the parser, which finds a byte string
+  // where a COSE_Sign1 belongs.
+  await assertRejectsStringError(
+    pkg.verify_uvm_endorsement_async(byteStringDocument(limit), TRUSTED_DIDX509),
+    /^COSE error: expected tagged COSE_Sign1 envelope$/,
+  );
+  // A byte longer, the length alone rejects it.
+  await assertRejectsStringError(
+    pkg.verify_uvm_endorsement_async(byteStringDocument(limit + 1), TRUSTED_DIDX509),
+    new RegExp(`^COSE error: UVM endorsement is ${limit + 1} bytes, over the ${limit}-byte limit$`),
   );
 });
 

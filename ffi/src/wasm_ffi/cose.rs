@@ -37,6 +37,11 @@ impl CborValue {
 #[wasm_bindgen]
 impl CborValue {
     /// Parse a CBOR document from bytes.
+    ///
+    /// Rejects nesting deeper than 64 levels, maps with more than 256 entries,
+    /// and maps inside map keys. Parsing can cost time proportional to the
+    /// nesting depth times the input length, so bound the length of untrusted
+    /// input before parsing it.
     pub fn from_bytes(bytes: &[u8]) -> Result<CborValue, String> {
         cose::CborValue::parse_nondet(bytes).map(CborValue::from_native)
     }
@@ -214,9 +219,11 @@ impl CoseSign1 {
         required_bytes(self.as_native().array_at(3)?, "signature")
     }
 
+    /// Decode the protected header. A header longer than 64 KiB is rejected,
+    /// as it is by `verify_embedded` and `verify_detached`.
     pub fn protected_header(&self) -> Result<CborValue, String> {
         let protected = borrowed_bytes(self.as_native().array_at(0)?, "protected")?;
-        cose::CborValue::parse_nondet(protected).map(CborValue::from_native)
+        cose::parse_protected_header(protected).map(CborValue::from_native)
     }
 }
 

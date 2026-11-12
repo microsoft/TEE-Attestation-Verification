@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::AciError;
+use crate::{AciError, MAX_UVM_ENDORSEMENT_LEN};
 use attestation::snp::report::{AttestationReport, TryFromBytes};
 use cose::CborValue;
 use crypto::CertificateBackend;
@@ -10,6 +10,17 @@ use crypto::CertificateBackend;
 pub(crate) fn parse_attestation(attestation: &[u8]) -> Result<AttestationReport, AciError> {
     AttestationReport::try_read_from_bytes(attestation)
         .map_err(|e| AciError::InvalidAttestation(format!("{e:?}")))
+}
+
+/// Parse an unauthenticated UVM endorsement, bounding its length first.
+pub(crate) fn parse_uvm_endorsement(uvm_endorsement: &[u8]) -> Result<CborValue<'_>, AciError> {
+    if uvm_endorsement.len() > MAX_UVM_ENDORSEMENT_LEN {
+        return Err(AciError::Cose(format!(
+            "UVM endorsement is {} bytes, over the {MAX_UVM_ENDORSEMENT_LEN}-byte limit",
+            uvm_endorsement.len()
+        )));
+    }
+    CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)
 }
 
 pub(crate) fn cose_payload(sign1: &CborValue) -> Result<Vec<u8>, AciError> {

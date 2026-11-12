@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace TeeAttestationVerification.Tests;
 
@@ -77,6 +78,18 @@ internal static class FixtureData
 
     internal static string ReadText(string relativePath) =>
         File.ReadAllText(Path.Combine(RepositoryRoot, relativePath), Encoding.UTF8);
+
+    // A "#define NAME value" limit from a public C header, the source the
+    // native consumer suites take it from.
+    internal static int ReadCHeaderLimit(string relativePath, string name)
+    {
+        Match match = Regex.Match(
+            ReadText(relativePath),
+            $@"^#define {Regex.Escape(name)} (\d+)\r?$",
+            RegexOptions.Multiline);
+        Assert.True(match.Success, $"{relativePath} does not define {name}");
+        return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
 
     internal static byte[] ReadBytes(string relativePath) =>
         File.ReadAllBytes(Path.Combine(RepositoryRoot, relativePath));

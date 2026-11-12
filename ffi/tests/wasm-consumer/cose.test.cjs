@@ -11,6 +11,7 @@ const test = require('node:test');
 const {
   pkg,
   textBytes,
+  cHeaderLimit,
   assertStringError,
   assertRejectsStringError,
 } = require('./support.cjs');
@@ -183,18 +184,21 @@ const COSE_SIG = [
   103, 128, 147, 144, 252, 13, 252, 91, 233, 88, 189, 169, 103, 151,
 ];
 
-// Append a CBOR byte string (major type 2) for buffers up to 255 bytes.
+// Append a CBOR byte string (major type 2).
 function putBstr(out, bytes) {
-  if (bytes.length < 24) out.push(0x40 | bytes.length);
-  else out.push(0x58, bytes.length);
+  const length = bytes.length;
+  if (length < 24) out.push(0x40 | length);
+  else if (length < 0x100) out.push(0x58, length);
+  else if (length < 0x10000) out.push(0x59, length >> 8, length & 0xff);
+  else out.push(0x5a, length >>> 24, (length >> 16) & 0xff, (length >> 8) & 0xff, length & 0xff);
   for (const b of bytes) out.push(b);
 }
 
 // Build a tagged (18) COSE_Sign1 envelope [protected, {}, payload, signature].
 // With embeddedPayload false the payload slot is CBOR null (detached).
-function buildSign1(embeddedPayload) {
+function buildSign1(embeddedPayload, protectedHeader = COSE_PHDR) {
   const env = [0xd2, 0x84];
-  putBstr(env, COSE_PHDR);
+  putBstr(env, protectedHeader);
   env.push(0xa0); // empty unprotected header map
   if (embeddedPayload) putBstr(env, COSE_PAYLOAD);
   else env.push(0xf6); // CBOR null
@@ -236,5 +240,44 @@ test('CoseSign1.verify_detached accepts a nil payload and rejects an embedded on
   await assertRejectsStringError(
     coseSign1(buildSign1(true)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
     /nil COSE payload/,
+  );
+});
+
+test('CoseSign1 rejects a protected header over the length limit', async () => {
+  const limit = cHeaderLimit('cose.h', 'TAV_COSE_MAX_PROTECTED_HEADER_LEN');
+  // The protected header {1: -7, "pad": h'00...'} in exactly `length` bytes.
+  const paddedProtectedHeader = (length) => {
+    const header = new Uint8Array(length);
+    header.set([0xa2, 0x01, 0x26, 0x63, 0x70, 0x61, 0x64, 0x5a]);
+    new DataView(header.buffer).setUint32(8, length - 12);
+    return header;
+  };
+  const overLimit = new RegExp(`^protected header is ${limit + 1} bytes, over the ${limit}-byte limit$`);
+
+  // At the limit the header is decoded, so verification reaches the signature,
+  // which was made over a different header.
+  const atLimit = paddedProtectedHeader(limit);
+  assert.equal(coseSign1(buildSign1(true, atLimit)).protected_header().map_at_int(1n).int(), -7n);
+  await assertRejectsStringError(
+    coseSign1(buildSign1(true, atLimit)).verify_embedded(COSE_SPKI, COSE_ALG_ES256),
+    /signature verification failed/,
+  );
+  await assertRejectsStringError(
+    coseSign1(buildSign1(false, atLimit)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
+    /signature verification failed/,
+  );
+
+  // A byte longer, the header is rejected by its length alone. The envelope
+  // still parses.
+  const over = paddedProtectedHeader(limit + 1);
+  assert.equal(coseSign1(buildSign1(true, over)).protected().length, limit + 1);
+  assertStringError(() => coseSign1(buildSign1(true, over)).protected_header(), overLimit);
+  await assertRejectsStringError(
+    coseSign1(buildSign1(true, over)).verify_embedded(COSE_SPKI, COSE_ALG_ES256),
+    overLimit,
+  );
+  await assertRejectsStringError(
+    coseSign1(buildSign1(false, over)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
+    overLimit,
   );
 });

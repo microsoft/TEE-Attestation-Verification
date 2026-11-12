@@ -23,8 +23,19 @@
 //! with more than a map entry limit, default [`MAX_CBOR_MAP_ENTRIES`], and
 //! maps inside map keys: EverCBOR checks the limits in a single pass over the
 //! input and finds duplicate keys by sorting, so validation costs time bounded
-//! by the input length and the limits. Bounding the input length is the
-//! caller's job.
+//! by the input length and the limits.
+//!
+//! Nothing here bounds the input length. After validation, building the
+//! [`CborValue`] tree skips over each child of every array and map to reach
+//! the next, so an item is walked once for each array or map it is nested in,
+//! and parsing can cost time proportional to the depth limit times the input
+//! length. Bound the length of untrusted input before parsing it.
+//!
+//! Each [`Nondet`] parse allocates and zeroes the scratch it sorts in, sized by
+//! its limits whatever the input length; see
+//! [`CborValue::parse_with_limits`]. The defaults, [`MAX_CBOR_NESTING_DEPTH`]
+//! and [`MAX_CBOR_MAP_ENTRIES`], are the recommended limits for untrusted
+//! input.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -488,10 +499,17 @@ impl<'a> CborValue<'a> {
     /// `max_map_entries` entries, at any level, and any map inside a map key,
     /// checking the limits in a single pass and finding duplicate keys by
     /// sorting, so validation costs time bounded by the input length and the
-    /// limits, and `3 * (max_depth + 1) * max_map_entries` words of scratch.
+    /// limits. It sorts in `3 * (max_depth + 1) * max_map_entries` words of
+    /// scratch, allocated and zeroed on every call whatever the input length:
+    /// the defaults, [`MAX_CBOR_NESTING_DEPTH`] and [`MAX_CBOR_MAP_ENTRIES`],
+    /// are the recommended limits for untrusted input.
     /// Input EverCBOR rejects fails with the generic parse error; the tree
     /// walk names the depth limit when it is the one to reject. [`Det`] mode
     /// ignores `max_map_entries`.
+    ///
+    /// The input length is not bounded, and the tree walk can cost time
+    /// proportional to `max_depth` times that length: bound the length of
+    /// untrusted input first.
     pub fn parse_with_limits<M: Mode>(
         bytes: &'a [u8],
         max_depth: usize,

@@ -26,16 +26,36 @@ const std::vector<uint8_t> kSig = {
 void put_bstr(std::vector<uint8_t> &out, const uint8_t *data, size_t len) {
     if (len < 24) {
         out.push_back(static_cast<uint8_t>(0x40 | len));
-    } else {
+    } else if (len < 0x100) {
         out.push_back(0x58);
         out.push_back(static_cast<uint8_t>(len));
+    } else if (len < 0x10000) {
+        out.push_back(0x59);
+        out.push_back(static_cast<uint8_t>(len >> 8));
+        out.push_back(static_cast<uint8_t>(len));
+    } else {
+        out.push_back(0x5a);
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            out.push_back(static_cast<uint8_t>(len >> shift));
+        }
     }
     out.insert(out.end(), data, data + len);
 }
 
-std::vector<uint8_t> build_sign1(bool embedded_payload) {
+// The protected header {1: -7, "pad": h'00...'} in exactly `len` bytes.
+std::vector<uint8_t> padded_protected_header(size_t len) {
+    std::vector<uint8_t> phdr = {0xa2, 0x01, 0x26, 0x63, 'p', 'a', 'd', 0x5a};
+    const size_t padding = len - phdr.size() - 4;
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        phdr.push_back(static_cast<uint8_t>(padding >> shift));
+    }
+    phdr.resize(len, 0);
+    return phdr;
+}
+
+std::vector<uint8_t> build_sign1(const std::vector<uint8_t> &phdr, bool embedded_payload) {
     std::vector<uint8_t> env = {0xd2, 0x84};
-    put_bstr(env, kPhdr.data(), kPhdr.size());
+    put_bstr(env, phdr.data(), phdr.size());
     env.push_back(0xa0);
     if (embedded_payload) {
         put_bstr(env, reinterpret_cast<const uint8_t *>(kPayload.data()), kPayload.size());
@@ -44,6 +64,10 @@ std::vector<uint8_t> build_sign1(bool embedded_payload) {
     }
     put_bstr(env, kSig.data(), kSig.size());
     return env;
+}
+
+std::vector<uint8_t> build_sign1(bool embedded_payload) {
+    return build_sign1(kPhdr, embedded_payload);
 }
 
 struct CborHandle {
@@ -305,6 +329,36 @@ TEST_CASE("cose: detached verification requires a nil payload") {
             REQUIRE(error == nullptr);
             check_error(tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
                                                       TAV_COSE_ALG_ES256), TAV_ERROR_COSE_UNEXPECTED_TYPE);
+        }
+    }
+}
+
+TEST_CASE("cose: verification rejects a protected header over the length limit") {
+    // At the limit the header is decoded, so verification reaches the signature,
+    // which was made over a different header. A byte longer, the header is
+    // rejected by its length alone. The envelope still parses either way.
+    const std::string over_limit_message =
+        "over the " + std::to_string(TAV_COSE_MAX_PROTECTED_HEADER_LEN) + "-byte limit";
+    for (bool over_limit : {false, true}) {
+        const auto phdr =
+            padded_protected_header(TAV_COSE_MAX_PROTECTED_HEADER_LEN + (over_limit ? 1 : 0));
+        for (bool embedded : {true, false}) {
+            const auto env = build_sign1(phdr, embedded);
+            CborHandle root, sign1;
+            REQUIRE(tav_cbor_nondet_parse(env.data(), env.size(), 64, root.out()) == nullptr);
+            REQUIRE(tav_validate_cose_sign1(root.value, sign1.out()) == nullptr);
+            TavError *error = embedded
+                ? tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
+                                                 TAV_COSE_ALG_ES256)
+                : tav_verify_cose_sign1_detached(
+                      sign1.value, reinterpret_cast<const uint8_t *>(kPayload.data()),
+                      kPayload.size(), kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
+            REQUIRE(error != nullptr);
+            const std::string message = tav_error_message(error);
+            CHECK((message.find(over_limit_message) != std::string::npos) == over_limit);
+            CHECK((message.find("signature verification failed") != std::string::npos) ==
+                  !over_limit);
+            check_error(error, TAV_ERROR_COSE_VERIFICATION);
         }
     }
 }

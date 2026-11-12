@@ -25,8 +25,15 @@ prefer OpenSSL. WASM targets prefer WebCrypto.
 Use `CborValue::parse_nondet` to parse a COSE_Sign1 envelope. It applies the
 default CBOR limits, which also bound the protected headers this crate decodes:
 nesting up to `MAX_CBOR_NESTING_DEPTH` (64), at most `MAX_CBOR_MAP_ENTRIES`
-(256) entries in any map, and no map inside a map key. COSE_Sign1 is encoded as
-CBOR tag 18 over an array:
+(256) entries in any map, and no map inside a map key.
+
+Parsing can cost time proportional to the nesting depth times the input length.
+The verifiers reject a protected header longer than
+`MAX_COSE_PROTECTED_HEADER_LEN` (64 KiB) before decoding it, as
+`parse_protected_header` does. Nothing bounds an envelope: bound the length of
+an untrusted one before parsing it.
+
+COSE_Sign1 is encoded as CBOR tag 18 over an array:
 
 ```text
 [

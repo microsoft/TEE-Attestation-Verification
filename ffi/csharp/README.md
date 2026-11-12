@@ -135,6 +135,12 @@ resources during finalization. Returned byte arrays are managed copies.
 into native-owned storage before unpinning. Returned values and their projections
 do not depend on managed input buffers.
 
+`CborValue.FromBytes` accepts up to 1 GiB, and parsing can cost time
+proportional to the nesting depth, at most 64, times the input length: bound
+the length of untrusted input before parsing it. Verification bounds what it
+parses itself: `VerifyUvmEndorsement` rejects an endorsement longer than
+64 KiB, and `CoseSign1` rejects a protected header longer than 64 KiB.
+
 Native failures throw `VerifyException`; its `Code` property identifies the
 error. Invalid managed arguments throw standard .NET exceptions.
 

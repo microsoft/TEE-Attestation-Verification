@@ -205,3 +205,31 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
         write_owned_bytes(report_data, out_report_data)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn c_header_publishes_the_uvm_endorsement_limit() {
+        // Every `#define TAV_CACI_<NAME> <value>`; TAV_CACI_API has no value.
+        let declared: Vec<(&str, usize)> = include_str!("../../include/tav/caci.h")
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line
+                    .trim()
+                    .strip_prefix("#define ")?
+                    .trim()
+                    .split_once(' ')?;
+                name.starts_with("TAV_CACI_")
+                    .then(|| (name, value.trim().parse().unwrap()))
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [(
+                "TAV_CACI_MAX_UVM_ENDORSEMENT_LEN",
+                caci::MAX_UVM_ENDORSEMENT_LEN
+            )],
+            "the C header's limits must match the Rust constants"
+        );
+    }
+}

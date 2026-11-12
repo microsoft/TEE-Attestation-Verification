@@ -25,6 +25,12 @@
 //! nesting up to [`MAX_CBOR_NESTING_DEPTH`], at most [`MAX_CBOR_MAP_ENTRIES`]
 //! entries in any map, and no map inside a map key.
 //!
+//! Parsing can cost time proportional to the nesting depth times the input
+//! length. The verifiers reject a protected header longer than
+//! [`MAX_COSE_PROTECTED_HEADER_LEN`] before decoding it, as
+//! [`parse_protected_header`] does. Nothing bounds an envelope: bound the
+//! length of an untrusted one before parsing it.
+//!
 //! ```no_run
 //! use tee_attestation_verification_cose::{
 //!     synchronous as tav_cose, CborValue, Key, KeyBackend, RsaPssSignatureKeyAlgorithm,
