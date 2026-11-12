@@ -25,12 +25,12 @@
 //! # Limits
 //!
 //! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
-//! whatever depth the caller asks for. `tav_cbor_nondet_parse_bounded` also
-//! caps the entries of every map, at most [`MAX_MAP_ENTRIES_LIMIT`] whatever
-//! the caller asks for, and rejects maps inside map keys. Builders do not
-//! enforce these limits. Callers must bound the depth they build. Copying,
-//! materializing, or dropping an extremely deep value can exhaust the process
-//! stack and abort.
+//! whatever depth the caller asks for, maps with more than
+//! [`cbor::MAX_CBOR_MAP_ENTRIES`] entries, and maps inside map keys.
+//! `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly, at most
+//! [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these limits. Callers
+//! must bound the depth they build. Copying, materializing, or dropping an
+//! extremely deep value can exhaust the process stack and abort.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -498,7 +498,9 @@ unsafe fn parse<M: Mode>(
 
 /// Parse a complete document, borrowing byte and text payloads from `data`.
 ///
-/// Indefinite-length encodings are rejected. Keys use RFC 8949 equivalence.
+/// Indefinite-length encodings, maps with more than
+/// [`cbor::MAX_CBOR_MAP_ENTRIES`] entries, and maps inside map keys are
+/// rejected. Keys use RFC 8949 equivalence.
 ///
 /// # Safety
 /// `data` must be valid for `len` bytes and remain alive and unmodified while
@@ -513,9 +515,8 @@ pub unsafe extern "C" fn tav_cbor_nondet_parse(
     into_result(|| unsafe { parse::<Nondet>(data, len, max_depth, out) })
 }
 
-/// Parse like `tav_cbor_nondet_parse`, also rejecting any map with more than
-/// `max_map_entries` entries, capped at [`MAX_MAP_ENTRIES_LIMIT`], and any map
-/// inside a map key.
+/// Parse like `tav_cbor_nondet_parse` with an explicit map entry limit,
+/// capped at [`MAX_MAP_ENTRIES_LIMIT`].
 ///
 /// # Safety
 /// Same requirements as `tav_cbor_nondet_parse`.

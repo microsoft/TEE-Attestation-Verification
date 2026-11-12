@@ -94,9 +94,10 @@ tav_cbor_free(child);
 Byte and text accessors return borrowed views. Keep the backing storage alive
 while using a view. For handle-owned payloads, keep the accessor's handle alive.
 
-For untrusted input, `tav_cbor_nondet_parse_bounded` also caps the entries of
-every map (`TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES`) and rejects maps inside map keys,
-which bounds validation time by the input length and the limits.
+Parsing and serialization cap the entries of every map at
+`TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` (256) and reject maps inside map keys, which
+bounds validation time by the input length and the limits;
+`tav_cbor_nondet_parse_bounded` takes the entry limit explicitly.
 
 ## SNP verification
 

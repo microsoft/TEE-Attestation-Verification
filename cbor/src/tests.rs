@@ -308,12 +308,29 @@ fn explicit_depth_limit_is_honoured() {
     assert!(value.to_bytes_with_depth::<Det>(1).is_err());
 }
 
-// --- Bounded parsing ---
+// --- Map entry and key limits ---
 
 const DEFAULT_BOUNDS: (usize, usize) = (MAX_CBOR_NESTING_DEPTH, MAX_CBOR_MAP_ENTRIES);
 
 fn bounded(bytes: &[u8], (depth, entries): (usize, usize)) -> Result<CborValue<'_>, String> {
     CborValue::parse_nondet_bounded(bytes, depth, entries)
+}
+
+/// Parse in both modes within the limits, requiring them to agree.
+fn parse_both(
+    bytes: &[u8],
+    (depth, entries): (usize, usize),
+) -> Result<CborValue<'_>, [String; 2]> {
+    let nondet = CborValue::parse_with_limits::<Nondet>(bytes, depth, entries);
+    let det = CborValue::parse_with_limits::<Det>(bytes, depth, entries);
+    match (nondet, det) {
+        (Ok(nondet), Ok(det)) => {
+            assert_eq!(nondet, det);
+            Ok(nondet)
+        }
+        (Err(nondet), Err(det)) => Err([nondet, det]),
+        (nondet, det) => panic!("modes disagreed: nondet {nondet:?}, det {det:?}"),
+    }
 }
 
 /// `{0: 0, 1: 0, ...}` with `entries` entries.
@@ -323,7 +340,7 @@ fn flat_map(entries: usize) -> Vec<u8> {
             .map(|key| (CborValue::Int(key), CborValue::Int(0)))
             .collect(),
     )
-    .to_bytes_det()
+    .to_bytes_with_limits::<Det>(1, entries)
     .unwrap()
 }
 
@@ -359,13 +376,59 @@ fn bounded_map_entry_limit_applies_at_every_level() {
         flat_map(MAX_CBOR_MAP_ENTRIES + 1),
     );
     assert_eq!(
-        bounded(&at_limit, DEFAULT_BOUNDS).unwrap().len().unwrap(),
+        parse_both(&at_limit, DEFAULT_BOUNDS)
+            .unwrap()
+            .len()
+            .unwrap(),
         MAX_CBOR_MAP_ENTRIES
     );
-    assert!(bounded(&over_limit, DEFAULT_BOUNDS).is_err());
-    // The other parsers are unchanged.
-    assert!(CborValue::parse_nondet(&over_limit).is_ok());
-    assert!(CborValue::parse_det(&over_limit).is_ok());
+    // EverCBOR rejects before any item is produced; the det tree walk names
+    // the limit.
+    let [nondet, det] = parse_both(&over_limit, DEFAULT_BOUNDS).unwrap_err();
+    assert_eq!(nondet, "Failed to parse CBOR bytes");
+    assert_eq!(det, MAP_ENTRIES_ERROR);
+    // Every convenience parser applies the default limit.
+    assert!(CborValue::parse_nondet(&over_limit).is_err());
+    assert!(CborValue::parse_det(&over_limit).is_err());
+    assert!(CborValue::parse_with_depth::<Nondet>(&over_limit, 1).is_err());
+    // Serialization applies it too, wherever the map sits.
+    let value =
+        CborValue::parse_with_limits::<Det>(&over_limit, 1, MAX_CBOR_MAP_ENTRIES + 1).unwrap();
+    for value in [
+        value.clone(),
+        CborValue::Array(vec![value.clone()]),
+        CborValue::Map(vec![(CborValue::Int(0), value.clone())]),
+    ] {
+        assert_eq!(value.to_bytes_det().unwrap_err(), MAP_ENTRIES_ERROR);
+        assert_eq!(value.to_bytes_nondet().unwrap_err(), MAP_ENTRIES_ERROR);
+    }
+    assert!(value
+        .to_bytes_with_limits::<Det>(1, MAX_CBOR_MAP_ENTRIES + 1)
+        .is_ok());
+}
+
+/// A map over the limit fails on its size, before its keys are checked.
+#[test]
+fn serialization_checks_map_size_before_duplicates() {
+    let duplicates = CborValue::Map(vec![
+        (CborValue::Int(1), CborValue::Int(0)),
+        (CborValue::Int(1), CborValue::Int(0)),
+        (CborValue::Int(2), CborValue::Int(0)),
+    ]);
+    for (entries, expected) in [(2, MAP_ENTRIES_ERROR), (3, "Failed to build CBOR map")] {
+        assert_eq!(
+            duplicates
+                .to_bytes_with_limits::<Det>(1, entries)
+                .unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            duplicates
+                .to_bytes_with_limits::<Nondet>(1, entries)
+                .unwrap_err(),
+            expected
+        );
+    }
 }
 
 /// Arrays and empty maps are unaffected by the entry limit.
@@ -412,9 +475,9 @@ fn bounded_accepts_valid_maps_in_values() {
     assert!(bounded(&encoded, (4, 1)).is_err());
 }
 
-/// A map anywhere inside a key is rejected; the other parsers accept it.
+/// A map anywhere inside a key is rejected by every parser and serializer.
 #[test]
-fn bounded_rejects_maps_inside_keys() {
+fn maps_inside_keys_are_rejected() {
     let documents: [&[u8]; 6] = [
         &[0xa1, 0xa0, 0x00],                         // {{}: 0}
         &[0xa1, 0xa1, 0x01, 0x02, 0x00],             // {{1: 2}: 0}
@@ -424,13 +487,41 @@ fn bounded_rejects_maps_inside_keys() {
         &[0x81, 0xa1, 0x82, 0x01, 0xa0, 0x00],       // [{[1, {}]: 0}]
     ];
     for document in documents {
+        let [nondet, det] = parse_both(document, (16, 16))
+            .map(|_| ())
+            .expect_err("a map inside a key should be rejected");
+        assert_eq!(nondet, "Failed to parse CBOR bytes", "{document:02x?}");
+        assert_eq!(det, MAP_IN_KEY_ERROR, "{document:02x?}");
+        assert!(CborValue::parse_nondet(document).is_err());
+    }
+
+    let empty = || CborValue::Map(vec![]);
+    let values = [
+        CborValue::Map(vec![(empty(), CborValue::Int(0))]),
+        CborValue::Map(vec![(CborValue::Array(vec![empty()]), CborValue::Int(0))]),
+        CborValue::Map(vec![(
+            CborValue::Tagged {
+                tag: 42,
+                payload: Box::new(empty()),
+            },
+            CborValue::Int(0),
+        )]),
+        CborValue::Map(vec![(
+            CborValue::Int(0),
+            CborValue::Map(vec![(empty(), CborValue::Int(0))]),
+        )]),
+    ];
+    for value in values {
         assert_eq!(
-            bounded(document, (16, 16)).unwrap_err(),
-            "Failed to parse CBOR bytes",
-            "{document:02x?}"
+            value.to_bytes_det().unwrap_err(),
+            MAP_IN_KEY_ERROR,
+            "{value:?}"
         );
-        assert!(CborValue::parse_nondet(document).is_ok(), "{document:02x?}");
-        assert!(CborValue::parse_det(document).is_ok(), "{document:02x?}");
+        assert_eq!(
+            value.to_bytes_nondet().unwrap_err(),
+            MAP_IN_KEY_ERROR,
+            "{value:?}"
+        );
     }
 }
 
@@ -644,8 +735,12 @@ fn bounded_parsing_meets_the_deadline() {
     within_deadline("nested keys", || {
         assert!(bounded(&nested_keys, DEFAULT_BOUNDS).is_err())
     });
-    // The nested keys are valid CBOR; the other parsers accept them.
-    assert!(CborValue::parse_det(&nested_keys).is_ok());
+    within_deadline("nested keys, det", || {
+        assert_eq!(
+            CborValue::parse_det(&nested_keys).unwrap_err(),
+            MAP_IN_KEY_ERROR
+        )
+    });
 
     // One 4096-entry map: quadratic duplicate detection would take seconds.
     let wide = flat_map(4096);
@@ -1115,6 +1210,8 @@ fn deprecated_to_bytes_serializes_in_det_mode() {
     assert_ne!(value.to_bytes().unwrap(), value.to_bytes_nondet().unwrap());
 }
 
+/// Compound key equivalence holds in memory for any key, and through
+/// serialization and parsing for array and tagged keys holding no map.
 #[test]
 fn compound_key_equivalence_and_duplicate_detection() {
     let first = CborValue::Map(vec![
@@ -1145,23 +1242,34 @@ fn compound_key_equivalence_and_duplicate_detection() {
         let map = CborValue::Map(vec![(key.clone(), CborValue::Int(7))]);
         assert_eq!(map.map_at(&equivalent).unwrap(), &CborValue::Int(7));
         assert!(map.map_has_key(&equivalent).unwrap());
-        for encoded in [map.to_bytes_det().unwrap(), map.to_bytes_nondet().unwrap()] {
-            assert_eq!(
-                CborValue::parse_nondet(&encoded)
-                    .unwrap()
-                    .map_at(&equivalent)
-                    .unwrap(),
-                &CborValue::Int(7)
-            );
-        }
-        let duplicate = CborValue::Map(vec![
-            (key, CborValue::Int(1)),
-            (equivalent, CborValue::Int(2)),
-        ]);
-        assert!(duplicate.to_bytes_det().is_err());
-        assert!(duplicate.to_bytes_nondet().is_err());
+        assert_eq!(map.to_bytes_det().unwrap_err(), MAP_IN_KEY_ERROR);
+        assert_eq!(map.to_bytes_nondet().unwrap_err(), MAP_IN_KEY_ERROR);
     }
-    // Equivalent map keys with different entry order in non-deterministic input.
+
+    let key = CborValue::Array(vec![
+        CborValue::Int(1),
+        CborValue::Tagged {
+            tag: 42,
+            payload: Box::new(CborValue::text("x")),
+        },
+    ]);
+    let map = CborValue::Map(vec![(key.clone(), CborValue::Int(7))]);
+    for encoded in [map.to_bytes_det().unwrap(), map.to_bytes_nondet().unwrap()] {
+        for parsed in [
+            CborValue::parse_nondet(&encoded).unwrap(),
+            CborValue::parse_det(&encoded).unwrap(),
+        ] {
+            assert_eq!(parsed.map_at(&key).unwrap(), &CborValue::Int(7));
+        }
+    }
+    let duplicate = CborValue::Map(vec![
+        (key.clone(), CborValue::Int(1)),
+        (key, CborValue::Int(2)),
+    ]);
+    assert!(duplicate.to_bytes_det().is_err());
+    assert!(duplicate.to_bytes_nondet().is_err());
+
+    // Equivalent map keys in different entry order: rejected as map keys.
     let duplicate = [0xa2, 0xa2, 1, 2, 3, 4, 0, 0xa2, 3, 4, 1, 2, 1];
     assert!(CborValue::parse_nondet(&duplicate).is_err());
     assert!(CborValue::parse_det(&duplicate).is_err());

@@ -68,17 +68,25 @@ void check_error(TavError *error, TavErrorCode code) {
 
 } // namespace
 
-TEST_CASE("cbor: map keys compare independently of entry order") {
-    const uint8_t encoded[] = {0xa1, 0xa2, 1, 2, 3, 4, 7};
-    const uint8_t reordered[] = {0xa2, 3, 4, 1, 2};
+TEST_CASE("cbor: compound keys are looked up by value and map keys are rejected") {
+    // {[1, 18(2)]: 7}, looked up with a separately parsed copy of the key.
+    const uint8_t encoded[] = {0xa1, 0x82, 1, 0xd2, 2, 7};
+    const uint8_t same_key[] = {0x82, 1, 0xd2, 2};
     CborHandle root, key, found;
     REQUIRE(tav_cbor_nondet_parse(encoded, sizeof(encoded), 64, root.out()) == nullptr);
-    REQUIRE(tav_cbor_nondet_parse(reordered, sizeof(reordered), 64, key.out()) == nullptr);
+    REQUIRE(tav_cbor_nondet_parse(same_key, sizeof(same_key), 64, key.out()) == nullptr);
     REQUIRE(tav_cbor_map_at(root.value, key.value, found.out()) == nullptr);
     root.out();
     int64_t number = 0;
     REQUIRE(tav_cbor_as_signed(found.value, &number) == nullptr);
     CHECK(number == 7);
+
+    // {{1: 2, 3: 4}: 7}: a map inside a key.
+    const uint8_t map_key[] = {0xa1, 0xa2, 1, 2, 3, 4, 7};
+    CborHandle rejected;
+    check_error(tav_cbor_nondet_parse(map_key, sizeof(map_key), 64, rejected.out()),
+                TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(rejected.value == nullptr);
 }
 
 TEST_CASE("cbor: deep copies own input and projected views survive parents") {

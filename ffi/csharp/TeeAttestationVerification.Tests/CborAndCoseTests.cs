@@ -8,16 +8,54 @@ namespace TeeAttestationVerification.Tests;
 public sealed class CborAndCoseTests
 {
     [Fact]
-    public void MapKeysCompareIndependentlyOfEntryOrder()
+    public void CompoundKeysAreLookedUpByValue()
     {
-        using CborValue map = CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 });
-        using CborValue key = CborValue.FromBytes(new byte[] { 0xa2, 3, 4, 1, 2 });
+        // {[1, 18(2)]: 7}, looked up with a separately parsed copy of the key.
+        using CborValue map = CborValue.FromBytes(new byte[] { 0xa1, 0x82, 1, 0xd2, 2, 7 });
+        using CborValue key = CborValue.FromBytes(new byte[] { 0x82, 1, 0xd2, 2 });
         Assert.True(map.TryGetValue(key, out CborValue? result));
         using CborValue found = Assert.IsType<CborValue>(result);
         using CborValue direct = map.MapAt(key);
         map.Dispose();
         Assert.Equal(7, found.GetInt64());
         Assert.Equal(7, direct.GetInt64());
+    }
+
+    [Fact]
+    public void MapsInsideKeysAndOversizedMapsAreRejected()
+    {
+        // {{1: 2, 3: 4}: 7}
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(
+                () => CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 })).Code);
+
+        // {0: 0, 1: 0, ...} in preferred encoding: 256 entries parse, 257 do not.
+        static byte[] FlatMap(int entries)
+        {
+            List<byte> document = [0xb9, (byte)(entries >> 8), (byte)entries];
+            for (int key = 0; key < entries; key++)
+            {
+                if (key >= 256)
+                {
+                    document.Add(0x19);
+                    document.Add((byte)(key >> 8));
+                }
+                else if (key >= 24)
+                {
+                    document.Add(0x18);
+                }
+
+                document.Add((byte)key);
+                document.Add(0x00);
+            }
+
+            return [.. document];
+        }
+
+        using CborValue atLimit = CborValue.FromBytes(FlatMap(256));
+        Assert.Equal(256, atLimit.GetLength());
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(FlatMap(257))).Code);
     }
 
     private static readonly byte[] ProtectedHeader = [0xa1, 0x01, 0x26];

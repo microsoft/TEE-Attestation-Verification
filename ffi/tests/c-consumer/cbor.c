@@ -200,7 +200,7 @@ static void parsing_and_serialization(void)
     tav_cbor_free(value);
 
     /* Bounded parsing: {0: 0, 1: 0} fits an entry limit of 2 and not 1; {{}: 0}
-     * is rejected, while the plain parser accepts it. */
+     * is rejected by every parser. */
     const uint8_t two_entries[] = {0xa2, 0x00, 0x00, 0x01, 0x00};
     const uint8_t map_key[] = {0xa1, 0xa0, 0x00};
     const size_t entries = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
@@ -211,8 +211,8 @@ static void parsing_and_serialization(void)
     expect(tav_cbor_size(value, &size), TAV_ERROR_OK);
     CHECK(size == 2);
     tav_cbor_free(value);
-    expect(tav_cbor_nondet_parse(map_key, sizeof(map_key), 16, &value), TAV_ERROR_OK);
-    tav_cbor_free(value);
+    expect(tav_cbor_nondet_parse(map_key, sizeof(map_key), 16, &value), TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
     expect(tav_cbor_nondet_parse_bounded(map_key, sizeof(map_key), 16, entries, &value), TAV_ERROR_CBOR_DECODE_FAILED);
     CHECK(value == NULL);
     expect(tav_cbor_nondet_parse_bounded(map_key, sizeof(map_key), 16, entries, NULL), TAV_ERROR_INVALID_ARGUMENT);

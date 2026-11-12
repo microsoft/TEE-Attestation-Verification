@@ -7,6 +7,8 @@ namespace TeeAttestationVerification;
 /// <remarks>
 /// Navigation returns independently owned views that share the parsed document.
 /// Dispose every returned value. Byte and text results are managed copies.
+/// Parsing and serialization reject nesting deeper than 64 levels, maps with
+/// more than 256 key/value pairs, and maps inside map keys.
 /// </remarks>
 public sealed class CborValue : IDisposable
 {

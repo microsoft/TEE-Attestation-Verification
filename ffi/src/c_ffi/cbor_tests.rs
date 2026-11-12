@@ -374,14 +374,10 @@ fn a_repeated_handle_is_rejected_without_consuming_the_batch() {
 
 #[test]
 fn a_container_can_be_a_map_key() {
-    for key in [
-        unsafe { make_array(ptr::null_mut(), 0) },
-        unsafe { make_map(ptr::null_mut(), 0) },
-        {
-            let mut payload = make_signed(1);
-            unsafe { make_tagged(18, &mut payload) }
-        },
-    ] {
+    for key in [unsafe { make_array(ptr::null_mut(), 0) }, {
+        let mut payload = make_signed(1);
+        unsafe { make_tagged(18, &mut payload) }
+    }] {
         let value = make_signed(7);
         let lookup = unsafe { shallow_copy(key) };
         let mut pairs = vec![key, value];
@@ -395,11 +391,37 @@ fn a_container_can_be_a_map_key() {
             TavErrorCode::Ok
         );
         assert_eq!(encode_det(found).unwrap(), [7]);
+        assert!(encode_det(map).is_ok());
         unsafe {
             tav_cbor_free(found);
             tav_cbor_free(lookup);
             tav_cbor_free(map);
         }
+    }
+}
+
+/// A map inside a key builds and looks up, but does not serialize.
+#[test]
+fn a_map_inside_a_key_builds_but_cannot_be_serialized() {
+    let key = unsafe { make_map(ptr::null_mut(), 0) };
+    let lookup = unsafe { shallow_copy(key) };
+    let mut pairs = vec![key, make_signed(7)];
+    let map = unsafe { make_map(pairs.as_mut_ptr(), 1) };
+    assert!(!map.is_null());
+    let mut found = ptr::null_mut();
+    assert_eq!(
+        status(unsafe { tav_cbor_map_at(map, lookup, &mut found) }),
+        TavErrorCode::Ok
+    );
+    for encoded in [encode_det(map), encode_nondet(map)] {
+        assert!(encoded
+            .unwrap_err()
+            .contains("map keys must not contain maps"));
+    }
+    unsafe {
+        tav_cbor_free(found);
+        tav_cbor_free(lookup);
+        tav_cbor_free(map);
     }
 }
 
@@ -627,16 +649,25 @@ fn bounded_parsing_enforces_the_map_entry_limit() {
         unsafe { tav_cbor_free(decode_bounded(&wrapped, 16, 4).unwrap()) };
     }
 
-    // The default limit is a boundary; the plain parser is unchanged.
+    // The default limit is a boundary for every parser and serializer.
     let default_entries = cbor::MAX_CBOR_MAP_ENTRIES;
     let (at_limit, over_limit) = (flat_map(default_entries), flat_map(default_entries + 1));
-    unsafe { tav_cbor_free(decode_bounded(&at_limit, MAX_DEPTH_LIMIT, default_entries).unwrap()) };
+    for det in [false, true] {
+        let handle = decode(&at_limit, MAX_DEPTH_LIMIT, det).unwrap();
+        assert_eq!(encode(handle, MAX_DEPTH_LIMIT, det).unwrap(), at_limit);
+        unsafe { tav_cbor_free(handle) };
+        assert!(decode(&over_limit, MAX_DEPTH_LIMIT, det).is_err());
+    }
+    let handle = decode_bounded(&over_limit, MAX_DEPTH_LIMIT, default_entries + 1).unwrap();
+    assert!(encode_det(handle)
+        .unwrap_err()
+        .contains("Maximum CBOR map entries"));
+    unsafe { tav_cbor_free(handle) };
     assert!(decode_bounded(&over_limit, MAX_DEPTH_LIMIT, default_entries).is_err());
-    unsafe { tav_cbor_free(parse_nondet(&over_limit).unwrap()) };
 }
 
 #[test]
-fn bounded_parsing_rejects_maps_inside_keys() {
+fn parsing_rejects_maps_inside_keys() {
     for document in [
         &[0xa1, 0xa0, 0x00][..],                     // {{}: 0}
         &[0xa1, 0xa1, 0x01, 0x02, 0x03],             // {{1: 2}: 3}
@@ -645,7 +676,12 @@ fn bounded_parsing_rejects_maps_inside_keys() {
         &[0xa1, 0x00, 0xa1, 0xa1, 0x01, 0x00, 0x00], // {0: {{1: 0}: 0}}
     ] {
         assert!(decode_bounded(document, 16, 16).is_err(), "{document:02x?}");
-        unsafe { tav_cbor_free(parse_nondet(document).unwrap()) };
+        for det in [false, true] {
+            assert!(
+                decode(document, MAX_DEPTH_LIMIT, det).is_err(),
+                "{document:02x?} det={det}"
+            );
+        }
     }
     // {[1, 18(2)]: 7} keeps its compound key.
     let array_key = [0xa1, 0x82, 0x01, 0xd2, 0x02, 0x07];
@@ -661,7 +697,6 @@ fn bounded_parsing_caps_the_map_entry_limit() {
     let over_ceiling = flat_map(MAX_MAP_ENTRIES_LIMIT + 1);
     unsafe { tav_cbor_free(decode_bounded(&at_ceiling, 16, usize::MAX).unwrap()) };
     assert!(decode_bounded(&over_ceiling, 16, usize::MAX).is_err());
-    unsafe { tav_cbor_free(parse_nondet(&over_ceiling).unwrap()) };
 }
 
 #[test]
@@ -916,11 +951,11 @@ fn map_lookup_matches_by_value() {
 #[test]
 fn parsing_accepts_compound_map_keys() {
     for document in [
-        &[0xa1, 0x81, 0x01, 0x02][..],
-        &[0x81, 0xa1, 0x81, 0x01, 0x02],
-        &[0xd2, 0xa1, 0x81, 0x01, 0x02],
-        &[0xa1, 0xa1, 0x01, 0x02, 0x03],
-        &[0xa1, 0xd2, 0x01, 0x02],
+        &[0xa1, 0x81, 0x01, 0x02][..],         // {[1]: 2}
+        &[0x81, 0xa1, 0x81, 0x01, 0x02],       // [{[1]: 2}]
+        &[0xd2, 0xa1, 0x81, 0x01, 0x02],       // 18({[1]: 2})
+        &[0xa1, 0xd2, 0x01, 0x02],             // {18(1): 2}
+        &[0xa1, 0x82, 0x01, 0xd2, 0x02, 0x03], // {[1, 18(2)]: 3}
     ] {
         for det in [false, true] {
             let handle = decode(document, MAX_DEPTH_LIMIT, det).unwrap();

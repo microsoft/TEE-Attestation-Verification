@@ -16,15 +16,39 @@ const {
 } = require('./support.cjs');
 
 // CBOR accessors: CborValue decoding plus the CoseSign1 wrapper.
-test('map keys compare independently of entry order', () => {
-  const root = pkg.CborValue.from_bytes(Uint8Array.of(0xa1, 0xa2, 1, 2, 3, 4, 7));
-  const key = pkg.CborValue.from_bytes(Uint8Array.of(0xa2, 3, 4, 1, 2));
+test('compound keys are looked up by value', () => {
+  // {[1, 18(2)]: 7}, looked up with a separately parsed copy of the key.
+  const root = pkg.CborValue.from_bytes(Uint8Array.of(0xa1, 0x82, 1, 0xd2, 2, 7));
+  const key = pkg.CborValue.from_bytes(Uint8Array.of(0x82, 1, 0xd2, 2));
   assert.equal(root.map_has(key), true);
   const found = root.map_at(key);
   root.free();
   key.free();
   assert.equal(found.int(), 7n);
   found.free();
+});
+
+test('maps inside keys and maps over the entry limit are rejected', () => {
+  // {{1: 2, 3: 4}: 7}
+  assertStringError(() => pkg.CborValue.from_bytes(Uint8Array.of(0xa1, 0xa2, 1, 2, 3, 4, 7)));
+
+  // {0: 0, 1: 0, ...} in preferred encoding: 256 entries parse, 257 do not.
+  const flatMap = (entries) => {
+    const bytes = [0xb9, entries >> 8, entries & 0xff];
+    for (let key = 0; key < entries; key++) {
+      if (key >= 256) {
+        bytes.push(0x19, key >> 8);
+      } else if (key >= 24) {
+        bytes.push(0x18);
+      }
+      bytes.push(key & 0xff, 0x00);
+    }
+    return Uint8Array.from(bytes);
+  };
+  const atLimit = pkg.CborValue.from_bytes(flatMap(256));
+  assert.equal(atLimit.len(), 256);
+  atLimit.free();
+  assertStringError(() => pkg.CborValue.from_bytes(flatMap(257)));
 });
 
 test('cbor accessors decode scalars, containers, tags, and COSE_Sign1', () => {
