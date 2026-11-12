@@ -21,13 +21,13 @@
 //
 // Failures throw tav::Exception with the C ABI's tav::ErrorCode and message.
 //
-// Limits:
+// Nesting:
 // - MAX_DEPTH limits parsing and serialization, not builders. Callers must
 //   bound the depth they build. Copying, materializing, or destroying an
 //   extremely deep Value can exhaust the process stack and abort.
-// - Parsing and serialization reject maps with more than
-//   DEFAULT_MAX_MAP_ENTRIES entries and maps inside map keys;
-//   nondet_parse_bounded takes the entry limit explicitly.
+// - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
+//   and maps inside map keys; nondet_parse_bounded takes the entry limit
+//   explicitly. det_parse and serialization apply neither.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -46,8 +46,8 @@ namespace tav::cbor
 /// Ceiling on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
 
-/// Ceiling on the map entry limit of nondet_parse_bounded, and the limit the
-/// other parsers and the serializers apply.
+/// Ceiling on the map entry limit of nondet_parse_bounded, and the limit
+/// nondet_parse applies.
 constexpr size_t MAX_MAP_ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES;
 constexpr size_t DEFAULT_MAX_MAP_ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
 
@@ -376,8 +376,8 @@ inline Value make_array(std::vector<Value>&& items)
       [&](auto out) { return tav_cbor_make_array(batch.data(), batch.size(), out); });
 }
 
-/// Construction accepts any keys; duplicate keys, maps inside keys, and more
-/// than DEFAULT_MAX_MAP_ENTRIES entries throw tav::Exception at serialization.
+/// Keys may be any supported CBOR value and must be unique. Duplicate keys are
+/// unsupported: construction may succeed, but serialization throws tav::Exception.
 inline Value make_map(std::vector<MapItem>&& entries)
 {
     const size_t pair_count = entries.size();
@@ -403,7 +403,8 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 
 /// Borrows raw, which must outlive the returned value.
 ///
-/// Map keys use RFC 8949 equivalence.
+/// Rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries and maps inside
+/// map keys. Map keys use RFC 8949 equivalence.
 inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_nondet_parse, raw, max_depth);

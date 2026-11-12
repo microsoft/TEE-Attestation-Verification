@@ -65,19 +65,20 @@ extern "C" {
 typedef struct TavCborHandle TavCborHandle;
 
 /*
- * Limits for parsing and serialization. Nesting deeper than max_depth, capped
- * at TAV_CBOR_MAX_DEPTH, is rejected; depth counts the root at 0 and charges
- * one level per container with children. Maps with more than
- * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES key/value pairs, at any level, and maps
- * inside map keys are rejected; tav_cbor_nondet_parse_bounded takes the entry
- * limit explicitly, capped at TAV_CBOR_MAX_MAP_ENTRIES. Bounding the input
- * length is the caller's job.
- *
- * Builders do not enforce these limits. Callers must bound the depth they
- * build. Copying, materializing, or dropping an extremely deep value can
- * exhaust the process stack and abort.
+ * Ceiling on nesting depth for parsing and serialization. Builders do not
+ * enforce this limit. Callers must bound the depth they build. Copying,
+ * materializing, or dropping an extremely deep value can exhaust the process
+ * stack and abort.
  */
 #define TAV_CBOR_MAX_DEPTH 256
+
+/*
+ * Non-deterministic parsing rejects maps with more than
+ * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES key/value pairs, at any level, and maps
+ * inside map keys; tav_cbor_nondet_parse_bounded takes the entry limit
+ * explicitly, capped at TAV_CBOR_MAX_MAP_ENTRIES. Deterministic parsing and
+ * serialization apply neither. Bounding the input length is the caller's job.
+ */
 #define TAV_CBOR_MAX_MAP_ENTRIES 1024
 #define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 256
 
@@ -110,8 +111,8 @@ TavError* tav_cbor_make_string(const char* data, size_t len, TavCborHandle** out
 TavError* tav_cbor_make_array(TavCborHandle** items, size_t count, TavCborHandle** out);
 /*
  * pairs holds key, value, key, value, ... so it has 2 * pair_count entries.
- * Construction accepts any keys; duplicate keys, maps inside keys, and more
- * than TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES pairs fail at serialization.
+ * Keys may be any supported CBOR value and must be unique. Duplicate
+ * keys are unsupported: construction may succeed, but serialization fails.
  */
 TavError* tav_cbor_make_map(TavCborHandle** pairs, size_t pair_count, TavCborHandle** out);
 TavError* tav_cbor_make_tagged(uint64_t tag, TavCborHandle** payload, TavCborHandle** out);
@@ -146,7 +147,9 @@ TavError* tav_cbor_det_serialize(
 /*
  * Parsing. On success writes an owning handle through out_value. The returned
  * tree borrows byte and text payloads from data, which must outlive it.
- * Trailing bytes are rejected. Map keys use RFC 8949 equivalence.
+ *
+ * Map keys use RFC 8949 equivalence, including order-independent map
+ * comparison for keys parsed deterministically.
  */
 TavError* tav_cbor_nondet_parse(
   const uint8_t* data,

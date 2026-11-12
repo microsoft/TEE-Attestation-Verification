@@ -25,12 +25,12 @@
 //! # Limits
 //!
 //! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
-//! whatever depth the caller asks for, maps with more than
-//! [`cbor::MAX_CBOR_MAP_ENTRIES`] entries, and maps inside map keys.
-//! `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly, at most
-//! [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these limits. Callers
-//! must bound the depth they build. Copying, materializing, or dropping an
-//! extremely deep value can exhaust the process stack and abort.
+//! whatever depth the caller asks for. Non-deterministic parsing also rejects
+//! maps with more than [`cbor::MAX_CBOR_MAP_ENTRIES`] entries and maps inside
+//! map keys; `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly,
+//! at most [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these limits. Callers must bound the depth they build. Copying,
+//! materializing, or dropping an extremely deep value can exhaust the process
+//! stack and abort.
 
 use std::borrow::Cow;
 use std::collections::HashSet;

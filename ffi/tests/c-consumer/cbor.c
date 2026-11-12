@@ -200,7 +200,7 @@ static void parsing_and_serialization(void)
     tav_cbor_free(value);
 
     /* Bounded parsing: {0: 0, 1: 0} fits an entry limit of 2 and not 1; {{}: 0}
-     * is rejected by every parser. */
+     * is rejected by both nondet parsers. */
     const uint8_t two_entries[] = {0xa2, 0x00, 0x00, 0x01, 0x00};
     const uint8_t map_key[] = {0xa1, 0xa0, 0x00};
     const size_t entries = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;

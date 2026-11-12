@@ -19,13 +19,12 @@
 //!
 //! Both modes reject floating-point values, indefinite-length encodings,
 //! invalid UTF-8, duplicate map keys, integers outside the range of `i64`,
-//! nesting deeper than a depth limit, maps with more than an entry limit, and
-//! maps inside map keys. The defaults are [`MAX_CBOR_NESTING_DEPTH`] and
-//! [`MAX_CBOR_MAP_ENTRIES`]; [`CborValue::parse_with_limits`] and
-//! [`CborValue::to_bytes_with_limits`] take explicit ones. In [`Nondet`] mode
-//! EverCBOR checks the limits in a single pass over the input and finds
-//! duplicate keys by sorting, so validation costs time bounded by the input
-//! length and the limits. Bounding the input length is the caller's job.
+//! and nesting deeper than a depth limit. [`Nondet`] parsing also rejects maps
+//! with more than a map entry limit, default [`MAX_CBOR_MAP_ENTRIES`], and
+//! maps inside map keys: EverCBOR checks the limits in a single pass over the
+//! input and finds duplicate keys by sorting, so validation costs time bounded
+//! by the input length and the limits. Bounding the input length is the
+//! caller's job.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -50,21 +49,8 @@ use std::borrow::Cow;
 pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
 
 /// Default maximum number of key/value pairs in any CBOR map, at any level,
-/// for parse and serialization.
+/// for [`Nondet`] parsing.
 pub const MAX_CBOR_MAP_ENTRIES: usize = 256;
-
-const DEPTH_ERROR: &str = "Maximum CBOR nesting depth exceeded";
-const MAP_ENTRIES_ERROR: &str = "Maximum CBOR map entries exceeded";
-const MAP_IN_KEY_ERROR: &str = "CBOR map keys must not contain maps";
-
-/// Rejects a map of `declared` entries over `max_map_entries`, before any
-/// space is reserved for them.
-fn check_map_entries(declared: u64, max_map_entries: usize) -> Result<(), String> {
-    if declared > u64::try_from(max_map_entries).unwrap_or(u64::MAX) {
-        return Err(MAP_ENTRIES_ERROR.to_string());
-    }
-    Ok(())
-}
 
 /// Bound passed to EverCBOR's serialized-size estimator.
 const SIZE_BOUND: usize = usize::MAX;
@@ -137,9 +123,7 @@ pub trait Backend<'a>: Sized + Copy {
     /// validator takes.
     fn parse(input: &'a [u8], max_depth: usize, max_map_entries: usize)
         -> Option<(Self, &'a [u8])>;
-    /// Peel one layer, rejecting a map over `max_map_entries` before
-    /// reserving space for it.
-    fn destruct(item: Self, max_map_entries: usize) -> Result<RawView<'a, Self>, String>;
+    fn destruct(item: Self) -> RawView<'a, Self>;
     fn to_vec(item: Self) -> Result<Vec<u8>, String>;
 
     fn mk_int64(negative: bool, magnitude: u64) -> Self;
@@ -153,7 +137,7 @@ pub trait Backend<'a>: Sized + Copy {
 }
 
 mod det_backend {
-    use super::{check_map_entries, reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
+    use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
     use cborrs::cbordet as api;
 
     /// Serializes into a fresh buffer.
@@ -176,11 +160,10 @@ mod det_backend {
     pub(super) fn value_to_vec(
         value: &super::CborValue<'_>,
         max_depth: usize,
-        max_map_entries: usize,
     ) -> Result<Vec<u8>, String> {
         let items: SimpleArena<api::CborDet<'_>> = SimpleArena::new();
         let entries: SimpleArena<api::CborDetMapEntry<'_>> = SimpleArena::new();
-        let raw = value.to_raw(&items, &entries, max_depth, max_map_entries, false)?;
+        let raw = value.to_raw(&items, &entries, max_depth)?;
         to_vec(raw)
     }
 
@@ -188,7 +171,7 @@ mod det_backend {
         type MapEntry = api::CborDetMapEntry<'a>;
 
         /// The deterministic validator takes no bounds; the tree walk
-        /// enforces the limits.
+        /// enforces the depth.
         fn parse(
             input: &'a [u8],
             _max_depth: usize,
@@ -197,8 +180,8 @@ mod det_backend {
             api::cbor_det_parse(input)
         }
 
-        fn destruct(item: Self, max_map_entries: usize) -> Result<RawView<'a, Self>, String> {
-            Ok(match api::cbor_det_destruct(item) {
+        fn destruct(item: Self) -> RawView<'a, Self> {
+            match api::cbor_det_destruct(item) {
                 api::CborDetView::Int64 { kind, value } => RawView::Int64 {
                     negative: matches!(kind, api::CborDetIntKind::NegInt64),
                     magnitude: value,
@@ -212,9 +195,8 @@ mod det_backend {
                     RawView::Array(items)
                 }
                 api::CborDetView::Map { _0: map } => {
-                    let declared = api::cbor_det_get_map_length(map);
-                    check_map_entries(declared, max_map_entries)?;
-                    let mut entries = Vec::with_capacity(reserve_for(declared));
+                    let mut entries =
+                        Vec::with_capacity(reserve_for(api::cbor_det_get_map_length(map)));
                     entries.extend(map.into_iter().map(|e| {
                         (
                             api::cbor_det_map_entry_key(e),
@@ -225,7 +207,7 @@ mod det_backend {
                 }
                 api::CborDetView::Tagged { tag, payload } => RawView::Tagged { tag, payload },
                 api::CborDetView::SimpleValue { _0: value } => RawView::Simple(value),
-            })
+            }
         }
 
         fn to_vec(item: Self) -> Result<Vec<u8>, String> {
@@ -272,7 +254,7 @@ mod det_backend {
 }
 
 mod nondet_backend {
-    use super::{check_map_entries, reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
+    use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
     use cborrs_nondet::cbornondet as api;
 
     /// See the deterministic counterpart for the note on the elided lifetime.
@@ -293,11 +275,10 @@ mod nondet_backend {
     pub(super) fn value_to_vec(
         value: &super::CborValue<'_>,
         max_depth: usize,
-        max_map_entries: usize,
     ) -> Result<Vec<u8>, String> {
         let items: SimpleArena<api::CborNondet<'_>> = SimpleArena::new();
         let entries: SimpleArena<api::CborNondetMapEntry<'_>> = SimpleArena::new();
-        let raw = value.to_raw(&items, &entries, max_depth, max_map_entries, false)?;
+        let raw = value.to_raw(&items, &entries, max_depth)?;
         to_vec(raw)
     }
 
@@ -328,8 +309,8 @@ mod nondet_backend {
             )
         }
 
-        fn destruct(item: Self, max_map_entries: usize) -> Result<RawView<'a, Self>, String> {
-            Ok(match api::cbor_nondet_destruct(item) {
+        fn destruct(item: Self) -> RawView<'a, Self> {
+            match api::cbor_nondet_destruct(item) {
                 api::CborNondetView::Int64 { kind, value } => RawView::Int64 {
                     negative: matches!(kind, api::CborNondetIntKind::NegInt64),
                     magnitude: value,
@@ -343,9 +324,8 @@ mod nondet_backend {
                     RawView::Array(items)
                 }
                 api::CborNondetView::Map { _0: map } => {
-                    let declared = api::cbor_nondet_get_map_length(map);
-                    check_map_entries(declared, max_map_entries)?;
-                    let mut entries = Vec::with_capacity(reserve_for(declared));
+                    let mut entries =
+                        Vec::with_capacity(reserve_for(api::cbor_nondet_get_map_length(map)));
                     entries.extend(map.into_iter().map(|e| {
                         (
                             api::cbor_nondet_map_entry_key(e),
@@ -356,7 +336,7 @@ mod nondet_backend {
                 }
                 api::CborNondetView::Tagged { tag, payload } => RawView::Tagged { tag, payload },
                 api::CborNondetView::SimpleValue { _0: value } => RawView::Simple(value),
-            })
+            }
         }
 
         fn to_vec(item: Self) -> Result<Vec<u8>, String> {
@@ -416,11 +396,7 @@ pub trait Mode: Sized {
     /// type, drop checking cannot retire the arena borrows before the call
     /// returns.
     #[doc(hidden)]
-    fn value_to_vec(
-        value: &CborValue<'_>,
-        max_depth: usize,
-        max_map_entries: usize,
-    ) -> Result<Vec<u8>, String>;
+    fn value_to_vec(value: &CborValue<'_>, max_depth: usize) -> Result<Vec<u8>, String>;
 }
 
 /// Deterministic CBOR, per RFC 8949 Section 4.2.1.
@@ -438,24 +414,16 @@ pub struct Nondet;
 impl Mode for Det {
     type Item<'x> = cborrs::cbordet::CborDet<'x>;
 
-    fn value_to_vec(
-        value: &CborValue<'_>,
-        max_depth: usize,
-        max_map_entries: usize,
-    ) -> Result<Vec<u8>, String> {
-        det_backend::value_to_vec(value, max_depth, max_map_entries)
+    fn value_to_vec(value: &CborValue<'_>, max_depth: usize) -> Result<Vec<u8>, String> {
+        det_backend::value_to_vec(value, max_depth)
     }
 }
 
 impl Mode for Nondet {
     type Item<'x> = cborrs_nondet::cbornondet::CborNondet<'x>;
 
-    fn value_to_vec(
-        value: &CborValue<'_>,
-        max_depth: usize,
-        max_map_entries: usize,
-    ) -> Result<Vec<u8>, String> {
-        nondet_backend::value_to_vec(value, max_depth, max_map_entries)
+    fn value_to_vec(value: &CborValue<'_>, max_depth: usize) -> Result<Vec<u8>, String> {
+        nondet_backend::value_to_vec(value, max_depth)
     }
 }
 
@@ -514,15 +482,16 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse CBOR bytes in the given [`Mode`], rejecting inputs nested deeper
-    /// than `max_depth`, any map with more than `max_map_entries` entries, at
-    /// any level, and any map inside a map key.
+    /// than `max_depth`.
     ///
-    /// In [`Nondet`] mode EverCBOR checks the limits in a single pass and
-    /// finds duplicate keys by sorting, so validation costs time bounded by
-    /// the input length and the limits, and
-    /// `3 * (max_depth + 1) * max_map_entries` words of scratch. Input
-    /// EverCBOR rejects fails with the generic parse error; the tree walk
-    /// names the limit when it is the one to reject.
+    /// In [`Nondet`] mode, EverCBOR also rejects any map with more than
+    /// `max_map_entries` entries, at any level, and any map inside a map key,
+    /// checking the limits in a single pass and finding duplicate keys by
+    /// sorting, so validation costs time bounded by the input length and the
+    /// limits, and `3 * (max_depth + 1) * max_map_entries` words of scratch.
+    /// Input EverCBOR rejects fails with the generic parse error; the tree
+    /// walk names the depth limit when it is the one to reject. [`Det`] mode
+    /// ignores `max_map_entries`.
     pub fn parse_with_limits<M: Mode>(
         bytes: &'a [u8],
         max_depth: usize,
@@ -536,7 +505,7 @@ impl<'a> CborValue<'a> {
                 remainder.len()
             ));
         }
-        Self::from_raw::<M::Item<'a>>(item, max_depth, max_map_entries, false)
+        Self::from_raw::<M::Item<'a>>(item, max_depth)
     }
 
     /// Parse leniently, accepting any well-formed definite-length encoding,
@@ -554,8 +523,7 @@ impl<'a> CborValue<'a> {
         Self::parse_with_limits::<Nondet>(bytes, max_depth, max_map_entries)
     }
 
-    /// Parse strictly, rejecting encodings that are not deterministic, within
-    /// the default limits.
+    /// Parse strictly, rejecting encodings that are not deterministic.
     pub fn parse_det(bytes: &'a [u8]) -> Result<Self, String> {
         Self::parse::<Det>(bytes)
     }
@@ -567,31 +535,17 @@ impl<'a> CborValue<'a> {
     }
 
     /// Serialize in the given [`Mode`], rejecting values nested deeper than
-    /// `max_depth`, within the default map entry limit.
+    /// `max_depth`.
     pub fn to_bytes_with_depth<M: Mode>(&self, max_depth: usize) -> Result<Vec<u8>, String> {
-        self.to_bytes_with_limits::<M>(max_depth, MAX_CBOR_MAP_ENTRIES)
+        M::value_to_vec(self, max_depth)
     }
 
-    /// Serialize in the given [`Mode`], rejecting values nested deeper than
-    /// `max_depth`, any map with more than `max_map_entries` entries, at any
-    /// level, and any map inside a map key. A map's size is checked before
-    /// its keys are.
-    pub fn to_bytes_with_limits<M: Mode>(
-        &self,
-        max_depth: usize,
-        max_map_entries: usize,
-    ) -> Result<Vec<u8>, String> {
-        M::value_to_vec(self, max_depth, max_map_entries)
-    }
-
-    /// Serialize to deterministic CBOR, sorting map keys, within the default
-    /// limits.
+    /// Serialize to deterministic CBOR, sorting map keys.
     pub fn to_bytes_det(&self) -> Result<Vec<u8>, String> {
         self.to_bytes_with_depth::<Det>(MAX_CBOR_NESTING_DEPTH)
     }
 
-    /// Serialize preserving map entry order as given, within the default
-    /// limits.
+    /// Serialize preserving map entry order as given.
     ///
     /// Detecting duplicate keys without sorting takes time quadratic in the
     /// number of map entries. [`CborValue::to_bytes_det`] sorts instead, and
@@ -785,17 +739,13 @@ impl<'a> CborValue<'a> {
         if child_count == 0 {
             return Ok(budget);
         }
-        budget.checked_sub(1).ok_or_else(|| DEPTH_ERROR.to_string())
+        budget
+            .checked_sub(1)
+            .ok_or_else(|| "Maximum CBOR nesting depth exceeded".to_string())
     }
 
-    /// `in_key` is set inside a map key, where a map is rejected.
-    fn from_raw<B: Backend<'a>>(
-        item: B,
-        budget: usize,
-        max_map_entries: usize,
-        in_key: bool,
-    ) -> Result<Self, String> {
-        Ok(match B::destruct(item, max_map_entries)? {
+    fn from_raw<B: Backend<'a>>(item: B, budget: usize) -> Result<Self, String> {
+        Ok(match B::destruct(item) {
             RawView::Int64 {
                 negative,
                 magnitude,
@@ -808,22 +758,19 @@ impl<'a> CborValue<'a> {
                 CborValue::Array(
                     children
                         .into_iter()
-                        .map(|c| Self::from_raw::<B>(c, child_budget, max_map_entries, in_key))
+                        .map(|c| Self::from_raw::<B>(c, child_budget))
                         .collect::<Result<_, _>>()?,
                 )
             }
             RawView::Map(children) => {
-                if in_key {
-                    return Err(MAP_IN_KEY_ERROR.to_string());
-                }
                 let child_budget = Self::child_budget(budget, children.len())?;
                 CborValue::Map(
                     children
                         .into_iter()
                         .map(|(k, v)| {
                             Ok((
-                                Self::from_raw::<B>(k, child_budget, max_map_entries, true)?,
-                                Self::from_raw::<B>(v, child_budget, max_map_entries, false)?,
+                                Self::from_raw::<B>(k, child_budget)?,
+                                Self::from_raw::<B>(v, child_budget)?,
                             ))
                         })
                         .collect::<Result<_, String>>()?,
@@ -834,8 +781,6 @@ impl<'a> CborValue<'a> {
                 payload: Box::new(Self::from_raw::<B>(
                     payload,
                     Self::child_budget(budget, 1)?,
-                    max_map_entries,
-                    in_key,
                 )?),
             },
         })
@@ -845,15 +790,12 @@ impl<'a> CborValue<'a> {
     ///
     /// Child nodes are allocated in the arenas so they stay alive long enough
     /// for the parent to borrow them. The caller serializes the returned root
-    /// exactly once. `in_key` is set inside a map key, where a map is
-    /// rejected.
+    /// exactly once.
     fn to_raw<'b, B: Backend<'b>>(
         &'b self,
         items: &'b SimpleArena<B>,
         entries: &'b SimpleArena<B::MapEntry>,
         budget: usize,
-        max_map_entries: usize,
-        in_key: bool,
     ) -> Result<B, String> {
         match self {
             CborValue::Int(v) => {
@@ -873,25 +815,19 @@ impl<'a> CborValue<'a> {
                 let child_budget = Self::child_budget(budget, children.len())?;
                 let raw: Vec<B> = children
                     .iter()
-                    .map(|c| c.to_raw(items, entries, child_budget, max_map_entries, in_key))
+                    .map(|c| c.to_raw(items, entries, child_budget))
                     .collect::<Result<_, _>>()?;
                 B::mk_array(items.alloc_extend(raw))
                     .ok_or_else(|| "Failed to build CBOR array".to_string())
             }
             CborValue::Map(map_entries) => {
-                if in_key {
-                    return Err(MAP_IN_KEY_ERROR.to_string());
-                }
-                if map_entries.len() > max_map_entries {
-                    return Err(MAP_ENTRIES_ERROR.to_string());
-                }
                 let child_budget = Self::child_budget(budget, map_entries.len())?;
                 let raw: Vec<B::MapEntry> = map_entries
                     .iter()
                     .map(|(k, v)| {
                         Ok(B::mk_map_entry(
-                            k.to_raw(items, entries, child_budget, max_map_entries, true)?,
-                            v.to_raw(items, entries, child_budget, max_map_entries, false)?,
+                            k.to_raw(items, entries, child_budget)?,
+                            v.to_raw(items, entries, child_budget)?,
                         ))
                     })
                     .collect::<Result<_, String>>()?;
@@ -899,13 +835,7 @@ impl<'a> CborValue<'a> {
                     .ok_or_else(|| "Failed to build CBOR map".to_string())
             }
             CborValue::Tagged { tag, payload } => {
-                let inner = payload.to_raw(
-                    items,
-                    entries,
-                    Self::child_budget(budget, 1)?,
-                    max_map_entries,
-                    in_key,
-                )?;
+                let inner = payload.to_raw(items, entries, Self::child_budget(budget, 1)?)?;
                 Ok(B::mk_tagged(*tag, items.alloc(inner)))
             }
         }

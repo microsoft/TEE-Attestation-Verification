@@ -852,12 +852,13 @@ TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map ke
     CHECK(
       nondet_parse_bounded(over_limit, MAX_DEPTH, DEFAULT_MAX_MAP_ENTRIES + 1).size() ==
       DEFAULT_MAX_MAP_ENTRIES + 1);
-    // Every parser applies the default limit; serialization does too.
+    // nondet_parse applies the default limit; det_parse and serialization
+    // take no entry limit.
     expect_error([&] { (void)nondet_parse(over_limit); }, ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)det_parse(over_limit); }, ErrorCode::CBOR_DECODE_FAILED);
-    const Value wider = nondet_parse_bounded(over_limit, MAX_DEPTH, DEFAULT_MAX_MAP_ENTRIES + 1);
-    expect_error([&] { (void)wider.det_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
-    expect_error([&] { (void)wider.nondet_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
+    const Value det = det_parse(over_limit);
+    CHECK(det.size() == DEFAULT_MAX_MAP_ENTRIES + 1);
+    CHECK(det.det_serialize() == over_limit);
+    CHECK(det.nondet_serialize() == over_limit);
 
     // {0: 0, 1: 0, 2: 0, 3: 0} nested in an array, a map value, and a tag.
     const std::vector<uint8_t> four = flat_map(4);
@@ -869,8 +870,8 @@ TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map ke
         CHECK_NOTHROW((void)nondet_parse_bounded(head, 16, 4));
     }
 
-    // {{1: 2, 3: 4}: 7}, {[{}]: 0}, {18({}): 0}, and {0: {{}: 0}}: every
-    // parser rejects a map inside a key.
+    // {{1: 2, 3: 4}: 7}, {[{}]: 0}, {18({}): 0}, and {0: {{}: 0}}: rejected
+    // by nondet parsing, accepted by det_parse.
     for (const std::vector<uint8_t>& document : {
            std::vector<uint8_t>{0xa1, 0xa2, 1, 2, 3, 4, 7},
            std::vector<uint8_t>{0xa1, 0x81, 0xa0, 0x00},
@@ -879,16 +880,9 @@ TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map ke
          })
     {
         expect_error([&] { (void)nondet_parse(document); }, ErrorCode::CBOR_DECODE_FAILED);
-        expect_error([&] { (void)det_parse(document); }, ErrorCode::CBOR_DECODE_FAILED);
         expect_error([&] { (void)nondet_parse_bounded(document); }, ErrorCode::CBOR_DECODE_FAILED);
+        CHECK(det_parse(document).det_serialize() == document);
     }
-    // A built map with a map key does not serialize.
-    std::vector<MapItem> entries;
-    entries.emplace_back(make_map({}), make_signed(7));
-    const Value map_in_key = make_map(std::move(entries));
-    CHECK(map_in_key.map_at(make_map({})).as_signed() == 7);
-    expect_error([&] { (void)map_in_key.det_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
-    expect_error([&] { (void)map_in_key.nondet_serialize(); }, ErrorCode::CBOR_ENCODE_FAILED);
     // {[1, 18(2)]: 7} keeps its compound key.
     const std::vector<uint8_t> array_key{0xa1, 0x82, 1, 0xd2, 2, 7};
     CHECK(nondet_parse_bounded(array_key).det_serialize() == array_key);
@@ -967,11 +961,12 @@ TEST_CASE("cbor handle: compound map keys can be built and looked up")
     CHECK(parsed.map_at(key).as_signed() == 2);
     CHECK(det_parse(encoded).map_at(key).as_signed() == 2);
 
-    // {[1, 18(2)]: 7}, looked up with a separately parsed copy of the key.
-    const std::vector<uint8_t> array_key{0xa1, 0x82, 1, 0xd2, 2, 7};
-    const std::vector<uint8_t> same_key{0x82, 1, 0xd2, 2};
-    const Value root = nondet_parse(array_key);
-    CHECK(root.map_at(nondet_parse(same_key)).as_signed() == 7);
+    // Map keys parse deterministically and compare independently of order.
+    const std::vector<uint8_t> map_key{0xa1, 0xa2, 1, 2, 3, 4, 7};
+    const std::vector<uint8_t> reordered{0xa2, 3, 4, 1, 2};
+    const Value root = det_parse(map_key);
+    const Value reordered_key = nondet_parse(reordered);
+    CHECK(root.map_at(reordered_key).as_signed() == 7);
 }
 
 TEST_CASE("cbor handle: duplicate map keys cannot be serialized")
