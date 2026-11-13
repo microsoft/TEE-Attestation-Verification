@@ -380,7 +380,12 @@ fn bounded_entry_limit_ignores_arrays_and_empty_maps() {
         .to_bytes_det()
         .unwrap();
     assert_eq!(bounded(&wide_array, (1, 0)).unwrap().len().unwrap(), 300);
-    assert_eq!(bounded(&[0xa0], (0, 0)).unwrap(), CborValue::Map(vec![]));
+    for depth in [0, usize::MAX - 1] {
+        assert_eq!(
+            bounded(&[0xa0], (depth, 0)).unwrap(),
+            CborValue::Map(vec![])
+        );
+    }
     assert!(bounded(&[0xa1, 0x00, 0x00], (1, 0)).is_err());
 }
 
@@ -508,8 +513,49 @@ fn bounded_depth_matches_parse_with_depth() {
     for document in [&[0x01u8][..], &[0x80], &[0xa0]] {
         assert!(bounded(document, (0, 0)).is_ok());
     }
-    // A depth of usize::MAX has no bound one above it.
-    assert!(bounded(&[0x01], (usize::MAX, 1)).is_err());
+}
+
+#[test]
+fn bounded_reports_unrepresentable_limits() {
+    for limits in [
+        (usize::MAX, 0),
+        (usize::MAX - 1, 2),
+        (usize::MAX / 3, 1),
+        (0, usize::MAX),
+    ] {
+        assert_eq!(
+            bounded(&[0x01], limits).unwrap_err(),
+            "CBOR limits too large",
+            "{limits:?}"
+        );
+    }
+    assert_eq!(
+        CborValue::parse_with_depth::<Nondet>(&[0x01], usize::MAX).unwrap_err(),
+        "CBOR limits too large"
+    );
+}
+
+#[test]
+fn bounded_reports_scratch_allocation_failure() {
+    // The word count fits usize, but exceeds Vec's byte capacity, so no
+    // allocation is attempted.
+    let max_words = isize::MAX as usize / std::mem::size_of::<usize>();
+    let error = bounded(&[0x01], (0, max_words / 3 + 1)).unwrap_err();
+    assert!(
+        error.starts_with("Failed to allocate CBOR scratch space: "),
+        "{error}"
+    );
+}
+
+#[test]
+fn deterministic_parsing_ignores_nondet_scratch_limits() {
+    let document = [0xa1, 0x01, 0x02];
+    for entries in [0, usize::MAX] {
+        assert_eq!(
+            CborValue::parse_with_limits::<Det>(&document, usize::MAX, entries).unwrap(),
+            CborValue::Map(vec![(CborValue::Int(1), CborValue::Int(2))])
+        );
+    }
 }
 
 /// Bounded parsing agrees with the other parsers on valid input and rejects

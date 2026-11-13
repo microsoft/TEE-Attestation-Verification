@@ -136,9 +136,13 @@ pub trait Backend<'a>: Sized + Copy {
     type MapEntry: Copy;
 
     /// Parse the first item of `input`, passing EverCBOR the limits its
-    /// validator takes.
-    fn parse(input: &'a [u8], max_depth: usize, max_map_entries: usize)
-        -> Option<(Self, &'a [u8])>;
+    /// validator takes. Report invalid limits and scratch allocation failures
+    /// separately from malformed input.
+    fn parse(
+        input: &'a [u8],
+        max_depth: usize,
+        max_map_entries: usize,
+    ) -> Result<(Self, &'a [u8]), String>;
     fn destruct(item: Self) -> RawView<'a, Self>;
     fn to_vec(item: Self) -> Result<Vec<u8>, String>;
 
@@ -192,8 +196,8 @@ mod det_backend {
             input: &'a [u8],
             _max_depth: usize,
             _max_map_entries: usize,
-        ) -> Option<(Self, &'a [u8])> {
-            api::cbor_det_parse(input)
+        ) -> Result<(Self, &'a [u8]), String> {
+            api::cbor_det_parse(input).ok_or_else(|| "Failed to parse CBOR bytes".to_string())
         }
 
         fn destruct(item: Self) -> RawView<'a, Self> {
@@ -303,26 +307,36 @@ mod nondet_backend {
 
         /// Validates within the limits in a single pass, finding duplicate
         /// keys by sorting in scratch space sized by the limits, then parses.
-        /// Input over a limit, or scratch that cannot be allocated, fails like
-        /// malformed input.
         fn parse(
             input: &'a [u8],
             max_depth: usize,
             max_map_entries: usize,
-        ) -> Option<(Self, &'a [u8])> {
+        ) -> Result<(Self, &'a [u8]), String> {
             // EverCBOR counts the maps on a path, a root or empty map
             // included; this crate counts the root at 0 and charges only
             // containers with children. So `max_depth + 1` admits what the
             // tree walk admits.
-            let map_depth_bound = max_depth.checked_add(1)?;
+            let map_depth_bound = max_depth.checked_add(1).ok_or("CBOR limits too large")?;
+            let scratch_len = map_depth_bound
+                .checked_mul(max_map_entries)
+                .and_then(|n| n.checked_mul(3))
+                .ok_or("CBOR limits too large")?;
+            let mut scratch = Vec::<usize>::new();
+            scratch
+                .try_reserve_exact(scratch_len)
+                .map_err(|error| format!("Failed to allocate CBOR scratch space: {error}"))?;
+            scratch.resize(scratch_len, 0);
+
             // A key's map depth is that of the maps inside it: zero rejects
             // any key holding a map.
-            api::cbor_nondet_parse_bounded_sort_alloc(
+            api::cbor_nondet_parse_bounded_sort(
                 map_depth_bound,
                 max_map_entries,
                 Some(0),
+                &mut scratch,
                 input,
             )
+            .ok_or_else(|| "Failed to parse CBOR bytes".to_string())
         }
 
         fn destruct(item: Self) -> RawView<'a, Self> {
@@ -493,6 +507,8 @@ impl<'a> CborValue<'a> {
 
     /// Parse CBOR bytes in the given [`Mode`], rejecting inputs nested deeper
     /// than `max_depth`, within the default map entry limit.
+    ///
+    /// See [`Self::parse_with_limits`] for scratch requirements and errors.
     pub fn parse_with_depth<M: Mode>(bytes: &'a [u8], max_depth: usize) -> Result<Self, String> {
         Self::parse_with_limits::<M>(bytes, max_depth, MAX_CBOR_MAP_ENTRIES)
     }
@@ -510,6 +526,11 @@ impl<'a> CborValue<'a> {
     /// walk names the depth limit when it is the one to reject. [`Det`] mode
     /// ignores `max_map_entries`.
     ///
+    /// In [`Nondet`] mode, limits whose depth offset or scratch word count
+    /// overflows `usize` fail with `"CBOR limits too large"`. Scratch
+    /// allocation failures are reported separately from malformed input.
+    /// In particular, `usize::MAX` is not an unlimited-depth sentinel.
+    ///
     /// The limits are not capped. The defaults, [`MAX_CBOR_NESTING_DEPTH`] and
     /// [`MAX_CBOR_MAP_ENTRIES`], are the recommended limits for untrusted
     /// input: larger ones make it more expensive to parse, in scratch and in
@@ -521,8 +542,7 @@ impl<'a> CborValue<'a> {
         max_depth: usize,
         max_map_entries: usize,
     ) -> Result<Self, String> {
-        let (item, remainder) = <M::Item<'a>>::parse(bytes, max_depth, max_map_entries)
-            .ok_or("Failed to parse CBOR bytes")?;
+        let (item, remainder) = <M::Item<'a>>::parse(bytes, max_depth, max_map_entries)?;
         if !remainder.is_empty() {
             return Err(format!(
                 "Trailing bytes: {} unconsumed byte(s)",
@@ -539,6 +559,8 @@ impl<'a> CborValue<'a> {
     }
 
     /// Parse leniently within `max_depth` and `max_map_entries`.
+    ///
+    /// See [`Self::parse_with_limits`] for scratch requirements and errors.
     pub fn parse_nondet_bounded(
         bytes: &'a [u8],
         max_depth: usize,
