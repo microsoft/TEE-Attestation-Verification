@@ -585,15 +585,24 @@ fn serialization_honours_the_depth_ceiling() {
 
 // --- Bounded parsing ---
 
+/// The preferred head of an item of `major` type whose argument, below 2^16,
+/// is `value`.
+fn head(major: u8, value: usize) -> Vec<u8> {
+    let major = major << 5;
+    match value {
+        0..=23 => vec![major | value as u8],
+        24..=0xff => vec![major | 24, value as u8],
+        _ => {
+            let mut head = vec![major | 25];
+            head.extend_from_slice(&u16::try_from(value).unwrap().to_be_bytes());
+            head
+        }
+    }
+}
+
 /// `{0: 0, 1: 0, ...}` with `entries` entries, in preferred encoding.
 fn flat_map(entries: usize) -> Vec<u8> {
-    let mut document = if entries < 24 {
-        vec![0xa0 | entries as u8]
-    } else {
-        let mut head = vec![0xb9];
-        head.extend_from_slice(&(entries as u16).to_be_bytes());
-        head
-    };
+    let mut document = head(5, entries);
     for key in 0..entries {
         if key >= 256 {
             document.extend_from_slice(&[0x19, (key >> 8) as u8]);
@@ -702,50 +711,59 @@ fn bounded_parsing_honours_the_depth_ceiling_and_clears_its_output() {
     );
 }
 
-/// The 128 KiB fixtures of the `cbor` crate's tests, through the C ABI: maps
-/// at the default entry limit with long-prefixed keys, and two 14-level
-/// nested map keys, each padded with a byte string.
-fn fixture(duplicate: bool, nested_keys: bool) -> Vec<u8> {
-    const LEN: usize = 128 * 1024;
+const FIXTURE_LEN: usize = 128 * 1024;
+
+/// The 128 KiB fixture of the `cbor` crate's tests, through the C ABI: an
+/// array of maps of `entries` entries each with long-prefixed keys, padded
+/// with a byte string. With `duplicate`, the last key of the last map repeats
+/// that map's first key.
+fn large_fixture(entries: usize, duplicate: bool) -> Vec<u8> {
     const KEY_LEN: usize = 23;
-    let entries = cbor::MAX_CBOR_MAP_ENTRIES;
-    let mut document = Vec::with_capacity(LEN);
-    if nested_keys {
-        fn tree(depth: usize, leaf: u8) -> Vec<u8> {
-            if depth == 0 {
-                return vec![leaf];
-            }
-            let mut out = vec![0xa2];
-            out.extend(tree(depth - 1, 0));
-            out.push(0x00);
-            out.extend(tree(depth - 1, 1));
-            out.push(leaf);
-            out
-        }
-        document.push(0x82);
-        document.extend(tree(14, 0));
-    } else {
-        let map_count = (LEN - 1 - 3) / (3 + entries * (1 + KEY_LEN + 1));
-        document.push(0x80 | (map_count + 1) as u8);
-        for map in 0..map_count {
-            document.push(0xb9);
-            document.extend_from_slice(&(entries as u16).to_be_bytes());
-            for entry in 0..entries {
-                let last_of_last = map + 1 == map_count && entry + 1 == entries;
-                let index = if duplicate && last_of_last { 0 } else { entry };
-                document.push(0x40 | KEY_LEN as u8);
-                document.resize(document.len() + KEY_LEN - 2, 0xab);
-                document.extend_from_slice(&(index as u16).to_be_bytes());
-                document.push(0x00);
-            }
+    let map_len = head(5, entries).len() + entries * (1 + KEY_LEN + 1);
+    let map_count = (FIXTURE_LEN - 3 - 3) / map_len;
+    let mut document = Vec::with_capacity(FIXTURE_LEN);
+    document.extend(head(4, map_count + 1));
+    for map in 0..map_count {
+        document.extend(head(5, entries));
+        for entry in 0..entries {
+            let last_of_last = map + 1 == map_count && entry + 1 == entries;
+            let index = if duplicate && last_of_last { 0 } else { entry };
+            document.push(0x40 | KEY_LEN as u8);
+            document.resize(document.len() + KEY_LEN - 2, 0xab);
+            document.extend_from_slice(&(index as u16).to_be_bytes());
+            document.push(0x00);
         }
     }
-    let padding = LEN - document.len() - 3;
+    pad(document)
+}
+
+/// The `cbor` crate's nested-key fixture: 128 KiB holding a map whose two
+/// keys are 14 levels of nested maps, padded with a byte string.
+fn nested_key_fixture() -> Vec<u8> {
+    fn tree(depth: usize, leaf: u8) -> Vec<u8> {
+        if depth == 0 {
+            return vec![leaf];
+        }
+        let mut out = vec![0xa2];
+        out.extend(tree(depth - 1, 0));
+        out.push(0x00);
+        out.extend(tree(depth - 1, 1));
+        out.push(leaf);
+        out
+    }
+    let mut document = vec![0x82];
+    document.extend(tree(14, 0));
+    pad(document)
+}
+
+/// Appends a byte string that brings `document` to [`FIXTURE_LEN`].
+fn pad(mut document: Vec<u8>) -> Vec<u8> {
+    let padding = FIXTURE_LEN - document.len() - 3;
     assert!((256..=u16::MAX as usize).contains(&padding));
     document.push(0x59);
     document.extend_from_slice(&(padding as u16).to_be_bytes());
     document.resize(document.len() + padding, 0);
-    assert_eq!(document.len(), LEN);
+    assert_eq!(document.len(), FIXTURE_LEN);
     document
 }
 
@@ -758,29 +776,28 @@ fn deep_array_fixture() -> Vec<u8> {
     document
 }
 
-/// The fixtures parse, or are rejected, in time through the C ABI.
+/// The fixtures parse, or are rejected, in time through the C ABI within the
+/// default limits.
 #[test]
 #[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
 fn bounded_parsing_meets_the_deadline_through_the_abi() {
     const DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+    let (depth, entries) = (cbor::MAX_CBOR_NESTING_DEPTH, cbor::MAX_CBOR_MAP_ENTRIES);
     let (valid, control, nested_keys) = (
-        fixture(false, false),
-        fixture(true, false),
-        fixture(false, true),
+        large_fixture(entries, false),
+        large_fixture(entries, true),
+        nested_key_fixture(),
     );
     let deep_arrays = deep_array_fixture();
-    let entries = cbor::MAX_CBOR_MAP_ENTRIES;
 
     let start = std::time::Instant::now();
-    let handle = decode_bounded(&valid, MAX_DEPTH_LIMIT, entries).unwrap();
-    assert!(decode_bounded(&control, MAX_DEPTH_LIMIT, entries).is_err());
-    assert!(decode_bounded(&nested_keys, MAX_DEPTH_LIMIT, entries).is_err());
-    // At the default depth: the walk costs a pass over the input per level.
-    assert!(
-        decode_bounded(&deep_arrays, cbor::MAX_CBOR_NESTING_DEPTH, entries)
-            .unwrap_err()
-            .contains("Maximum CBOR nesting depth")
-    );
+    let handle = decode_bounded(&valid, depth, entries).unwrap();
+    assert!(decode_bounded(&control, depth, entries).is_err());
+    assert!(decode_bounded(&nested_keys, depth, entries).is_err());
+    // The walk costs a pass over the input for each level of the depth limit.
+    assert!(decode_bounded(&deep_arrays, depth, entries)
+        .unwrap_err()
+        .contains("Maximum CBOR nesting depth"));
     let elapsed = start.elapsed();
     assert!(elapsed <= DEADLINE, "took {elapsed:?}");
 
@@ -792,6 +809,95 @@ fn bounded_parsing_meets_the_deadline_through_the_abi() {
     );
     assert!(size > 16);
     unsafe { tav_cbor_free(handle) };
+}
+
+/// The `cbor` crate's map fixture at the hard caps: [`MAX_DEPTH_LIMIT`] nested
+/// maps of [`MAX_MAP_ENTRIES_LIMIT`] entries around an empty map, each the
+/// value of its parent's last key. The validator sorts a full map at every
+/// level of its scratch. About 47 KiB.
+fn hard_cap_maps_fixture() -> Vec<u8> {
+    // A map whose last value is whatever follows it.
+    let mut open = flat_map(MAX_MAP_ENTRIES_LIMIT);
+    open.pop();
+    let mut document = open.repeat(MAX_DEPTH_LIMIT);
+    document.push(0xa0);
+    document
+}
+
+/// [`hard_cap_maps_fixture`] with the outermost map's last key repeating the
+/// one before it, which the validator finds last.
+fn hard_cap_maps_duplicate_control() -> Vec<u8> {
+    let mut document = hard_cap_maps_fixture();
+    // The key is a 0x18 head and one byte, and ends where its value starts.
+    let value = flat_map(MAX_MAP_ENTRIES_LIMIT).len() - 1;
+    assert_eq!(
+        document[value - 2..value],
+        [0x18, (MAX_MAP_ENTRIES_LIMIT - 1) as u8]
+    );
+    document[value - 1] = (MAX_MAP_ENTRIES_LIMIT - 2) as u8;
+    document
+}
+
+/// The `cbor` crate's array fixture at the hard caps: [`MAX_DEPTH_LIMIT`]
+/// nested arrays, the innermost holding the zeros that bring the document to
+/// 64 KiB, the longest protected header or UVM endorsement that COSE and CACI
+/// verification parse.
+fn hard_cap_arrays_fixture() -> Vec<u8> {
+    const LEN: usize = 64 * 1024;
+    let mut document = vec![0x81; MAX_DEPTH_LIMIT - 1];
+    let items = LEN - document.len() - 3;
+    document.extend(head(4, items));
+    document.resize(document.len() + items, 0x00);
+    assert_eq!(document.len(), LEN);
+    document
+}
+
+/// The `cbor` crate's fixtures at the hard caps parse, or are rejected, in
+/// time through the C ABI, however much more the caller asks for, and neither
+/// limit can be one lower.
+#[test]
+#[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
+fn bounded_parsing_meets_the_deadline_at_the_hard_caps_through_the_abi() {
+    // Generous for a debug build, where the fixtures take about 3 s.
+    const DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+    let (depth, entries) = (MAX_DEPTH_LIMIT, MAX_MAP_ENTRIES_LIMIT);
+    let (maps, control, arrays) = (
+        hard_cap_maps_fixture(),
+        hard_cap_maps_duplicate_control(),
+        hard_cap_arrays_fixture(),
+    );
+    let deep_arrays = deep_array_fixture();
+    let (valid, valid_control) = (large_fixture(entries, false), large_fixture(entries, true));
+
+    let start = std::time::Instant::now();
+    // Asking for more than the hard caps parses within them.
+    let parsed = [&maps, &arrays, &valid]
+        .map(|document| decode_bounded(document, usize::MAX, usize::MAX).unwrap());
+    assert_eq!(
+        decode_bounded(&control, depth, entries).unwrap_err(),
+        "Failed to parse CBOR bytes"
+    );
+    assert!(decode_bounded(&valid_control, depth, entries).is_err());
+    assert!(decode_bounded(&deep_arrays, usize::MAX, entries)
+        .unwrap_err()
+        .contains("Maximum CBOR nesting depth"));
+    let elapsed = start.elapsed();
+    println!("at the hard caps, the fixtures took {elapsed:?} through the C ABI");
+    assert!(elapsed <= DEADLINE, "took {elapsed:?}");
+
+    for (handle, document) in parsed.into_iter().zip([&maps, &arrays, &valid]) {
+        assert_eq!(&encode_det(handle).unwrap(), document);
+        unsafe { tav_cbor_free(handle) };
+    }
+    // Neither limit can be one lower, so the defaults reject the fixtures.
+    assert!(decode_bounded(&maps, depth - 1, entries).is_err());
+    assert!(decode_bounded(&maps, depth, entries - 1).is_err());
+    for document in [&maps, &valid] {
+        assert!(decode(document, cbor::MAX_CBOR_NESTING_DEPTH, false).is_err());
+    }
+    // One more map is over the depth cap, however much the caller asks for.
+    let deeper = [&[0xa1, 0x00][..], &maps].concat();
+    assert!(decode_bounded(&deeper, usize::MAX, usize::MAX).is_err());
 }
 
 // --- Inspection ---

@@ -19,23 +19,27 @@
 //!
 //! Both modes reject floating-point values, indefinite-length encodings,
 //! invalid UTF-8, duplicate map keys, integers outside the range of `i64`,
-//! and nesting deeper than a depth limit. [`Nondet`] parsing also rejects maps
-//! with more than a map entry limit, default [`MAX_CBOR_MAP_ENTRIES`], and
-//! maps inside map keys: EverCBOR checks the limits in a single pass over the
-//! input and finds duplicate keys by sorting, so validation costs time bounded
-//! by the input length and the limits.
+//! and nesting deeper than a depth limit, default [`MAX_CBOR_NESTING_DEPTH`].
+//! [`Nondet`] parsing also rejects maps with more than a map entry limit,
+//! default [`MAX_CBOR_MAP_ENTRIES`], and maps inside map keys: EverCBOR checks
+//! the limits in a single pass over the input and finds duplicate keys by
+//! sorting, so validation costs time bounded by the input length and the
+//! limits.
 //!
-//! Nothing here bounds the input length. After validation, building the
-//! [`CborValue`] tree skips over each child of every array and map to reach
-//! the next, so an item is walked once for each array or map it is nested in,
-//! and parsing can cost time proportional to the depth limit times the input
-//! length. Bound the length of untrusted input before parsing it.
+//! The defaults are the recommended limits for untrusted input.
+//! [`CborValue::parse_with_limits`] takes others. This crate applies no hard
+//! cap to them; the C ABI does. Larger limits make untrusted input more
+//! expensive to parse, so do not raise them for it:
 //!
-//! Each [`Nondet`] parse allocates and zeroes the scratch it sorts in, sized by
-//! its limits whatever the input length; see
-//! [`CborValue::parse_with_limits`]. The defaults, [`MAX_CBOR_NESTING_DEPTH`]
-//! and [`MAX_CBOR_MAP_ENTRIES`], are the recommended limits for untrusted
-//! input.
+//! - After validation, building the [`CborValue`] tree skips over each child
+//!   of every array and map to reach the next, so an item is walked once for
+//!   each array or map it is nested in, and parsing can cost time
+//!   proportional to the depth limit times the input length.
+//! - Each [`Nondet`] parse allocates and zeroes the scratch it sorts in,
+//!   `3 * (max_depth + 1) * max_map_entries` words whatever the input length.
+//!
+//! Nothing here bounds the input length: bound the length of untrusted input
+//! before parsing it.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive
@@ -51,17 +55,18 @@
 
 use std::borrow::Cow;
 
-/// Default maximum nesting depth for CBOR parse and serialization.
+/// Default maximum nesting depth for CBOR parse and serialization, and the
+/// recommended one for untrusted input.
 ///
 /// Depth 0 is the root item. Containers (arrays, maps, and tags) increment the
 /// depth of their children, so an empty container is depth 0 like any other
 /// leaf. This bounds the recursion depth reached while walking untrusted
 /// input.
-pub const MAX_CBOR_NESTING_DEPTH: usize = 64;
+pub const MAX_CBOR_NESTING_DEPTH: usize = 16;
 
 /// Default maximum number of key/value pairs in any CBOR map, at any level,
-/// for [`Nondet`] parsing.
-pub const MAX_CBOR_MAP_ENTRIES: usize = 256;
+/// for [`Nondet`] parsing, and the recommended one for untrusted input.
+pub const MAX_CBOR_MAP_ENTRIES: usize = 128;
 
 /// Bound passed to EverCBOR's serialized-size estimator.
 const SIZE_BOUND: usize = usize::MAX;
@@ -500,16 +505,17 @@ impl<'a> CborValue<'a> {
     /// checking the limits in a single pass and finding duplicate keys by
     /// sorting, so validation costs time bounded by the input length and the
     /// limits. It sorts in `3 * (max_depth + 1) * max_map_entries` words of
-    /// scratch, allocated and zeroed on every call whatever the input length:
-    /// the defaults, [`MAX_CBOR_NESTING_DEPTH`] and [`MAX_CBOR_MAP_ENTRIES`],
-    /// are the recommended limits for untrusted input.
+    /// scratch, allocated and zeroed on every call whatever the input length.
     /// Input EverCBOR rejects fails with the generic parse error; the tree
     /// walk names the depth limit when it is the one to reject. [`Det`] mode
     /// ignores `max_map_entries`.
     ///
-    /// The input length is not bounded, and the tree walk can cost time
-    /// proportional to `max_depth` times that length: bound the length of
-    /// untrusted input first.
+    /// The limits are not capped. The defaults, [`MAX_CBOR_NESTING_DEPTH`] and
+    /// [`MAX_CBOR_MAP_ENTRIES`], are the recommended limits for untrusted
+    /// input: larger ones make it more expensive to parse, in scratch and in
+    /// the tree walk, which can cost time proportional to `max_depth` times
+    /// the input length. The input length is not bounded either: bound the
+    /// length of untrusted input first.
     pub fn parse_with_limits<M: Mode>(
         bytes: &'a [u8],
         max_depth: usize,

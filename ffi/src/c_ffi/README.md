@@ -94,19 +94,31 @@ tav_cbor_free(child);
 Byte and text accessors return borrowed views. Keep the backing storage alive
 while using a view. For handle-owned payloads, keep the accessor's handle alive.
 
-Non-deterministic parsing caps the entries of every map at
-`TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` (256) and rejects maps inside map keys, which
-bounds validation time by the input length and the limits;
-`tav_cbor_nondet_parse_bounded` takes the entry limit explicitly.
+## CBOR limits
 
-No parser bounds the input length, and parsing can cost time proportional to
-the depth limit times the input length: bound the length of untrusted input
-before parsing it. Each non-deterministic parse also allocates scratch sized by
-its limits, so `TAV_CBOR_DEFAULT_MAX_DEPTH` (64) with the default entry limit is
-recommended for untrusted input; `cbor.h` gives the sizes. The C++ wrapper
-defaults to both. COSE and CACI verification bound what they parse themselves:
-protected headers at `TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements
-at `TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 64 KiB.
+| Limit | Default | Hard cap |
+| --- | --- | --- |
+| Nesting depth, `max_depth` | `TAV_CBOR_DEFAULT_MAX_DEPTH` (16) | `TAV_CBOR_MAX_DEPTH` (64) |
+| Key/value pairs in any map, `max_map_entries` | `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` (128) | `TAV_CBOR_MAX_MAP_ENTRIES` (256) |
+
+Every parser and serializer takes `max_depth`. Non-deterministic parsing also
+caps the entries of every map and rejects maps inside map keys, which bounds
+validation time by the input length and the limits: `tav_cbor_nondet_parse`
+applies the default entry limit, and `tav_cbor_nondet_parse_bounded` takes the
+limit explicitly. A request above a hard cap is clamped to it. The C++ wrapper
+applies both defaults unless told otherwise, and COSE and CACI verification
+parse within them.
+
+Keep the defaults for untrusted input, and bound its length before parsing it,
+since no parser does. Larger limits make untrusted input more expensive to
+parse, so do not raise them for it: parsing can cost time proportional to the
+depth limit times the input length, and each non-deterministic parse allocates
+scratch sized by its limits, whatever the input length. Expect a document
+nested to the hard cap to take up to four times as long to parse as one nested
+to the default; `cbor.h` gives the scratch sizes. COSE and CACI verification
+bound what they parse themselves: protected headers at
+`TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements at
+`TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 64 KiB.
 
 ## SNP verification
 

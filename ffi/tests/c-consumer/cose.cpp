@@ -240,21 +240,22 @@ TEST_CASE("cbor: failed reads preserve scalars and borrowed views but clear owne
 }
 
 TEST_CASE("cbor: parsing and owned serialization enforce the requested depth") {
-    for (size_t depth : {64u, 65u}) {
+    const size_t limit = TAV_CBOR_DEFAULT_MAX_DEPTH;
+    for (size_t depth : {limit, limit + 1}) {
         std::vector<uint8_t> input(depth, 0x81);
         input.push_back(0);
         CborHandle root;
-        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), 64, root.out());
-        if (depth == 64) {
+        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), limit, root.out());
+        if (depth == limit) {
             REQUIRE(error == nullptr);
         } else {
             check_error(error, TAV_ERROR_CBOR_DECODE_FAILED);
             CHECK(root.value == nullptr);
         }
-        REQUIRE(tav_cbor_nondet_parse(input.data(), input.size(), 65, root.out()) == nullptr);
+        REQUIRE(tav_cbor_nondet_parse(input.data(), input.size(), limit + 1, root.out()) == nullptr);
         TavByteBuffer *bytes = reinterpret_cast<TavByteBuffer *>(0x1);
-        error = tav_cbor_det_serialize(root.value, 64, &bytes);
-        if (depth == 64) {
+        error = tav_cbor_det_serialize(root.value, limit, &bytes);
+        if (depth == limit) {
             REQUIRE(error == nullptr);
             CHECK(tav_byte_buffer_len(bytes) == input.size());
             CHECK(std::memcmp(tav_byte_buffer_data(bytes), input.data(), input.size()) == 0);
@@ -263,10 +264,25 @@ TEST_CASE("cbor: parsing and owned serialization enforce the requested depth") {
             CHECK(bytes == nullptr);
         }
         tav_byte_buffer_free(bytes);
-        REQUIRE(tav_cbor_det_serialize(root.value, 65, &bytes) == nullptr);
+        REQUIRE(tav_cbor_det_serialize(root.value, limit + 1, &bytes) == nullptr);
         CHECK(tav_byte_buffer_len(bytes) == input.size());
         CHECK(std::memcmp(tav_byte_buffer_data(bytes), input.data(), input.size()) == 0);
         tav_byte_buffer_free(bytes);
+    }
+
+    // A larger request is clamped to the hard cap.
+    const size_t cap = TAV_CBOR_MAX_DEPTH;
+    for (size_t depth : {cap, cap + 1}) {
+        std::vector<uint8_t> input(depth, 0x81);
+        input.push_back(0);
+        CborHandle root;
+        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), SIZE_MAX, root.out());
+        if (depth == cap) {
+            REQUIRE(error == nullptr);
+        } else {
+            check_error(error, TAV_ERROR_CBOR_DECODE_FAILED);
+            CHECK(root.value == nullptr);
+        }
     }
 }
 

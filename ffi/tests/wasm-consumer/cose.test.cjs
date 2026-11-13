@@ -33,23 +33,39 @@ test('maps inside keys and maps over the entry limit are rejected', () => {
   // {{1: 2, 3: 4}: 7}
   assertStringError(() => pkg.CborValue.from_bytes(Uint8Array.of(0xa1, 0xa2, 1, 2, 3, 4, 7)));
 
-  // {0: 0, 1: 0, ...} in preferred encoding: 256 entries parse, 257 do not.
+  // {0: 0, 1: 0, ...} in preferred encoding: the default entry limit parses,
+  // one entry more does not.
   const flatMap = (entries) => {
-    const bytes = [0xb9, entries >> 8, entries & 0xff];
+    // Both sizes take a one-byte length, and every key a one-byte value.
+    assert.ok(entries >= 24 && entries <= 255);
+    const bytes = [0xb8, entries];
     for (let key = 0; key < entries; key++) {
-      if (key >= 256) {
-        bytes.push(0x19, key >> 8);
-      } else if (key >= 24) {
+      if (key >= 24) {
         bytes.push(0x18);
       }
-      bytes.push(key & 0xff, 0x00);
+      bytes.push(key, 0x00);
     }
     return Uint8Array.from(bytes);
   };
-  const atLimit = pkg.CborValue.from_bytes(flatMap(256));
-  assert.equal(atLimit.len(), 256);
+  const limit = cHeaderLimit('cbor.h', 'TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES');
+  const atLimitBytes = flatMap(limit);
+  const atLimit = pkg.CborValue.from_bytes(atLimitBytes);
+  assert.equal(atLimit.len(), limit);
+  assert.deepEqual(Array.from(atLimit.to_bytes()), Array.from(atLimitBytes));
   atLimit.free();
-  assertStringError(() => pkg.CborValue.from_bytes(flatMap(257)));
+  assertStringError(() => pkg.CborValue.from_bytes(flatMap(limit + 1)));
+});
+
+test('nesting past the default depth is rejected', () => {
+  // One-element arrays nested to the default depth parse and serialize; one
+  // level deeper does not.
+  const nested = (levels) => Uint8Array.from([...new Array(levels).fill(0x81), 0x01]);
+  const limit = cHeaderLimit('cbor.h', 'TAV_CBOR_DEFAULT_MAX_DEPTH');
+  const atLimitBytes = nested(limit);
+  const atLimit = pkg.CborValue.from_bytes(atLimitBytes);
+  assert.deepEqual(Array.from(atLimit.to_bytes()), Array.from(atLimitBytes));
+  atLimit.free();
+  assertStringError(() => pkg.CborValue.from_bytes(nested(limit + 1)));
 });
 
 test('cbor accessors decode scalars, containers, tags, and COSE_Sign1', () => {

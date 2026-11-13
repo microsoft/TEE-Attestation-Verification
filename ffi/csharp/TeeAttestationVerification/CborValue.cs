@@ -7,14 +7,15 @@ namespace TeeAttestationVerification;
 /// <remarks>
 /// Navigation returns independently owned views that share the parsed document.
 /// Dispose every returned value. Byte and text results are managed copies.
-/// Parsing rejects nesting deeper than 64 levels, maps with more than 256
-/// key/value pairs, and maps inside map keys. It can cost time proportional to
-/// the nesting depth times the input length, so bound the length of untrusted
-/// input before parsing it.
+/// Parsing rejects nesting deeper than 16 levels, maps with more than 128
+/// key/value pairs, and maps inside map keys. These are the native library's
+/// default limits, recommended for untrusted input; this binding offers no
+/// larger ones. Parsing can cost time proportional to the nesting depth times
+/// the input length, so bound the length of untrusted input before parsing it.
 /// </remarks>
 public sealed class CborValue : IDisposable
 {
-    private const nuint MaximumDepth = 64;
+    private const nuint MaximumDepth = 16;
     private readonly object _sync = new();
     private readonly SafeCborValueHandle _handle;
 

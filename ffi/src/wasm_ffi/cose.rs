@@ -38,10 +38,11 @@ impl CborValue {
 impl CborValue {
     /// Parse a CBOR document from bytes.
     ///
-    /// Rejects nesting deeper than 64 levels, maps with more than 256 entries,
-    /// and maps inside map keys. Parsing can cost time proportional to the
-    /// nesting depth times the input length, so bound the length of untrusted
-    /// input before parsing it.
+    /// Rejects nesting deeper than 16 levels, maps with more than 128 entries,
+    /// and maps inside map keys. These are the default limits, recommended for
+    /// untrusted input; this binding offers no larger ones. Parsing can cost
+    /// time proportional to the nesting depth times the input length, so
+    /// bound the length of untrusted input before parsing it.
     pub fn from_bytes(bytes: &[u8]) -> Result<CborValue, String> {
         cose::CborValue::parse_nondet(bytes).map(CborValue::from_native)
     }

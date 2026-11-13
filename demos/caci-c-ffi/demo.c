@@ -427,7 +427,8 @@ static void print_uvm_endorsement(const TavCborHandle *uvm_endorsement) {
         tav_cbor_as_bytes(protected_value, &protected_bytes, &protected_len),
         "borrow UVM protected header bytes");
     check_cose_error(
-        tav_cbor_nondet_parse(protected_bytes, protected_len, 64, &protected_header),
+        tav_cbor_nondet_parse(
+            protected_bytes, protected_len, TAV_CBOR_DEFAULT_MAX_DEPTH, &protected_header),
         "parse UVM protected header");
 
     check_cose_error(tav_cbor_make_signed(TAV_COSE_HEADER_CONTENT_TYPE, &key), "make content type key");

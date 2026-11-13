@@ -24,20 +24,23 @@
 //!
 //! # Limits
 //!
-//! Parsing and serialization reject nesting deeper than [`MAX_DEPTH_LIMIT`],
-//! whatever depth the caller asks for. Non-deterministic parsing also rejects
-//! maps with more than [`cbor::MAX_CBOR_MAP_ENTRIES`] entries and maps inside
-//! map keys; `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly,
-//! at most [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these limits. Callers must bound the depth they build. Copying,
-//! materializing, or dropping an extremely deep value can exhaust the process
-//! stack and abort.
+//! Parsing and serialization reject nesting deeper than the depth the caller
+//! asks for, and deeper than [`MAX_DEPTH_LIMIT`], the hard cap, whatever that
+//! depth is. Non-deterministic parsing also rejects maps with more than
+//! [`cbor::MAX_CBOR_MAP_ENTRIES`] entries and maps inside map keys;
+//! `tav_cbor_nondet_parse_bounded` takes the entry limit explicitly, up to
+//! its hard cap, [`MAX_MAP_ENTRIES_LIMIT`]. Builders do not enforce these
+//! limits. Callers must bound the depth they build. Copying, materializing,
+//! or dropping an extremely deep value can exhaust the process stack and
+//! abort.
 //!
-//! No parser bounds the input length. Parsing can cost time proportional to
-//! the depth limit times the input length, so callers bound the length of
-//! untrusted input. Each non-deterministic parse also allocates scratch sized
-//! by its limits, whatever the input length, so a depth of
-//! [`cbor::MAX_CBOR_NESTING_DEPTH`] with [`cbor::MAX_CBOR_MAP_ENTRIES`] is
-//! recommended for untrusted input.
+//! The defaults, a depth of [`cbor::MAX_CBOR_NESTING_DEPTH`] with
+//! [`cbor::MAX_CBOR_MAP_ENTRIES`] entries, are recommended for untrusted
+//! input. No parser bounds the input length, so callers bound the length of
+//! untrusted input. Larger limits make it more expensive to parse, so callers
+//! should not raise them for it: parsing can cost time proportional to the
+//! depth limit times the input length, and each non-deterministic parse
+//! allocates scratch sized by its limits, whatever the input length.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -61,14 +64,14 @@ pub const KIND_MAP: i32 = 4;
 pub const KIND_TAGGED: i32 = 5;
 pub const KIND_SIMPLE: i32 = 6;
 
-/// Ceiling on the depth a caller may request, bounding recursion in the
+/// Hard cap on the depth a caller may request, bounding recursion in the
 /// parser and serializer so that deeply nested input cannot overflow the
-/// stack.
-pub const MAX_DEPTH_LIMIT: usize = 256;
+/// stack, and how long parsing it can take.
+pub const MAX_DEPTH_LIMIT: usize = 64;
 
-/// Ceiling on the map entry limit a caller may request, bounding the scratch
+/// Hard cap on the map entry limit a caller may request, bounding the scratch
 /// space bounded parsing allocates per call.
-pub const MAX_MAP_ENTRIES_LIMIT: usize = 1024;
+pub const MAX_MAP_ENTRIES_LIMIT: usize = 256;
 
 /// An opaque, independently owned view into an immutable CBOR document.
 pub type TavCborHandle = CborView;

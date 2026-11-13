@@ -21,24 +21,28 @@
 //
 // Failures throw tav::Exception with the C ABI's tav::ErrorCode and message.
 //
-// Nesting:
+// Limits:
 // - max_depth defaults to DEFAULT_MAX_DEPTH for parsing and serialization, and
-//   can be raised to MAX_DEPTH, the ceiling. Neither limits builders. Callers
-//   must bound the depth they build. Copying, materializing, or destroying an
-//   extremely deep Value can exhaust the process stack and abort.
+//   can be raised to MAX_DEPTH, the hard cap. Neither limits builders.
+//   Callers must bound the depth they build. Copying, materializing, or
+//   destroying an extremely deep Value can exhaust the process stack and
+//   abort.
 // - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
 //   and maps inside map keys; nondet_parse_bounded takes the entry limit
-//   explicitly. det_parse and serialization apply neither.
+//   explicitly, up to MAX_MAP_ENTRIES, the hard cap. det_parse and
+//   serialization apply neither.
 //
 // Untrusted input:
-// - No parser bounds the input length, and parsing can cost time proportional
-//   to max_depth times the input length, deeply nested arrays being the worst
-//   case. Bound the length of untrusted input before parsing it.
+// - Keep the defaults, and bound the length of the input before parsing it,
+//   since no parser does. Larger limits make untrusted input more expensive
+//   to parse, so do not raise them for it.
+// - Parsing can cost time proportional to max_depth times the input length:
+//   expect a document nested to MAX_DEPTH to take up to four times as long as
+//   one nested to DEFAULT_MAX_DEPTH.
 // - Every nondet parse allocates and zeroes
 //   3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever
-//   the input length: about 0.4 MB at the defaults on a 64-bit target, and
-//   about 6.3 MB at MAX_DEPTH with MAX_MAP_ENTRIES. The defaults are the
-//   recommended limits for untrusted input.
+//   the input length: about 52 KB at the defaults on a 64-bit target, and
+//   about 0.4 MB at MAX_DEPTH with MAX_MAP_ENTRIES.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -54,14 +58,15 @@
 
 namespace tav::cbor
 {
-/// Ceiling on nesting depth for parsing and serialization.
+/// Hard cap on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
 
-/// Nesting depth parsing and serialization allow unless told otherwise.
+/// Nesting depth parsing and serialization allow unless told otherwise,
+/// recommended for untrusted input.
 constexpr size_t DEFAULT_MAX_DEPTH = TAV_CBOR_DEFAULT_MAX_DEPTH;
 
-/// Ceiling on the map entry limit of nondet_parse_bounded, and the limit
-/// nondet_parse applies.
+/// Hard cap on the map entry limit of nondet_parse_bounded, and the limit
+/// nondet_parse applies, recommended for untrusted input.
 constexpr size_t MAX_MAP_ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES;
 constexpr size_t DEFAULT_MAX_MAP_ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
 

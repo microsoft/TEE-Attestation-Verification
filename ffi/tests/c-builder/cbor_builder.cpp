@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -747,20 +748,30 @@ TEST_CASE("cbor handle: serialization stops one level past the depth limit")
 
 namespace {
 
+// The preferred head of an item of `major` type whose argument, below 2^16,
+// is `value`.
+std::vector<uint8_t> head(uint8_t major, size_t value)
+{
+    const uint8_t type = static_cast<uint8_t>(major << 5);
+    if (value < 24)
+    {
+        return {static_cast<uint8_t>(type | value)};
+    }
+    if (value <= 0xff)
+    {
+        return {static_cast<uint8_t>(type | 24), static_cast<uint8_t>(value)};
+    }
+    REQUIRE(value <= 0xffff);
+    return {
+      static_cast<uint8_t>(type | 25),
+      static_cast<uint8_t>(value >> 8),
+      static_cast<uint8_t>(value)};
+}
+
 // {0: 0, 1: 0, ...} with `entries` entries, in preferred encoding.
 std::vector<uint8_t> flat_map(size_t entries)
 {
-    std::vector<uint8_t> document;
-    if (entries < 24)
-    {
-        document.push_back(static_cast<uint8_t>(0xa0 | entries));
-    }
-    else
-    {
-        document.insert(
-          document.end(),
-          {0xb9, static_cast<uint8_t>(entries >> 8), static_cast<uint8_t>(entries)});
-    }
+    std::vector<uint8_t> document = head(5, entries);
     for (size_t key = 0; key < entries; ++key)
     {
         if (key >= 256)
@@ -791,26 +802,23 @@ std::vector<uint8_t> pad(std::vector<uint8_t> document)
     return document;
 }
 
-// An array of maps at the default entry limit with long-prefixed keys. With
-// `duplicate`, the last key of the last map repeats that map's first key.
-std::vector<uint8_t> large_fixture(bool duplicate)
+// An array of maps of `entries` entries each with long-prefixed keys, padded
+// to 128 KiB. With `duplicate`, the last key of the last map repeats that
+// map's first key.
+std::vector<uint8_t> large_fixture(size_t entries, bool duplicate)
 {
     constexpr size_t key_len = 23;
-    constexpr size_t map_count =
-      (128 * 1024 - 1 - 3) / (3 + DEFAULT_MAX_MAP_ENTRIES * (1 + key_len + 1));
-    static_assert(map_count + 1 < 24);
-    std::vector<uint8_t> document{static_cast<uint8_t>(0x80 | (map_count + 1))};
+    const std::vector<uint8_t> map_head = head(5, entries);
+    // Room for the heads of the array and the padding.
+    const size_t map_count =
+      (128 * 1024 - 3 - 3) / (map_head.size() + entries * (1 + key_len + 1));
+    std::vector<uint8_t> document = head(4, map_count + 1);
     for (size_t map = 0; map < map_count; ++map)
     {
-        document.insert(
-          document.end(),
-          {0xb9,
-           static_cast<uint8_t>(DEFAULT_MAX_MAP_ENTRIES >> 8),
-           static_cast<uint8_t>(DEFAULT_MAX_MAP_ENTRIES)});
-        for (size_t entry = 0; entry < DEFAULT_MAX_MAP_ENTRIES; ++entry)
+        document.insert(document.end(), map_head.begin(), map_head.end());
+        for (size_t entry = 0; entry < entries; ++entry)
         {
-            const bool last_of_last =
-              map + 1 == map_count && entry + 1 == DEFAULT_MAX_MAP_ENTRIES;
+            const bool last_of_last = map + 1 == map_count && entry + 1 == entries;
             const size_t index = duplicate && last_of_last ? 0 : entry;
             document.push_back(static_cast<uint8_t>(0x40 | key_len));
             document.insert(document.end(), key_len - 2, 0xab);
@@ -854,6 +862,51 @@ std::vector<uint8_t> deep_array_fixture()
 {
     std::vector<uint8_t> document(8 * 1024 - 1, 0x81);
     document.push_back(0x00);
+    return document;
+}
+
+// MAX_DEPTH nested maps of MAX_MAP_ENTRIES entries around an empty map, each
+// the value of its parent's last key. The validator sorts a full map at every
+// level of its scratch. About 47 KiB.
+std::vector<uint8_t> hard_cap_maps_fixture()
+{
+    // A map whose last value is whatever follows it.
+    std::vector<uint8_t> open = flat_map(MAX_MAP_ENTRIES);
+    open.pop_back();
+    std::vector<uint8_t> document;
+    for (size_t level = 0; level < MAX_DEPTH; ++level)
+    {
+        document.insert(document.end(), open.begin(), open.end());
+    }
+    document.push_back(0xa0);
+    return document;
+}
+
+// hard_cap_maps_fixture with the outermost map's last key repeating the one
+// before it, which the validator finds last.
+std::vector<uint8_t> hard_cap_maps_duplicate_control()
+{
+    std::vector<uint8_t> document = hard_cap_maps_fixture();
+    // The key is a 0x18 head and one byte, and ends where its value starts.
+    const size_t value = flat_map(MAX_MAP_ENTRIES).size() - 1;
+    REQUIRE(document[value - 2] == 0x18);
+    REQUIRE(document[value - 1] == MAX_MAP_ENTRIES - 1);
+    document[value - 1] = static_cast<uint8_t>(MAX_MAP_ENTRIES - 2);
+    return document;
+}
+
+// MAX_DEPTH nested arrays, the innermost holding the zeros that bring the
+// document to 64 KiB, the longest protected header or UVM endorsement that
+// COSE and CACI verification parse.
+std::vector<uint8_t> hard_cap_arrays_fixture()
+{
+    constexpr size_t len = 64 * 1024;
+    std::vector<uint8_t> document(MAX_DEPTH - 1, 0x81);
+    const size_t items = len - document.size() - 3;
+    const std::vector<uint8_t> items_head = head(4, items);
+    document.insert(document.end(), items_head.begin(), items_head.end());
+    document.insert(document.end(), items, 0x00);
+    REQUIRE(document.size() == len);
     return document;
 }
 
@@ -958,8 +1011,8 @@ TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial f
 {
     using Clock = std::chrono::steady_clock;
     constexpr auto deadline = std::chrono::seconds(2);
-    const std::vector<uint8_t> fixture = large_fixture(false);
-    const std::vector<uint8_t> control = large_fixture(true);
+    const std::vector<uint8_t> fixture = large_fixture(DEFAULT_MAX_MAP_ENTRIES, false);
+    const std::vector<uint8_t> control = large_fixture(DEFAULT_MAX_MAP_ENTRIES, true);
     const std::vector<uint8_t> nested_keys = nested_key_fixture();
     const std::vector<uint8_t> deep_arrays = deep_array_fixture();
 
@@ -977,6 +1030,68 @@ TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial f
     {
         CHECK(parsed.array_at(i).size() == DEFAULT_MAX_MAP_ENTRIES);
     }
+}
+
+TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline at the hard caps")
+{
+    using Clock = std::chrono::steady_clock;
+    // Generous for the unoptimized library this suite links, where the
+    // fixtures take about 3 s.
+    constexpr auto deadline = std::chrono::seconds(15);
+    // The message of the decode failure that parsing `raw` at the hard caps
+    // ends in.
+    const auto failure = [](const std::vector<uint8_t>& raw) -> std::string {
+        try
+        {
+            (void)nondet_parse_bounded(raw, MAX_DEPTH, MAX_MAP_ENTRIES);
+        }
+        catch (const Exception& error)
+        {
+            CHECK(error.code() == ErrorCode::CBOR_DECODE_FAILED);
+            return error.what();
+        }
+        return "parsed";
+    };
+
+    const std::vector<uint8_t> maps = hard_cap_maps_fixture();
+    const std::vector<uint8_t> control = hard_cap_maps_duplicate_control();
+    const std::vector<uint8_t> arrays = hard_cap_arrays_fixture();
+    const std::vector<uint8_t> deep_arrays = deep_array_fixture();
+    const std::vector<uint8_t> fixture = large_fixture(MAX_MAP_ENTRIES, false);
+    const std::vector<uint8_t> fixture_control = large_fixture(MAX_MAP_ENTRIES, true);
+
+    const auto start = Clock::now();
+    // Asking for more than the hard caps parses within them.
+    const Value parsed_maps = nondet_parse_bounded(maps, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1);
+    const Value parsed_arrays = nondet_parse_bounded(arrays, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1);
+    const Value parsed_fixture = nondet_parse_bounded(fixture, MAX_DEPTH, MAX_MAP_ENTRIES);
+    CHECK(failure(control) == "Failed to parse CBOR bytes");
+    CHECK(failure(fixture_control) == "Failed to parse CBOR bytes");
+    CHECK(failure(deep_arrays) == "Maximum CBOR nesting depth exceeded");
+    const auto elapsed = Clock::now() - start;
+    CHECK(elapsed <= deadline);
+    MESSAGE(
+      "at the hard caps, the fixtures took "
+      << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms");
+
+    CHECK(parsed_maps.det_serialize(MAX_DEPTH) == maps);
+    CHECK(parsed_arrays.det_serialize(MAX_DEPTH) == arrays);
+    CHECK(parsed_fixture.det_serialize() == fixture);
+    // Neither limit can be one lower, so the defaults reject the fixtures.
+    expect_error(
+      [&] { (void)nondet_parse_bounded(maps, MAX_DEPTH - 1, MAX_MAP_ENTRIES); },
+      ErrorCode::CBOR_DECODE_FAILED);
+    expect_error(
+      [&] { (void)nondet_parse_bounded(maps, MAX_DEPTH, MAX_MAP_ENTRIES - 1); },
+      ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse_bounded(maps); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(fixture); }, ErrorCode::CBOR_DECODE_FAILED);
+    // One more map is over the depth cap, however much the caller asks for.
+    std::vector<uint8_t> deeper{0xa1, 0x00};
+    deeper.insert(deeper.end(), maps.begin(), maps.end());
+    expect_error(
+      [&] { (void)nondet_parse_bounded(deeper, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1); },
+      ErrorCode::CBOR_DECODE_FAILED);
 }
 
 TEST_CASE("cbor handle: every key a map holds can be looked up")

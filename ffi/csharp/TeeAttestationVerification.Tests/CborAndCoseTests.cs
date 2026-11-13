@@ -30,18 +30,16 @@ public sealed class CborAndCoseTests
             Assert.Throws<VerifyException>(
                 () => CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 })).Code);
 
-        // {0: 0, 1: 0, ...} in preferred encoding: 256 entries parse, 257 do not.
+        // {0: 0, 1: 0, ...} in preferred encoding: the default entry limit
+        // parses, one entry more does not.
         static byte[] FlatMap(int entries)
         {
-            List<byte> document = [0xb9, (byte)(entries >> 8), (byte)entries];
+            // Both sizes take a one-byte length, and every key a one-byte value.
+            Assert.InRange(entries, 24, 255);
+            List<byte> document = [0xb8, (byte)entries];
             for (int key = 0; key < entries; key++)
             {
-                if (key >= 256)
-                {
-                    document.Add(0x19);
-                    document.Add((byte)(key >> 8));
-                }
-                else if (key >= 24)
+                if (key >= 24)
                 {
                     document.Add(0x18);
                 }
@@ -53,10 +51,14 @@ public sealed class CborAndCoseTests
             return [.. document];
         }
 
-        using CborValue atLimit = CborValue.FromBytes(FlatMap(256));
-        Assert.Equal(256, atLimit.GetLength());
+        int limit = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/cbor.h", "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES");
+        byte[] atLimitBytes = FlatMap(limit);
+        using CborValue atLimit = CborValue.FromBytes(atLimitBytes);
+        Assert.Equal(limit, atLimit.GetLength());
+        Assert.Equal(atLimitBytes, atLimit.ToBytes());
         Assert.Equal(ErrorCode.CborDecodeFailed,
-            Assert.Throws<VerifyException>(() => CborValue.FromBytes(FlatMap(257))).Code);
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(FlatMap(limit + 1))).Code);
     }
 
     private static readonly byte[] ProtectedHeader = [0xa1, 0x01, 0x26];
@@ -360,7 +362,14 @@ public sealed class CborAndCoseTests
         Assert.Equal(ErrorCode.CborDecodeFailed,
             Assert.Throws<VerifyException>(
                 () => CborValue.FromBytes(new byte[] { 0xa2, 1, 2, 1, 3 })).Code);
-        byte[] tooDeep = [.. Enumerable.Repeat((byte)0x81, 65), 0x01];
+        // One-element arrays nested to the default depth parse and serialize;
+        // one level deeper does not.
+        int depth = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/cbor.h", "TAV_CBOR_DEFAULT_MAX_DEPTH");
+        byte[] atDepthLimit = [.. Enumerable.Repeat((byte)0x81, depth), 0x01];
+        using CborValue deepest = CborValue.FromBytes(atDepthLimit);
+        Assert.Equal(atDepthLimit, deepest.ToBytes());
+        byte[] tooDeep = [.. Enumerable.Repeat((byte)0x81, depth + 1), 0x01];
         Assert.Equal(ErrorCode.CborDecodeFailed,
             Assert.Throws<VerifyException>(() => CborValue.FromBytes(tooDeep)).Code);
         using CborValue array = CborValue.FromBytes(new byte[] { 0x80 });
