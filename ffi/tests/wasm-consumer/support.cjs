@@ -41,6 +41,14 @@ function textBytes(value) {
   return new TextEncoder().encode(value);
 }
 
+// A `#define NAME <value>` limit from a public C header, the source the
+// native consumer suites take it from.
+function cHeaderLimit(header, name) {
+  const match = readText(`ffi/include/tav/${header}`).match(new RegExp(`^#define ${name} (\\d+)$`, 'm'));
+  assert.ok(match, `${header} does not define ${name}`);
+  return Number(match[1]);
+}
+
 function loadMilanInputs() {
   return {
     report: new Uint8Array(read('demos/web-verify-kernel/test-data/milan_attestation_report.bin')),
@@ -103,6 +111,7 @@ module.exports = {
   pkg,
   TRUSTED_DIDX509,
   textBytes,
+  cHeaderLimit,
   loadMilanInputs,
   loadCaciInputs,
   verifiedMilanReport,

@@ -41,7 +41,17 @@ extern "C" {
  */
 
 /*
+ * Longest UVM endorsement, in bytes, that tav_verify_caci_uvm_endorsement
+ * accepts. The endorsement is parsed before anything authenticates it, and
+ * parsing CBOR can cost time proportional to the nesting depth times the input
+ * length, so a longer one fails with TAV_ERROR_CACI_COSE without being parsed.
+ */
+#define TAV_CACI_MAX_UVM_ENDORSEMENT_LEN 65536
+
+/*
  * Verify an ACI/UVM endorsement COSE blob against a caller-pinned did:x509 root.
+ * An endorsement longer than TAV_CACI_MAX_UVM_ENDORSEMENT_LEN bytes is
+ * rejected.
  *
  * trusted_didx509 is a UTF-8 byte slice and does not need to be NUL-terminated.
  * out_uvm_endorsement must point to a writable handle slot. It is reset to NULL

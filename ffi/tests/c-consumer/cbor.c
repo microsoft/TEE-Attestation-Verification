@@ -198,6 +198,24 @@ static void parsing_and_serialization(void)
     CHECK(value == NULL);
     expect(tav_cbor_nondet_parse(noncanonical, 2, 16, &value), TAV_ERROR_OK);
     tav_cbor_free(value);
+
+    /* Bounded parsing: {0: 0, 1: 0} fits an entry limit of 2 and not 1; {{}: 0}
+     * is rejected by both nondet parsers. */
+    const uint8_t two_entries[] = {0xa2, 0x00, 0x00, 0x01, 0x00};
+    const uint8_t map_key[] = {0xa1, 0xa0, 0x00};
+    const size_t entries = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
+    expect(tav_cbor_nondet_parse_bounded(two_entries, sizeof(two_entries), 16, 1, &value), TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
+    expect(tav_cbor_nondet_parse_bounded(two_entries, sizeof(two_entries), 16, entries, &value), TAV_ERROR_OK);
+    size_t size = 0;
+    expect(tav_cbor_size(value, &size), TAV_ERROR_OK);
+    CHECK(size == 2);
+    tav_cbor_free(value);
+    expect(tav_cbor_nondet_parse(map_key, sizeof(map_key), 16, &value), TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
+    expect(tav_cbor_nondet_parse_bounded(map_key, sizeof(map_key), 16, entries, &value), TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(value == NULL);
+    expect(tav_cbor_nondet_parse_bounded(map_key, sizeof(map_key), 16, entries, NULL), TAV_ERROR_INVALID_ARGUMENT);
 }
 
 static void nulls_and_rejected_batches(void)
@@ -265,7 +283,7 @@ static void cose_interoperability(void)
     TavCborHandle* sign1 = NULL;
     TavCborHandle* payload = NULL;
     size_t size = 0;
-    expect(tav_cbor_nondet_parse(input, sizeof(input), 64, &root), TAV_ERROR_OK);
+    expect(tav_cbor_nondet_parse(input, sizeof(input), TAV_CBOR_DEFAULT_MAX_DEPTH, &root), TAV_ERROR_OK);
     expect(tav_validate_cose_sign1(root, &sign1), TAV_ERROR_OK);
     tav_cbor_free(root);
     expect(tav_cbor_size(sign1, &size), TAV_ERROR_OK);

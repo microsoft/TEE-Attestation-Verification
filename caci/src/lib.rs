@@ -15,6 +15,9 @@
 //! 3. Bind the two verified artifacts by checking that the UVM launch
 //!    measurement matches the attestation report measurement.
 //!
+//! The UVM endorsement is parsed before anything authenticates it, so one
+//! longer than [`MAX_UVM_ENDORSEMENT_LEN`] is rejected without being parsed.
+//!
 
 mod didx509;
 mod parse;
@@ -33,7 +36,10 @@ use std::collections::BTreeSet;
 use didx509::verify_didx509_root;
 #[cfg(async_crypto)]
 use didx509::verify_didx509_root_async;
-use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
+use parse::{
+    parse_attestation, parse_uvm_endorsement, parse_x5chain_certs, required_bstr, required_int,
+    required_text,
+};
 
 pub use attestation::snp;
 pub use cose::CborValue;
@@ -49,6 +55,13 @@ const SNP_MEASUREMENT_LEN: usize = attestation_report_field_len(|report| &report
 pub const SNP_HOST_DATA_LEN: usize = attestation_report_field_len(|report| &report.host_data);
 /// Length of the SNP `REPORT_DATA` field.
 pub const SNP_REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &report.report_data);
+/// Maximum length in bytes of a UVM endorsement that `verify_uvm_endorsement`
+/// accepts.
+///
+/// The endorsement is parsed before anything authenticates it, and parsing
+/// CBOR can cost time proportional to the nesting depth times the input
+/// length, so the length is bounded first.
+pub const MAX_UVM_ENDORSEMENT_LEN: usize = 64 * 1024;
 const MAX_GUEST_VMPL: u32 = 3;
 const JSON_LAUNCH_MEASUREMENT: &str = "x-ms-sevsnpvm-launchmeasurement";
 const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";
@@ -132,12 +145,13 @@ pub mod synchronous {
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`.
+    /// chain root matches `trusted_didx509`. An endorsement longer than
+    /// [`MAX_UVM_ENDORSEMENT_LEN`] is rejected before it is parsed.
     pub fn verify_uvm_endorsement<'a>(
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        let parsed = parse_uvm_endorsement(uvm_endorsement)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -145,7 +159,7 @@ pub mod synchronous {
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
 
-        let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+        let protected_header = cose::parse_protected_header(&protected).map_err(AciError::Cose)?;
         let x5chain = parse::parse_x5chain(
             protected_header
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
@@ -362,11 +376,13 @@ pub mod asynchronous {
     /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
     /// call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
+    /// An endorsement longer than [`MAX_UVM_ENDORSEMENT_LEN`] is rejected
+    /// before it is parsed.
     pub async fn verify_uvm_endorsement<'a>(
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        let parsed = parse_uvm_endorsement(uvm_endorsement)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // Sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -374,7 +390,7 @@ pub mod asynchronous {
         let payload = required_bstr(sign1.array_at(2).map_err(AciError::Cose)?, "payload")?;
         let signature = required_bstr(sign1.array_at(3).map_err(AciError::Cose)?, "signature")?;
 
-        let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+        let protected_header = cose::parse_protected_header(&protected).map_err(AciError::Cose)?;
         let x5chain = parse::parse_x5chain(
             protected_header
                 .map_at_int(cose::COSE_HEADER_X5CHAIN)
@@ -568,7 +584,7 @@ fn verify_caci_attestation_impl(
     let sign1 = cose::cose_sign1(uvm_endorsement).map_err(AciError::Cose)?;
     let payload = parse::cose_payload(sign1)?;
     let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
-    let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
+    let protected_header = cose::parse_protected_header(&protected).map_err(AciError::Cose)?;
 
     let content_type = protected_header
         .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)

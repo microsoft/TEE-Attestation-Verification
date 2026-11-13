@@ -65,12 +65,45 @@ extern "C" {
 typedef struct TavCborHandle TavCborHandle;
 
 /*
- * Ceiling on nesting depth for parsing and serialization. Builders do not
- * enforce this limit. Callers must bound the depth they build. Copying,
- * materializing, or dropping an extremely deep value can exhaust the process
- * stack and abort.
+ * Limits. Parsing and serialization take a nesting depth, max_depth.
+ * Non-deterministic parsing also limits the key/value pairs in any one map,
+ * at any level, and rejects maps inside map keys. Each limit has a default,
+ * recommended for untrusted input, and a hard cap, which a larger request is
+ * clamped to.
+ *
+ * - Depth: TAV_CBOR_DEFAULT_MAX_DEPTH is the default, the limit the C++
+ *   wrapper applies unless told otherwise and the one COSE and CACI
+ *   verification parse within. TAV_CBOR_MAX_DEPTH is the hard cap.
+ * - Map entries: tav_cbor_nondet_parse applies
+ *   TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES, as COSE and CACI verification do.
+ *   tav_cbor_nondet_parse_bounded takes the limit explicitly, and
+ *   TAV_CBOR_MAX_MAP_ENTRIES is its hard cap. Deterministic parsing and
+ *   serialization apply neither the entry limit nor the map key rule.
+ *
+ * Builders do not enforce these limits. Callers must bound the depth they
+ * build. Copying, materializing, or dropping an extremely deep value can
+ * exhaust the process stack and abort.
+ *
+ * For untrusted input, keep the defaults, and bound the length of the input
+ * before parsing it, since no parser does. Larger limits make untrusted input
+ * more expensive to parse, so do not raise them for it:
+ *
+ * - Parsing can cost time proportional to max_depth times the input length,
+ *   because building a value skips over each item once for every array or map
+ *   it is nested in. Expect a document nested to the hard cap to take up to
+ *   four times as long as one nested to the default.
+ * - Every non-deterministic parse allocates and zeroes
+ *   3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever
+ *   the input length. On a 64-bit target that is about 52 KB at the defaults
+ *   and about 0.4 MB at the hard caps.
+ *
+ * COSE and CACI verification bound what they parse themselves; see
+ * tav/cose.h and tav/caci.h.
  */
-#define TAV_CBOR_MAX_DEPTH 256
+#define TAV_CBOR_DEFAULT_MAX_DEPTH 16
+#define TAV_CBOR_MAX_DEPTH 64
+#define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 128
+#define TAV_CBOR_MAX_MAP_ENTRIES 256
 
 /*
  * Value kinds, named for use with tav_cbor_kind. The enum type itself is not
@@ -137,13 +170,28 @@ TavError* tav_cbor_det_serialize(
 /*
  * Parsing. On success writes an owning handle through out_value. The returned
  * tree borrows byte and text payloads from data, which must outlive it.
+ * Bound the length of untrusted data first, and keep the default limits for
+ * it, as described with the limits above.
  *
- * Map keys use RFC 8949 equivalence, including order-independent map comparison.
+ * Map keys use RFC 8949 equivalence, including order-independent map
+ * comparison for keys parsed deterministically.
  */
 TavError* tav_cbor_nondet_parse(
   const uint8_t* data,
   size_t len,
   size_t max_depth,
+  TavCborHandle** out_value);
+
+/*
+ * tav_cbor_nondet_parse with an explicit map entry limit, capped at
+ * TAV_CBOR_MAX_MAP_ENTRIES. Raising max_map_entries raises the scratch each
+ * call allocates, as described with the limits above.
+ */
+TavError* tav_cbor_nondet_parse_bounded(
+  const uint8_t* data,
+  size_t len,
+  size_t max_depth,
+  size_t max_map_entries,
   TavCborHandle** out_value);
 
 /* Requires deterministic encoding. */

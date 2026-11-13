@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers.Binary;
 using System.Text;
 
 namespace TeeAttestationVerification.Tests;
@@ -8,16 +9,56 @@ namespace TeeAttestationVerification.Tests;
 public sealed class CborAndCoseTests
 {
     [Fact]
-    public void MapKeysCompareIndependentlyOfEntryOrder()
+    public void CompoundKeysAreLookedUpByValue()
     {
-        using CborValue map = CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 });
-        using CborValue key = CborValue.FromBytes(new byte[] { 0xa2, 3, 4, 1, 2 });
+        // {[1, 18(2)]: 7}, looked up with a separately parsed copy of the key.
+        using CborValue map = CborValue.FromBytes(new byte[] { 0xa1, 0x82, 1, 0xd2, 2, 7 });
+        using CborValue key = CborValue.FromBytes(new byte[] { 0x82, 1, 0xd2, 2 });
         Assert.True(map.TryGetValue(key, out CborValue? result));
         using CborValue found = Assert.IsType<CborValue>(result);
         using CborValue direct = map.MapAt(key);
         map.Dispose();
         Assert.Equal(7, found.GetInt64());
         Assert.Equal(7, direct.GetInt64());
+    }
+
+    [Fact]
+    public void MapsInsideKeysAndOversizedMapsAreRejected()
+    {
+        // {{1: 2, 3: 4}: 7}
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(
+                () => CborValue.FromBytes(new byte[] { 0xa1, 0xa2, 1, 2, 3, 4, 7 })).Code);
+
+        // {0: 0, 1: 0, ...} in preferred encoding: the default entry limit
+        // parses, one entry more does not.
+        static byte[] FlatMap(int entries)
+        {
+            // Both sizes take a one-byte length, and every key a one-byte value.
+            Assert.InRange(entries, 24, 255);
+            List<byte> document = [0xb8, (byte)entries];
+            for (int key = 0; key < entries; key++)
+            {
+                if (key >= 24)
+                {
+                    document.Add(0x18);
+                }
+
+                document.Add((byte)key);
+                document.Add(0x00);
+            }
+
+            return [.. document];
+        }
+
+        int limit = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/cbor.h", "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES");
+        byte[] atLimitBytes = FlatMap(limit);
+        using CborValue atLimit = CborValue.FromBytes(atLimitBytes);
+        Assert.Equal(limit, atLimit.GetLength());
+        Assert.Equal(atLimitBytes, atLimit.ToBytes());
+        Assert.Equal(ErrorCode.CborDecodeFailed,
+            Assert.Throws<VerifyException>(() => CborValue.FromBytes(FlatMap(limit + 1))).Code);
     }
 
     private static readonly byte[] ProtectedHeader = [0xa1, 0x01, 0x26];
@@ -183,6 +224,52 @@ public sealed class CborAndCoseTests
     }
 
     [Fact]
+    public void ProtectedHeaderOverTheLengthLimitIsRejected()
+    {
+        int limit = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/cose.h", "TAV_COSE_MAX_PROTECTED_HEADER_LEN");
+
+        // At the limit the header is decoded, so verification reaches the
+        // signature, which was made over a different header.
+        using (CborValue root = CborValue.FromBytes(
+            BuildSign1(embeddedPayload: true, PaddedProtectedHeader(limit))))
+        using (CoseSign1 sign1 = root.AsCoseSign1())
+        {
+            using CborValue protectedHeader = sign1.GetProtectedHeader();
+            using CborValue algorithm = protectedHeader.MapAt(1L);
+            Assert.Equal(-7, algorithm.GetInt64());
+            VerifyException signatureError = Assert.Throws<VerifyException>(
+                () => sign1.VerifyEmbedded(Spki, CoseAlgorithm.Es256));
+            Assert.Equal(ErrorCode.CoseVerification, signatureError.Code);
+            Assert.Contains("signature verification failed", signatureError.Message);
+        }
+
+        // A byte longer, the header is rejected by its length alone. The
+        // envelope still parses.
+        string overLimit = $"protected header is {limit + 1} bytes, over the {limit}-byte limit";
+        using CborValue embeddedRoot = CborValue.FromBytes(
+            BuildSign1(embeddedPayload: true, PaddedProtectedHeader(limit + 1)));
+        using CoseSign1 embedded = embeddedRoot.AsCoseSign1();
+        Assert.Equal(limit + 1, embedded.GetProtectedBytes().Length);
+        VerifyException headerError = Assert.Throws<VerifyException>(
+            () => embedded.GetProtectedHeader());
+        Assert.Equal(ErrorCode.CborDecodeFailed, headerError.Code);
+        Assert.Equal(overLimit, headerError.Message);
+        VerifyException embeddedError = Assert.Throws<VerifyException>(
+            () => embedded.VerifyEmbedded(Spki, CoseAlgorithm.Es256));
+        Assert.Equal(ErrorCode.CoseVerification, embeddedError.Code);
+        Assert.Equal(overLimit, embeddedError.Message);
+
+        using CborValue detachedRoot = CborValue.FromBytes(
+            BuildSign1(embeddedPayload: false, PaddedProtectedHeader(limit + 1)));
+        using CoseSign1 detached = detachedRoot.AsCoseSign1();
+        VerifyException detachedError = Assert.Throws<VerifyException>(
+            () => detached.VerifyDetached(Payload, Spki, CoseAlgorithm.Es256));
+        Assert.Equal(ErrorCode.CoseVerification, detachedError.Code);
+        Assert.Equal(overLimit, detachedError.Message);
+    }
+
+    [Fact]
     public void ParsedPayloadsOwnTheirBytesAfterUnpinningAndParentDisposal()
     {
         byte[] input = [0x82, 0x43, 1, 2, 3, 0x62, 0x68, 0x69];
@@ -275,7 +362,14 @@ public sealed class CborAndCoseTests
         Assert.Equal(ErrorCode.CborDecodeFailed,
             Assert.Throws<VerifyException>(
                 () => CborValue.FromBytes(new byte[] { 0xa2, 1, 2, 1, 3 })).Code);
-        byte[] tooDeep = [.. Enumerable.Repeat((byte)0x81, 65), 0x01];
+        // One-element arrays nested to the default depth parse and serialize;
+        // one level deeper does not.
+        int depth = FixtureData.ReadCHeaderLimit(
+            "ffi/include/tav/cbor.h", "TAV_CBOR_DEFAULT_MAX_DEPTH");
+        byte[] atDepthLimit = [.. Enumerable.Repeat((byte)0x81, depth), 0x01];
+        using CborValue deepest = CborValue.FromBytes(atDepthLimit);
+        Assert.Equal(atDepthLimit, deepest.ToBytes());
+        byte[] tooDeep = [.. Enumerable.Repeat((byte)0x81, depth + 1), 0x01];
         Assert.Equal(ErrorCode.CborDecodeFailed,
             Assert.Throws<VerifyException>(() => CborValue.FromBytes(tooDeep)).Code);
         using CborValue array = CborValue.FromBytes(new byte[] { 0x80 });
@@ -309,10 +403,10 @@ public sealed class CborAndCoseTests
         GC.KeepAlive(pressure);
     }
 
-    private static byte[] BuildSign1(bool embeddedPayload)
+    private static byte[] BuildSign1(bool embeddedPayload, byte[]? protectedHeader = null)
     {
         List<byte> bytes = [0xd2, 0x84];
-        PutByteString(bytes, ProtectedHeader);
+        PutByteString(bytes, protectedHeader ?? ProtectedHeader);
         bytes.Add(0xa0);
         if (embeddedPayload)
         {
@@ -327,16 +421,41 @@ public sealed class CborAndCoseTests
         return bytes.ToArray();
     }
 
+    // The protected header {1: -7, "pad": h'00...'} in exactly length bytes.
+    private static byte[] PaddedProtectedHeader(int length)
+    {
+        byte[] header = new byte[length];
+        new byte[] { 0xa2, 0x01, 0x26, 0x63, (byte)'p', (byte)'a', (byte)'d', 0x5a }
+            .CopyTo(header, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(8), (uint)(length - 12));
+        return header;
+    }
+
     private static void PutByteString(List<byte> destination, byte[] value)
     {
-        if (value.Length < 24)
+        int length = value.Length;
+        if (length < 24)
         {
-            destination.Add((byte)(0x40 | value.Length));
+            destination.Add((byte)(0x40 | length));
+        }
+        else if (length < 0x100)
+        {
+            destination.Add(0x58);
+            destination.Add((byte)length);
+        }
+        else if (length < 0x10000)
+        {
+            destination.Add(0x59);
+            destination.Add((byte)(length >> 8));
+            destination.Add((byte)length);
         }
         else
         {
-            destination.Add(0x58);
-            destination.Add((byte)value.Length);
+            destination.Add(0x5a);
+            destination.Add((byte)(length >> 24));
+            destination.Add((byte)(length >> 16));
+            destination.Add((byte)(length >> 8));
+            destination.Add((byte)length);
         }
 
         destination.AddRange(value);

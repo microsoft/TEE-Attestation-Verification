@@ -10,6 +10,6 @@ authors = ["Max Tropets", "Chris Jensen"]
 license = "MIT"
 
 [dependencies]
-# project-everest/everparse tag v2026.07.02 resolves to this pinned commit.
-cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
-cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "950bc93838ac2faae51126d8acd0637cf8c8a569" }
+# The merge of project-everest/everparse#364 (bounded parsers with a map key depth bound).
+cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "add81b4f6bb0c771be711aa261cdb33421a3293d" }
+cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "add81b4f6bb0c771be711aa261cdb33421a3293d" }

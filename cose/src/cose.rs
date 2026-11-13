@@ -45,6 +45,29 @@ pub const COSE_ALG_PS256: i64 = -37;
 pub const COSE_ALG_PS384: i64 = -38;
 pub const COSE_ALG_PS512: i64 = -39;
 
+/// Maximum length in bytes of a serialized protected header this crate
+/// decodes.
+///
+/// Parsing CBOR can cost time proportional to the nesting depth times the
+/// input length, so the length of these untrusted bytes is bounded before
+/// they are parsed.
+pub const MAX_COSE_PROTECTED_HEADER_LEN: usize = 64 * 1024;
+
+/// Decode serialized protected-header bytes, as the verifiers do.
+///
+/// Rejects headers longer than [`MAX_COSE_PROTECTED_HEADER_LEN`], then parses
+/// within the default CBOR limits. A zero-length header, COSE's encoding of an
+/// empty map, is not CBOR and fails to parse.
+pub fn parse_protected_header(phdr: &[u8]) -> Result<CborValue<'_>, String> {
+    if phdr.len() > MAX_COSE_PROTECTED_HEADER_LEN {
+        return Err(format!(
+            "protected header is {} bytes, over the {MAX_COSE_PROTECTED_HEADER_LEN}-byte limit",
+            phdr.len()
+        ));
+    }
+    CborValue::parse_nondet(phdr)
+}
+
 /// Return the COSE_Sign1 array from a tagged or untagged COSE_Sign1 document.
 pub fn cose_sign1<'a, 'b>(document: &'a CborValue<'b>) -> Result<&'a CborValue<'b>, String> {
     // RFC 9052, Section 4.2: COSE_Sign1 may be encoded as CBOR tag 18
@@ -154,7 +177,8 @@ fn sig_structure(phdr: &[u8], payload: &[u8]) -> Result<Vec<u8>, String> {
 /// contains an `alg`, it must match `algorithm`; if it omits `alg`, the caller's
 /// algorithm context is used. Unsupported algorithms, key/algorithm mismatches,
 /// malformed signatures, and failed signature verification are returned as
-/// errors.
+/// errors, as is a protected header longer than
+/// [`MAX_COSE_PROTECTED_HEADER_LEN`].
 #[cfg(sync_crypto)]
 pub fn cose_verify1(
     key: &<crypto::Crypto as CryptoBackend>::Key,
@@ -218,7 +242,7 @@ fn protected_header_alg(phdr: &[u8]) -> Result<Option<i64>, String> {
         return Ok(None);
     }
 
-    let protected = CborValue::parse_nondet(phdr)?;
+    let protected = parse_protected_header(phdr)?;
     for (key, value) in protected.iter_map()? {
         if key == &CborValue::Int(COSE_HEADER_ALG) {
             return match value {
@@ -506,6 +530,64 @@ mod tests {
         assert_eq!(
             cose_verify1(&key, algorithm, P256_PHDR, b"", &[0u8; 3]).unwrap_err(),
             "Expected 64 byte ECDSA signature, got 3"
+        );
+    }
+
+    /// `{1: -7, "pad": h'00...'}` in exactly `len` bytes.
+    fn padded_protected_header(len: usize) -> Vec<u8> {
+        let mut phdr = vec![0xa2, 0x01, 0x26, 0x63, b'p', b'a', b'd', 0x5a];
+        let padding = len - phdr.len() - 4;
+        phdr.extend_from_slice(&(padding as u32).to_be_bytes());
+        phdr.resize(len, 0);
+        phdr
+    }
+
+    fn over_limit_error() -> String {
+        format!(
+            "protected header is {} bytes, over the {MAX_COSE_PROTECTED_HEADER_LEN}-byte limit",
+            MAX_COSE_PROTECTED_HEADER_LEN + 1
+        )
+    }
+
+    #[test]
+    fn parse_protected_header_bounds_the_header_length() {
+        let at_limit = padded_protected_header(MAX_COSE_PROTECTED_HEADER_LEN);
+        assert_eq!(
+            parse_protected_header(&at_limit)
+                .unwrap()
+                .map_at_int(COSE_HEADER_ALG)
+                .unwrap(),
+            &CborValue::Int(COSE_ALG_ES256)
+        );
+
+        let over_limit = padded_protected_header(MAX_COSE_PROTECTED_HEADER_LEN + 1);
+        assert_eq!(
+            parse_protected_header(&over_limit).unwrap_err(),
+            over_limit_error()
+        );
+        // Only the length is over a limit: the CBOR parser accepts the bytes.
+        assert!(CborValue::parse_nondet(&over_limit).is_ok());
+    }
+
+    #[test]
+    #[cfg(sync_crypto)]
+    fn cose_verify1_bounds_the_protected_header_length() {
+        let algorithm = SignatureKeyAlgorithm::Ec(EcSignatureKeyAlgorithm::P256);
+        let key = key(P256_SPKI, algorithm);
+
+        // At the limit the header is decoded, so verification reaches the
+        // signature, which was made over a different header.
+        let at_limit = padded_protected_header(MAX_COSE_PROTECTED_HEADER_LEN);
+        let err = cose_verify1(&key, algorithm, &at_limit, PAYLOAD, P256_SIG).unwrap_err();
+        assert!(
+            err.contains("signature verification failed"),
+            "unexpected error: {err}"
+        );
+
+        let over_limit = padded_protected_header(MAX_COSE_PROTECTED_HEADER_LEN + 1);
+        assert_eq!(
+            cose_verify1(&key, algorithm, &over_limit, PAYLOAD, P256_SIG).unwrap_err(),
+            over_limit_error()
         );
     }
 }

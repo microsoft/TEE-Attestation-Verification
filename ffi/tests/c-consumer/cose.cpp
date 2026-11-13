@@ -26,16 +26,36 @@ const std::vector<uint8_t> kSig = {
 void put_bstr(std::vector<uint8_t> &out, const uint8_t *data, size_t len) {
     if (len < 24) {
         out.push_back(static_cast<uint8_t>(0x40 | len));
-    } else {
+    } else if (len < 0x100) {
         out.push_back(0x58);
         out.push_back(static_cast<uint8_t>(len));
+    } else if (len < 0x10000) {
+        out.push_back(0x59);
+        out.push_back(static_cast<uint8_t>(len >> 8));
+        out.push_back(static_cast<uint8_t>(len));
+    } else {
+        out.push_back(0x5a);
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            out.push_back(static_cast<uint8_t>(len >> shift));
+        }
     }
     out.insert(out.end(), data, data + len);
 }
 
-std::vector<uint8_t> build_sign1(bool embedded_payload) {
+// The protected header {1: -7, "pad": h'00...'} in exactly `len` bytes.
+std::vector<uint8_t> padded_protected_header(size_t len) {
+    std::vector<uint8_t> phdr = {0xa2, 0x01, 0x26, 0x63, 'p', 'a', 'd', 0x5a};
+    const size_t padding = len - phdr.size() - 4;
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        phdr.push_back(static_cast<uint8_t>(padding >> shift));
+    }
+    phdr.resize(len, 0);
+    return phdr;
+}
+
+std::vector<uint8_t> build_sign1(const std::vector<uint8_t> &phdr, bool embedded_payload) {
     std::vector<uint8_t> env = {0xd2, 0x84};
-    put_bstr(env, kPhdr.data(), kPhdr.size());
+    put_bstr(env, phdr.data(), phdr.size());
     env.push_back(0xa0);
     if (embedded_payload) {
         put_bstr(env, reinterpret_cast<const uint8_t *>(kPayload.data()), kPayload.size());
@@ -44,6 +64,10 @@ std::vector<uint8_t> build_sign1(bool embedded_payload) {
     }
     put_bstr(env, kSig.data(), kSig.size());
     return env;
+}
+
+std::vector<uint8_t> build_sign1(bool embedded_payload) {
+    return build_sign1(kPhdr, embedded_payload);
 }
 
 struct CborHandle {
@@ -69,10 +93,15 @@ void check_error(TavError *error, TavErrorCode code) {
 } // namespace
 
 TEST_CASE("cbor: map keys compare independently of entry order") {
+    // {{1: 2, 3: 4}: 7} parses deterministically; nondet parsing rejects a
+    // map inside a key.
     const uint8_t encoded[] = {0xa1, 0xa2, 1, 2, 3, 4, 7};
     const uint8_t reordered[] = {0xa2, 3, 4, 1, 2};
-    CborHandle root, key, found;
-    REQUIRE(tav_cbor_nondet_parse(encoded, sizeof(encoded), 64, root.out()) == nullptr);
+    CborHandle root, key, found, rejected;
+    check_error(tav_cbor_nondet_parse(encoded, sizeof(encoded), 64, rejected.out()),
+                TAV_ERROR_CBOR_DECODE_FAILED);
+    CHECK(rejected.value == nullptr);
+    REQUIRE(tav_cbor_det_parse(encoded, sizeof(encoded), 64, root.out()) == nullptr);
     REQUIRE(tav_cbor_nondet_parse(reordered, sizeof(reordered), 64, key.out()) == nullptr);
     REQUIRE(tav_cbor_map_at(root.value, key.value, found.out()) == nullptr);
     root.out();
@@ -211,21 +240,22 @@ TEST_CASE("cbor: failed reads preserve scalars and borrowed views but clear owne
 }
 
 TEST_CASE("cbor: parsing and owned serialization enforce the requested depth") {
-    for (size_t depth : {64u, 65u}) {
+    const size_t limit = TAV_CBOR_DEFAULT_MAX_DEPTH;
+    for (size_t depth : {limit, limit + 1}) {
         std::vector<uint8_t> input(depth, 0x81);
         input.push_back(0);
         CborHandle root;
-        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), 64, root.out());
-        if (depth == 64) {
+        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), limit, root.out());
+        if (depth == limit) {
             REQUIRE(error == nullptr);
         } else {
             check_error(error, TAV_ERROR_CBOR_DECODE_FAILED);
             CHECK(root.value == nullptr);
         }
-        REQUIRE(tav_cbor_nondet_parse(input.data(), input.size(), 65, root.out()) == nullptr);
+        REQUIRE(tav_cbor_nondet_parse(input.data(), input.size(), limit + 1, root.out()) == nullptr);
         TavByteBuffer *bytes = reinterpret_cast<TavByteBuffer *>(0x1);
-        error = tav_cbor_det_serialize(root.value, 64, &bytes);
-        if (depth == 64) {
+        error = tav_cbor_det_serialize(root.value, limit, &bytes);
+        if (depth == limit) {
             REQUIRE(error == nullptr);
             CHECK(tav_byte_buffer_len(bytes) == input.size());
             CHECK(std::memcmp(tav_byte_buffer_data(bytes), input.data(), input.size()) == 0);
@@ -234,10 +264,25 @@ TEST_CASE("cbor: parsing and owned serialization enforce the requested depth") {
             CHECK(bytes == nullptr);
         }
         tav_byte_buffer_free(bytes);
-        REQUIRE(tav_cbor_det_serialize(root.value, 65, &bytes) == nullptr);
+        REQUIRE(tav_cbor_det_serialize(root.value, limit + 1, &bytes) == nullptr);
         CHECK(tav_byte_buffer_len(bytes) == input.size());
         CHECK(std::memcmp(tav_byte_buffer_data(bytes), input.data(), input.size()) == 0);
         tav_byte_buffer_free(bytes);
+    }
+
+    // A larger request is clamped to the hard cap.
+    const size_t cap = TAV_CBOR_MAX_DEPTH;
+    for (size_t depth : {cap, cap + 1}) {
+        std::vector<uint8_t> input(depth, 0x81);
+        input.push_back(0);
+        CborHandle root;
+        TavError *error = tav_cbor_nondet_parse(input.data(), input.size(), SIZE_MAX, root.out());
+        if (depth == cap) {
+            REQUIRE(error == nullptr);
+        } else {
+            check_error(error, TAV_ERROR_CBOR_DECODE_FAILED);
+            CHECK(root.value == nullptr);
+        }
     }
 }
 
@@ -300,6 +345,36 @@ TEST_CASE("cose: detached verification requires a nil payload") {
             REQUIRE(error == nullptr);
             check_error(tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
                                                       TAV_COSE_ALG_ES256), TAV_ERROR_COSE_UNEXPECTED_TYPE);
+        }
+    }
+}
+
+TEST_CASE("cose: verification rejects a protected header over the length limit") {
+    // At the limit the header is decoded, so verification reaches the signature,
+    // which was made over a different header. A byte longer, the header is
+    // rejected by its length alone. The envelope still parses either way.
+    const std::string over_limit_message =
+        "over the " + std::to_string(TAV_COSE_MAX_PROTECTED_HEADER_LEN) + "-byte limit";
+    for (bool over_limit : {false, true}) {
+        const auto phdr =
+            padded_protected_header(TAV_COSE_MAX_PROTECTED_HEADER_LEN + (over_limit ? 1 : 0));
+        for (bool embedded : {true, false}) {
+            const auto env = build_sign1(phdr, embedded);
+            CborHandle root, sign1;
+            REQUIRE(tav_cbor_nondet_parse(env.data(), env.size(), 64, root.out()) == nullptr);
+            REQUIRE(tav_validate_cose_sign1(root.value, sign1.out()) == nullptr);
+            TavError *error = embedded
+                ? tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
+                                                 TAV_COSE_ALG_ES256)
+                : tav_verify_cose_sign1_detached(
+                      sign1.value, reinterpret_cast<const uint8_t *>(kPayload.data()),
+                      kPayload.size(), kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
+            REQUIRE(error != nullptr);
+            const std::string message = tav_error_message(error);
+            CHECK((message.find(over_limit_message) != std::string::npos) == over_limit);
+            CHECK((message.find("signature verification failed") != std::string::npos) ==
+                  !over_limit);
+            check_error(error, TAV_ERROR_COSE_VERIFICATION);
         }
     }
 }

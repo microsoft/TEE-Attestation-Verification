@@ -41,3 +41,7 @@ let verified_report_data = tav::verify_caci_attestation(
     minimum_uvm_svn,
 )?;
 ```
+
+`verify_uvm_endorsement` parses the endorsement before anything authenticates
+it, so it rejects one longer than `MAX_UVM_ENDORSEMENT_LEN` (64 KiB) without
+parsing it.

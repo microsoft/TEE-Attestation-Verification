@@ -7,10 +7,15 @@ namespace TeeAttestationVerification;
 /// <remarks>
 /// Navigation returns independently owned views that share the parsed document.
 /// Dispose every returned value. Byte and text results are managed copies.
+/// Parsing rejects nesting deeper than 16 levels, maps with more than 128
+/// key/value pairs, and maps inside map keys. These are the native library's
+/// default limits, recommended for untrusted input; this binding offers no
+/// larger ones. Parsing can cost time proportional to the nesting depth times
+/// the input length, so bound the length of untrusted input before parsing it.
 /// </remarks>
 public sealed class CborValue : IDisposable
 {
-    private const nuint MaximumDepth = 64;
+    private const nuint MaximumDepth = 16;
     private readonly object _sync = new();
     private readonly SafeCborValueHandle _handle;
 
@@ -37,7 +42,10 @@ public sealed class CborValue : IDisposable
     }
 
     /// <summary>Parses an encoded CBOR document.</summary>
-    /// <param name="bytes">The encoded CBOR bytes, copied before native parsing.</param>
+    /// <param name="bytes">
+    /// The encoded CBOR bytes, copied before native parsing. Bound the length
+    /// of untrusted input first.
+    /// </param>
     /// <returns>An owned root value.</returns>
     /// <exception cref="VerifyException">The input is not valid supported CBOR.</exception>
     public static unsafe CborValue FromBytes(ReadOnlyMemory<byte> bytes)

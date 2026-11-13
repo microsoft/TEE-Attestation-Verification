@@ -21,10 +21,28 @@
 //
 // Failures throw tav::Exception with the C ABI's tav::ErrorCode and message.
 //
-// Nesting:
-// - MAX_DEPTH limits parsing and serialization, not builders. Callers must
-//   bound the depth they build. Copying, materializing, or destroying an
-//   extremely deep Value can exhaust the process stack and abort.
+// Limits:
+// - max_depth defaults to DEFAULT_MAX_DEPTH for parsing and serialization, and
+//   can be raised to MAX_DEPTH, the hard cap. Neither limits builders.
+//   Callers must bound the depth they build. Copying, materializing, or
+//   destroying an extremely deep Value can exhaust the process stack and
+//   abort.
+// - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
+//   and maps inside map keys; nondet_parse_bounded takes the entry limit
+//   explicitly, up to MAX_MAP_ENTRIES, the hard cap. det_parse and
+//   serialization apply neither.
+//
+// Untrusted input:
+// - Keep the defaults, and bound the length of the input before parsing it,
+//   since no parser does. Larger limits make untrusted input more expensive
+//   to parse, so do not raise them for it.
+// - Parsing can cost time proportional to max_depth times the input length:
+//   expect a document nested to MAX_DEPTH to take up to four times as long as
+//   one nested to DEFAULT_MAX_DEPTH.
+// - Every nondet parse allocates and zeroes
+//   3 * (max_depth + 1) * max_map_entries size_t words of scratch, whatever
+//   the input length: about 52 KB at the defaults on a 64-bit target, and
+//   about 0.4 MB at MAX_DEPTH with MAX_MAP_ENTRIES.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -40,8 +58,17 @@
 
 namespace tav::cbor
 {
-/// Ceiling on nesting depth for parsing and serialization.
+/// Hard cap on nesting depth for parsing and serialization.
 constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
+
+/// Nesting depth parsing and serialization allow unless told otherwise,
+/// recommended for untrusted input.
+constexpr size_t DEFAULT_MAX_DEPTH = TAV_CBOR_DEFAULT_MAX_DEPTH;
+
+/// Hard cap on the map entry limit of nondet_parse_bounded, and the limit
+/// nondet_parse applies, recommended for untrusted input.
+constexpr size_t MAX_MAP_ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES;
+constexpr size_t DEFAULT_MAX_MAP_ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
 
 /// Value kinds. INVALID is reported for an empty Value.
 enum class Kind : int
@@ -97,6 +124,7 @@ Value make_tagged(uint64_t tag, Value&& payload);
 Value shallow_copy(const Value& value);
 Value deep_copy(const Value& value);
 Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth);
+Value nondet_parse_bounded(std::span<const uint8_t> raw, size_t max_depth, size_t max_map_entries);
 Value det_parse(std::span<const uint8_t> raw, size_t max_depth);
 
 /// An owning value. Moving transfers the handle and empties the source.
@@ -218,13 +246,13 @@ public:
     }
 
     [[nodiscard]] std::vector<uint8_t> nondet_serialize(
-      size_t max_depth = MAX_DEPTH) const
+      size_t max_depth = DEFAULT_MAX_DEPTH) const
     {
         return encode(tav_cbor_nondet_serialize, max_depth);
     }
 
     /// Deterministic encoding.
-    [[nodiscard]] std::vector<uint8_t> det_serialize(size_t max_depth = MAX_DEPTH) const
+    [[nodiscard]] std::vector<uint8_t> det_serialize(size_t max_depth = DEFAULT_MAX_DEPTH) const
     {
         return encode(tav_cbor_det_serialize, max_depth);
     }
@@ -242,6 +270,7 @@ private:
     friend Value shallow_copy(const Value&);
     friend Value deep_copy(const Value&);
     friend Value nondet_parse(std::span<const uint8_t>, size_t);
+    friend Value nondet_parse_bounded(std::span<const uint8_t>, size_t, size_t);
     friend Value det_parse(std::span<const uint8_t>, size_t);
 
     /// Holds handles being handed to a container constructor.
@@ -393,14 +422,28 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 
 /// Borrows raw, which must outlive the returned value.
 ///
-/// Map keys use RFC 8949 equivalence, including order-independent map comparison.
-inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
+/// Rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries and maps inside
+/// map keys. Map keys use RFC 8949 equivalence. For untrusted input, bound
+/// raw.size() and keep the default limits; see the notes at the top of this
+/// header.
+inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = DEFAULT_MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_nondet_parse, raw, max_depth);
 }
 
+/// nondet_parse with an explicit map entry limit, capped at MAX_MAP_ENTRIES.
+inline Value nondet_parse_bounded(
+  std::span<const uint8_t> raw,
+  size_t max_depth = DEFAULT_MAX_DEPTH,
+  size_t max_map_entries = DEFAULT_MAX_MAP_ENTRIES)
+{
+    return Value::construct([&](auto out) {
+        return tav_cbor_nondet_parse_bounded(raw.data(), raw.size(), max_depth, max_map_entries, out);
+    });
+}
+
 /// Borrows raw, and requires deterministic encoding.
-inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = MAX_DEPTH)
+inline Value det_parse(std::span<const uint8_t> raw, size_t max_depth = DEFAULT_MAX_DEPTH)
 {
     return Value::parse_with(tav_cbor_det_parse, raw, max_depth);
 }

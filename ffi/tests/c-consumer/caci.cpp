@@ -120,6 +120,17 @@ TavError *verify_caci(const CaciInputs &in, const VerifiedArtifacts &artifacts,
         report_data);
 }
 
+// A CBOR byte string of zeros, `len` bytes long in all.
+std::vector<uint8_t> byte_string_document(size_t len) {
+    const size_t payload = len - 5;
+    std::vector<uint8_t> document = {
+        0x5a,
+        static_cast<uint8_t>(payload >> 24), static_cast<uint8_t>(payload >> 16),
+        static_cast<uint8_t>(payload >> 8), static_cast<uint8_t>(payload)};
+    document.resize(len, 0);
+    return document;
+}
+
 } // namespace
 
 TEST_CASE("caci: staged verification of the fixture attestation succeeds") {
@@ -209,6 +220,31 @@ TEST_CASE("caci: uvm-endorsement handle out-parameter is write-only on failure")
     CHECK(uvm == nullptr);
     CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
     tav_error_free(error);
+}
+
+TEST_CASE("caci: a uvm endorsement over the length limit is rejected unparsed") {
+    // At the limit the document reaches the parser, which finds a byte string
+    // where a COSE_Sign1 belongs. A byte longer, the length alone rejects it.
+    const std::string over_limit_message =
+        "over the " + std::to_string(TAV_CACI_MAX_UVM_ENDORSEMENT_LEN) + "-byte limit";
+    for (bool over_limit : {false, true}) {
+        const auto document =
+            byte_string_document(TAV_CACI_MAX_UVM_ENDORSEMENT_LEN + (over_limit ? 1 : 0));
+        TavCborHandle *uvm = reinterpret_cast<TavCborHandle *>(0x1);
+        TavError *error = tav_verify_caci_uvm_endorsement(
+            document.data(), document.size(),
+            kTrustedDidx509, std::strlen(kTrustedDidx509),
+            &uvm);
+
+        REQUIRE(error != nullptr);
+        CHECK(tav_error_code(error) == TAV_ERROR_CACI_COSE);
+        const std::string message = tav_error_message(error);
+        CHECK((message.find(over_limit_message) != std::string::npos) == over_limit);
+        CHECK((message.find("expected tagged COSE_Sign1 envelope") != std::string::npos) ==
+              !over_limit);
+        CHECK(uvm == nullptr);
+        tav_error_free(error);
+    }
 }
 
 TEST_CASE("caci: report-data byte-buffer out-parameter is write-only on failure") {

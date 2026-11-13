@@ -185,6 +185,25 @@ mod synchronous {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
         }
+
+        // The length is bounded before parsing: a document at the limit
+        // reaches the parser, one a byte longer does not.
+        match crate::synchronous::verify_uvm_endorsement(
+            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN),
+            TRUSTED_ACI_DIDX509,
+        ) {
+            Err(AciError::Cose(actual)) => {
+                assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
+            }
+            other => panic!("expected Cose error, got {other:?}"),
+        }
+        match crate::synchronous::verify_uvm_endorsement(
+            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN + 1),
+            TRUSTED_ACI_DIDX509,
+        ) {
+            Err(AciError::Cose(actual)) => assert_eq!(actual, oversized_endorsement_error()),
+            other => panic!("expected Cose error, got {other:?}"),
+        }
     }
 
     #[cfg_attr(not(target_family = "wasm"), test)]
@@ -259,6 +278,24 @@ mod synchronous {
                     "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
                 ),
                 other => panic!("expected Policy error for {}, got {other:?}", fixture.name),
+            }
+
+            let oversized_header = replace_cose_protected(
+                uvm.clone(),
+                vec![0; cose::MAX_COSE_PROTECTED_HEADER_LEN + 1],
+            );
+            match crate::synchronous::verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &oversized_header,
+                ACI_FEED,
+                ACI_SVN,
+            ) {
+                Err(AciError::Cose(actual)) => {
+                    assert_eq!(actual, oversized_protected_header_error())
+                }
+                other => panic!("expected Cose error for {}, got {other:?}", fixture.name),
             }
 
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
@@ -560,6 +597,29 @@ mod asynchronous {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
         }
+
+        // The length is bounded before parsing: a document at the limit
+        // reaches the parser, one a byte longer does not.
+        match crate::asynchronous::verify_uvm_endorsement(
+            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN),
+            TRUSTED_ACI_DIDX509,
+        )
+        .await
+        {
+            Err(AciError::Cose(actual)) => {
+                assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
+            }
+            other => panic!("expected Cose error, got {other:?}"),
+        }
+        match crate::asynchronous::verify_uvm_endorsement(
+            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN + 1),
+            TRUSTED_ACI_DIDX509,
+        )
+        .await
+        {
+            Err(AciError::Cose(actual)) => assert_eq!(actual, oversized_endorsement_error()),
+            other => panic!("expected Cose error, got {other:?}"),
+        }
     }
 
     #[cfg_attr(not(target_family = "wasm"), tokio::test)]
@@ -636,6 +696,26 @@ mod asynchronous {
                     "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
                 ),
                 other => panic!("expected Policy error for {}, got {other:?}", fixture.name),
+            }
+
+            let oversized_header = replace_cose_protected(
+                uvm.clone(),
+                vec![0; cose::MAX_COSE_PROTECTED_HEADER_LEN + 1],
+            );
+            match verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &oversized_header,
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .await
+            {
+                Err(AciError::Cose(actual)) => {
+                    assert_eq!(actual, oversized_protected_header_error())
+                }
+                other => panic!("expected Cose error for {}, got {other:?}", fixture.name),
             }
 
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
@@ -1007,6 +1087,34 @@ fn endorsement_payload(endorsement: &CborValue<'_>) -> serde_json::Value {
 fn replace_cose_payload<'a>(mut endorsement: CborValue<'a>, payload: Vec<u8>) -> CborValue<'a> {
     sign1_items_mut(&mut endorsement)[2] = CborValue::bytes(payload);
     endorsement
+}
+
+fn replace_cose_protected<'a>(mut endorsement: CborValue<'a>, protected: Vec<u8>) -> CborValue<'a> {
+    sign1_items_mut(&mut endorsement)[0] = CborValue::bytes(protected);
+    endorsement
+}
+
+/// A CBOR byte string of zeros, `len` bytes long in all.
+fn byte_string_document(len: usize) -> Vec<u8> {
+    let mut document = vec![0x5a];
+    document.extend_from_slice(&((len - 5) as u32).to_be_bytes());
+    document.resize(len, 0);
+    document
+}
+
+fn oversized_endorsement_error() -> String {
+    format!(
+        "UVM endorsement is {} bytes, over the {MAX_UVM_ENDORSEMENT_LEN}-byte limit",
+        MAX_UVM_ENDORSEMENT_LEN + 1
+    )
+}
+
+fn oversized_protected_header_error() -> String {
+    format!(
+        "protected header is {} bytes, over the {}-byte limit",
+        cose::MAX_COSE_PROTECTED_HEADER_LEN + 1,
+        cose::MAX_COSE_PROTECTED_HEADER_LEN
+    )
 }
 
 fn replace_cose_feed<'a>(mut endorsement: CborValue<'a>, feed: &str) -> CborValue<'a> {

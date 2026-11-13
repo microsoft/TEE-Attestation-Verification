@@ -187,4 +187,29 @@ mod tests {
         assert_eq!(declared.len(), actual.len(), "duplicate C constants");
         assert_eq!(actual, expected.into_iter().collect());
     }
+
+    #[test]
+    fn c_header_publishes_the_protected_header_limit() {
+        // Every `#define TAV_COSE_<NAME> <value>`; TAV_COSE_API has no value.
+        let declared: Vec<(&str, usize)> = include_str!("../../include/tav/cose.h")
+            .lines()
+            .filter_map(|line| {
+                let (name, value) = line
+                    .trim()
+                    .strip_prefix("#define ")?
+                    .trim()
+                    .split_once(' ')?;
+                name.starts_with("TAV_COSE_")
+                    .then(|| (name, value.trim().parse().unwrap()))
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [(
+                "TAV_COSE_MAX_PROTECTED_HEADER_LEN",
+                cose::MAX_COSE_PROTECTED_HEADER_LEN
+            )],
+            "the C header's limits must match the Rust constants"
+        );
+    }
 }
