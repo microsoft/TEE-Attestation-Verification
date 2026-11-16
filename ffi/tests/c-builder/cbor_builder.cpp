@@ -865,13 +865,13 @@ std::vector<uint8_t> deep_array_fixture()
     return document;
 }
 
-// MAX_DEPTH nested maps of MAX_MAP_ENTRIES entries around an empty map, each
-// the value of its parent's last key. The validator sorts a full map at every
-// level of its scratch. About 47 KiB.
-std::vector<uint8_t> hard_cap_maps_fixture()
+// MAX_DEPTH nested maps of DEFAULT_MAX_MAP_ENTRIES entries around an empty
+// map, each the value of its parent's last key. The validator sorts a full
+// map at every level of its scratch. About 23 KiB.
+std::vector<uint8_t> depth_cap_maps_fixture()
 {
     // A map whose last value is whatever follows it.
-    std::vector<uint8_t> open = flat_map(MAX_MAP_ENTRIES);
+    std::vector<uint8_t> open = flat_map(DEFAULT_MAX_MAP_ENTRIES);
     open.pop_back();
     std::vector<uint8_t> document;
     for (size_t level = 0; level < MAX_DEPTH; ++level)
@@ -882,23 +882,23 @@ std::vector<uint8_t> hard_cap_maps_fixture()
     return document;
 }
 
-// hard_cap_maps_fixture with the outermost map's last key repeating the one
+// depth_cap_maps_fixture with the outermost map's last key repeating the one
 // before it, which the validator finds last.
-std::vector<uint8_t> hard_cap_maps_duplicate_control()
+std::vector<uint8_t> depth_cap_maps_duplicate_control()
 {
-    std::vector<uint8_t> document = hard_cap_maps_fixture();
+    std::vector<uint8_t> document = depth_cap_maps_fixture();
     // The key is a 0x18 head and one byte, and ends where its value starts.
-    const size_t value = flat_map(MAX_MAP_ENTRIES).size() - 1;
+    const size_t value = flat_map(DEFAULT_MAX_MAP_ENTRIES).size() - 1;
     REQUIRE(document[value - 2] == 0x18);
-    REQUIRE(document[value - 1] == MAX_MAP_ENTRIES - 1);
-    document[value - 1] = static_cast<uint8_t>(MAX_MAP_ENTRIES - 2);
+    REQUIRE(document[value - 1] == DEFAULT_MAX_MAP_ENTRIES - 1);
+    document[value - 1] = static_cast<uint8_t>(DEFAULT_MAX_MAP_ENTRIES - 2);
     return document;
 }
 
 // MAX_DEPTH nested arrays, the innermost holding the zeros that bring the
 // document to 64 KiB, the longest protected header or UVM endorsement that
 // COSE and CACI verification parse.
-std::vector<uint8_t> hard_cap_arrays_fixture()
+std::vector<uint8_t> depth_cap_arrays_fixture()
 {
     constexpr size_t len = 64 * 1024;
     std::vector<uint8_t> document(MAX_DEPTH - 1, 0x81);
@@ -912,40 +912,37 @@ std::vector<uint8_t> hard_cap_arrays_fixture()
 
 } // namespace
 
-TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map keys")
+TEST_CASE("cbor handle: nondet_parse caps map entries and rejects map keys")
 {
     static_assert(DEFAULT_MAX_MAP_ENTRIES == TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES);
-    static_assert(MAX_MAP_ENTRIES == TAV_CBOR_MAX_MAP_ENTRIES);
-    static_assert(DEFAULT_MAX_MAP_ENTRIES <= MAX_MAP_ENTRIES);
 
     const std::vector<uint8_t> at_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES);
     const std::vector<uint8_t> over_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES + 1);
-    CHECK(nondet_parse_bounded(at_limit).size() == DEFAULT_MAX_MAP_ENTRIES);
-    CHECK(nondet_parse_bounded(at_limit).det_serialize() == at_limit);
-    expect_error([&] { (void)nondet_parse_bounded(over_limit); }, ErrorCode::CBOR_DECODE_FAILED);
-    CHECK(
-      nondet_parse_bounded(over_limit, MAX_DEPTH, DEFAULT_MAX_MAP_ENTRIES + 1).size() ==
-      DEFAULT_MAX_MAP_ENTRIES + 1);
-    // nondet_parse applies the default limit; det_parse and serialization
-    // take no entry limit.
+    CHECK(nondet_parse(at_limit).size() == DEFAULT_MAX_MAP_ENTRIES);
+    CHECK(nondet_parse(at_limit).det_serialize() == at_limit);
+    // The limit holds whatever depth the caller asks for.
     expect_error([&] { (void)nondet_parse(over_limit); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(over_limit, MAX_DEPTH); }, ErrorCode::CBOR_DECODE_FAILED);
+    // det_parse and serialization take no entry limit.
     const Value det = det_parse(over_limit);
     CHECK(det.size() == DEFAULT_MAX_MAP_ENTRIES + 1);
     CHECK(det.det_serialize() == over_limit);
     CHECK(det.nondet_serialize() == over_limit);
 
-    // {0: 0, 1: 0, 2: 0, 3: 0} nested in an array, a map value, and a tag.
-    const std::vector<uint8_t> four = flat_map(4);
-    for (std::vector<uint8_t> head :
+    // The limit applies in an array, a map value, and a tag.
+    for (const std::vector<uint8_t>& head :
          {std::vector<uint8_t>{0x81}, std::vector<uint8_t>{0xa1, 0x00}, std::vector<uint8_t>{0xd2}})
     {
-        head.insert(head.end(), four.begin(), four.end());
-        expect_error([&] { (void)nondet_parse_bounded(head, 16, 3); }, ErrorCode::CBOR_DECODE_FAILED);
-        CHECK_NOTHROW((void)nondet_parse_bounded(head, 16, 4));
+        std::vector<uint8_t> fits = head;
+        fits.insert(fits.end(), at_limit.begin(), at_limit.end());
+        std::vector<uint8_t> over = head;
+        over.insert(over.end(), over_limit.begin(), over_limit.end());
+        CHECK_NOTHROW((void)nondet_parse(fits));
+        expect_error([&] { (void)nondet_parse(over); }, ErrorCode::CBOR_DECODE_FAILED);
     }
 
     // {{1: 2, 3: 4}: 7}, {[{}]: 0}, {18({}): 0}, and {0: {{}: 0}}: rejected
-    // by nondet parsing, accepted by det_parse.
+    // by nondet_parse, accepted by det_parse.
     for (const std::vector<uint8_t>& document : {
            std::vector<uint8_t>{0xa1, 0xa2, 1, 2, 3, 4, 7},
            std::vector<uint8_t>{0xa1, 0x81, 0xa0, 0x00},
@@ -954,16 +951,15 @@ TEST_CASE("cbor handle: nondet_parse_bounded caps map entries and rejects map ke
          })
     {
         expect_error([&] { (void)nondet_parse(document); }, ErrorCode::CBOR_DECODE_FAILED);
-        expect_error([&] { (void)nondet_parse_bounded(document); }, ErrorCode::CBOR_DECODE_FAILED);
         CHECK(det_parse(document).det_serialize() == document);
     }
     // {[1, 18(2)]: 7} keeps its compound key.
     const std::vector<uint8_t> array_key{0xa1, 0x82, 1, 0xd2, 2, 7};
-    CHECK(nondet_parse_bounded(array_key).det_serialize() == array_key);
+    CHECK(nondet_parse(array_key).det_serialize() == array_key);
 
-    // Empty containers fit depth 0 and an entry limit of 0.
-    CHECK(nondet_parse_bounded(std::vector<uint8_t>{0xa0}, 0, 0).size() == 0);
-    CHECK(nondet_parse_bounded(std::vector<uint8_t>{0x80}, 0, 0).size() == 0);
+    // Empty containers fit depth 0.
+    CHECK(nondet_parse(std::vector<uint8_t>{0xa0}, 0).size() == 0);
+    CHECK(nondet_parse(std::vector<uint8_t>{0x80}, 0).size() == 0);
 }
 
 TEST_CASE("cbor handle: parsing defaults to DEFAULT_MAX_DEPTH and stops at MAX_DEPTH")
@@ -981,33 +977,26 @@ TEST_CASE("cbor handle: parsing defaults to DEFAULT_MAX_DEPTH and stops at MAX_D
 
     const std::vector<uint8_t> at_default = nested(DEFAULT_MAX_DEPTH);
     CHECK_NOTHROW((void)nondet_parse(at_default));
-    CHECK_NOTHROW((void)nondet_parse_bounded(at_default));
     CHECK_NOTHROW((void)det_parse(at_default));
 
     const std::vector<uint8_t> past_default = nested(DEFAULT_MAX_DEPTH + 1);
     expect_error([&] { (void)nondet_parse(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)nondet_parse_bounded(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
     expect_error([&] { (void)det_parse(past_default); }, ErrorCode::CBOR_DECODE_FAILED);
     CHECK_NOTHROW((void)nondet_parse(past_default, DEFAULT_MAX_DEPTH + 1));
-    CHECK_NOTHROW((void)nondet_parse_bounded(past_default, DEFAULT_MAX_DEPTH + 1));
     CHECK_NOTHROW((void)det_parse(past_default, DEFAULT_MAX_DEPTH + 1));
 
     // Asking for more than the ceiling still stops at the ceiling.
     const std::vector<uint8_t> at_ceiling = nested(MAX_DEPTH);
     CHECK_NOTHROW((void)nondet_parse(at_ceiling, MAX_DEPTH));
-    CHECK_NOTHROW((void)nondet_parse_bounded(at_ceiling, MAX_DEPTH));
     CHECK_NOTHROW((void)det_parse(at_ceiling, MAX_DEPTH));
     const std::vector<uint8_t> past_ceiling = nested(MAX_DEPTH + 1);
     expect_error(
       [&] { (void)nondet_parse(past_ceiling, MAX_DEPTH + 1); }, ErrorCode::CBOR_DECODE_FAILED);
     expect_error(
-      [&] { (void)nondet_parse_bounded(past_ceiling, MAX_DEPTH + 1); },
-      ErrorCode::CBOR_DECODE_FAILED);
-    expect_error(
       [&] { (void)det_parse(past_ceiling, MAX_DEPTH + 1); }, ErrorCode::CBOR_DECODE_FAILED);
 }
 
-TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial fixtures")
+TEST_CASE("cbor handle: nondet_parse meets the deadline on adversarial fixtures")
 {
     using Clock = std::chrono::steady_clock;
     constexpr auto deadline = std::chrono::seconds(2);
@@ -1017,10 +1006,10 @@ TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial f
     const std::vector<uint8_t> deep_arrays = deep_array_fixture();
 
     const auto start = Clock::now();
-    const Value parsed = nondet_parse_bounded(fixture);
-    expect_error([&] { (void)nondet_parse_bounded(control); }, ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)nondet_parse_bounded(nested_keys); }, ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)nondet_parse_bounded(deep_arrays); }, ErrorCode::CBOR_DECODE_FAILED);
+    const Value parsed = nondet_parse(fixture);
+    expect_error([&] { (void)nondet_parse(control); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(nested_keys); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(deep_arrays); }, ErrorCode::CBOR_DECODE_FAILED);
     const auto elapsed = Clock::now() - start;
     CHECK(elapsed <= deadline);
 
@@ -1032,18 +1021,18 @@ TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline on adversarial f
     }
 }
 
-TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline at the hard caps")
+TEST_CASE("cbor handle: nondet_parse meets the deadline at MAX_DEPTH")
 {
     using Clock = std::chrono::steady_clock;
     // Generous for the unoptimized library this suite links, where the
     // fixtures take about 3 s.
     constexpr auto deadline = std::chrono::seconds(15);
-    // The message of the decode failure that parsing `raw` at the hard caps
-    // ends in.
+    // The message of the decode failure that parsing `raw` at MAX_DEPTH ends
+    // in.
     const auto failure = [](const std::vector<uint8_t>& raw) -> std::string {
         try
         {
-            (void)nondet_parse_bounded(raw, MAX_DEPTH, MAX_MAP_ENTRIES);
+            (void)nondet_parse(raw, MAX_DEPTH);
         }
         catch (const Exception& error)
         {
@@ -1053,45 +1042,37 @@ TEST_CASE("cbor handle: nondet_parse_bounded meets the deadline at the hard caps
         return "parsed";
     };
 
-    const std::vector<uint8_t> maps = hard_cap_maps_fixture();
-    const std::vector<uint8_t> control = hard_cap_maps_duplicate_control();
-    const std::vector<uint8_t> arrays = hard_cap_arrays_fixture();
+    const std::vector<uint8_t> maps = depth_cap_maps_fixture();
+    const std::vector<uint8_t> control = depth_cap_maps_duplicate_control();
+    const std::vector<uint8_t> arrays = depth_cap_arrays_fixture();
     const std::vector<uint8_t> deep_arrays = deep_array_fixture();
-    const std::vector<uint8_t> fixture = large_fixture(MAX_MAP_ENTRIES, false);
-    const std::vector<uint8_t> fixture_control = large_fixture(MAX_MAP_ENTRIES, true);
+    const std::vector<uint8_t> fixture = large_fixture(DEFAULT_MAX_MAP_ENTRIES, false);
+    const std::vector<uint8_t> fixture_control = large_fixture(DEFAULT_MAX_MAP_ENTRIES, true);
 
     const auto start = Clock::now();
-    // Asking for more than the hard caps parses within them.
-    const Value parsed_maps = nondet_parse_bounded(maps, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1);
-    const Value parsed_arrays = nondet_parse_bounded(arrays, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1);
-    const Value parsed_fixture = nondet_parse_bounded(fixture, MAX_DEPTH, MAX_MAP_ENTRIES);
+    // Asking for more than MAX_DEPTH parses within it.
+    const Value parsed_maps = nondet_parse(maps, MAX_DEPTH + 1);
+    const Value parsed_arrays = nondet_parse(arrays, MAX_DEPTH + 1);
+    const Value parsed_fixture = nondet_parse(fixture, MAX_DEPTH);
     CHECK(failure(control) == "Failed to parse CBOR bytes");
     CHECK(failure(fixture_control) == "Failed to parse CBOR bytes");
     CHECK(failure(deep_arrays) == "Maximum CBOR nesting depth exceeded");
     const auto elapsed = Clock::now() - start;
     CHECK(elapsed <= deadline);
     MESSAGE(
-      "at the hard caps, the fixtures took "
+      "at MAX_DEPTH, the fixtures took "
       << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms");
 
     CHECK(parsed_maps.det_serialize(MAX_DEPTH) == maps);
     CHECK(parsed_arrays.det_serialize(MAX_DEPTH) == arrays);
     CHECK(parsed_fixture.det_serialize() == fixture);
-    // Neither limit can be one lower, so the defaults reject the fixtures.
-    expect_error(
-      [&] { (void)nondet_parse_bounded(maps, MAX_DEPTH - 1, MAX_MAP_ENTRIES); },
-      ErrorCode::CBOR_DECODE_FAILED);
-    expect_error(
-      [&] { (void)nondet_parse_bounded(maps, MAX_DEPTH, MAX_MAP_ENTRIES - 1); },
-      ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)nondet_parse_bounded(maps); }, ErrorCode::CBOR_DECODE_FAILED);
-    expect_error([&] { (void)nondet_parse(fixture); }, ErrorCode::CBOR_DECODE_FAILED);
-    // One more map is over the depth cap, however much the caller asks for.
+    // The depth cannot be one lower, so the default rejects the map fixture.
+    expect_error([&] { (void)nondet_parse(maps, MAX_DEPTH - 1); }, ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(maps); }, ErrorCode::CBOR_DECODE_FAILED);
+    // One more map is over MAX_DEPTH, however much the caller asks for.
     std::vector<uint8_t> deeper{0xa1, 0x00};
     deeper.insert(deeper.end(), maps.begin(), maps.end());
-    expect_error(
-      [&] { (void)nondet_parse_bounded(deeper, MAX_DEPTH + 1, MAX_MAP_ENTRIES + 1); },
-      ErrorCode::CBOR_DECODE_FAILED);
+    expect_error([&] { (void)nondet_parse(deeper, MAX_DEPTH + 1); }, ErrorCode::CBOR_DECODE_FAILED);
 }
 
 TEST_CASE("cbor handle: every key a map holds can be looked up")

@@ -313,7 +313,7 @@ fn explicit_depth_limit_is_honoured() {
 const DEFAULT_BOUNDS: (usize, usize) = (MAX_CBOR_NESTING_DEPTH, MAX_CBOR_MAP_ENTRIES);
 
 fn bounded(bytes: &[u8], (depth, entries): (usize, usize)) -> Result<CborValue<'_>, String> {
-    CborValue::parse_nondet_bounded(bytes, depth, entries)
+    CborValue::parse_with_limits::<Nondet>(bytes, depth, entries)
 }
 
 /// `{0: 0, 1: 0, ...}` with `entries` entries.
@@ -746,14 +746,15 @@ fn bounded_parsing_meets_the_deadline() {
 
 // --- Hard caps ---
 
-/// The largest limits the C ABI lets a caller ask for, `TAV_CBOR_MAX_DEPTH`
-/// and `TAV_CBOR_MAX_MAP_ENTRIES`; this crate caps neither. A parse within
-/// them sorts in `3 * 65 * 256` words of scratch, about 0.4 MB.
-const HARD_CAP_BOUNDS: (usize, usize) = (64, 256);
+/// The largest limits the C ABI parses within: `TAV_CBOR_MAX_DEPTH`, the most
+/// depth a caller can ask for, and the default entry limit, which it always
+/// applies. This crate caps neither. A parse within them sorts in
+/// `3 * 65 * 128` words of scratch, about 0.2 MB.
+const HARD_CAP_BOUNDS: (usize, usize) = (64, MAX_CBOR_MAP_ENTRIES);
 
 /// As many nested maps as the depth cap allows around an empty map, each the
 /// value of its parent's last key and holding as many entries as the entry
-/// cap allows. About 47 KiB.
+/// limit allows. About 23 KiB.
 ///
 /// EverCBOR counts the empty map too, which puts the document on its map
 /// depth bound, and the validator sorts a full map at every level of its
@@ -872,7 +873,7 @@ fn bounded_parsing_meets_the_deadline_at_the_hard_caps() {
         )
     });
 
-    // The 128 KiB fixture with every map at the entry cap.
+    // The 128 KiB fixture with every map at the entry limit.
     let fixture = large_fixture(entries, false);
     let control = large_fixture(entries, true);
     let parsed = within_hard_cap_deadline("the 128 KiB fixture", || {
@@ -882,7 +883,6 @@ fn bounded_parsing_meets_the_deadline_at_the_hard_caps() {
     for map in 0..parsed.len().unwrap() - 1 {
         assert_eq!(parsed.array_at(map).unwrap().len().unwrap(), entries);
     }
-    assert!(bounded(&fixture, DEFAULT_BOUNDS).is_err());
     within_hard_cap_deadline("its duplicate control", || {
         assert!(bounded(&control, HARD_CAP_BOUNDS).is_err())
     });

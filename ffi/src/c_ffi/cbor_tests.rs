@@ -114,30 +114,6 @@ fn parse_nondet(bytes: &[u8]) -> Result<*mut TavCborHandle, String> {
     decode(bytes, MAX_DEPTH_LIMIT, false)
 }
 
-fn decode_bounded(
-    bytes: &[u8],
-    max_depth: usize,
-    max_map_entries: usize,
-) -> Result<*mut TavCborHandle, String> {
-    let mut out = ptr::null_mut();
-    let error = unsafe {
-        tav_cbor_nondet_parse_bounded(
-            bytes.as_ptr(),
-            bytes.len(),
-            max_depth,
-            max_map_entries,
-            &mut out,
-        )
-    };
-    if !error.is_null() {
-        let error = unsafe { Box::from_raw(error) };
-        assert_eq!(error.code(), TavErrorCode::CborDecodeFailed);
-        assert!(out.is_null());
-        return Err(error.message());
-    }
-    Ok(out)
-}
-
 // --- Construction and round trips ---
 
 #[test]
@@ -583,7 +559,7 @@ fn serialization_honours_the_depth_ceiling() {
     unsafe { tav_cbor_free(handle) };
 }
 
-// --- Bounded parsing ---
+// --- Map limits ---
 
 /// The preferred head of an item of `major` type whose argument, below 2^16,
 /// is `value`.
@@ -615,34 +591,31 @@ fn flat_map(entries: usize) -> Vec<u8> {
     document
 }
 
+/// A map at the limit parses; one entry over fails, wherever it sits and
+/// whatever depth the caller asks for.
 #[test]
-fn bounded_parsing_enforces_the_map_entry_limit() {
-    let (at_limit, over_limit) = (flat_map(3), flat_map(4));
-    let handle = decode_bounded(&at_limit, 16, 3).unwrap();
+fn nondet_parsing_enforces_the_map_entry_limit() {
+    let entries = cbor::MAX_CBOR_MAP_ENTRIES;
+    let (at_limit, over_limit) = (flat_map(entries), flat_map(entries + 1));
+    let handle = parse_nondet(&at_limit).unwrap();
     let mut size = 0usize;
     assert_eq!(
         status(unsafe { tav_cbor_size(handle, &mut size) }),
         TavErrorCode::Ok
     );
-    assert_eq!(size, 3);
+    assert_eq!(size, entries);
+    assert_eq!(encode_det(handle).unwrap(), at_limit);
     unsafe { tav_cbor_free(handle) };
-    assert!(decode_bounded(&over_limit, 16, 3).is_err());
-    for wrapped in [
-        [&[0x81][..], &over_limit].concat(),
-        [&[0xa1, 0x00][..], &over_limit].concat(),
-        [&[0xd2][..], &over_limit].concat(),
-    ] {
-        assert!(decode_bounded(&wrapped, 16, 3).is_err());
-        unsafe { tav_cbor_free(decode_bounded(&wrapped, 16, 4).unwrap()) };
+    for max_depth in [1, cbor::MAX_CBOR_NESTING_DEPTH, usize::MAX] {
+        assert!(decode(&over_limit, max_depth, false).is_err());
+    }
+    // In an array, a map value, and a tag.
+    for head in [&[0x81][..], &[0xa1, 0x00], &[0xd2]] {
+        unsafe { tav_cbor_free(parse_nondet(&[head, &at_limit].concat()).unwrap()) };
+        assert!(parse_nondet(&[head, &over_limit].concat()).is_err());
     }
 
-    // The default limit is a boundary for every nondet parser; det parsing
-    // and serialization take no entry limit.
-    let default_entries = cbor::MAX_CBOR_MAP_ENTRIES;
-    let (at_limit, over_limit) = (flat_map(default_entries), flat_map(default_entries + 1));
-    unsafe { tav_cbor_free(decode_bounded(&at_limit, MAX_DEPTH_LIMIT, default_entries).unwrap()) };
-    assert!(decode_bounded(&over_limit, MAX_DEPTH_LIMIT, default_entries).is_err());
-    assert!(parse_nondet(&over_limit).is_err());
+    // Det parsing and serialization take no entry limit.
     let handle = decode(&over_limit, MAX_DEPTH_LIMIT, true).unwrap();
     assert_eq!(encode_det(handle).unwrap(), over_limit);
     assert_eq!(encode_nondet(handle).unwrap(), over_limit);
@@ -659,7 +632,6 @@ fn nondet_parsing_rejects_maps_inside_keys() {
         &[0xa1, 0xd2, 0xa0, 0x00],                   // {18({}): 0}
         &[0xa1, 0x00, 0xa1, 0xa1, 0x01, 0x00, 0x00], // {0: {{1: 0}: 0}}
     ] {
-        assert!(decode_bounded(document, 16, 16).is_err(), "{document:02x?}");
         assert!(parse_nondet(document).is_err(), "{document:02x?}");
         let handle = decode(document, MAX_DEPTH_LIMIT, true).unwrap();
         assert_eq!(encode_det(handle).unwrap(), document);
@@ -667,48 +639,9 @@ fn nondet_parsing_rejects_maps_inside_keys() {
     }
     // {[1, 18(2)]: 7} keeps its compound key.
     let array_key = [0xa1, 0x82, 0x01, 0xd2, 0x02, 0x07];
-    let handle = decode_bounded(&array_key, 16, 16).unwrap();
+    let handle = parse_nondet(&array_key).unwrap();
     assert_eq!(encode_det(handle).unwrap(), array_key);
     unsafe { tav_cbor_free(handle) };
-}
-
-/// However large an entry limit the caller asks for, the ceiling applies.
-#[test]
-fn bounded_parsing_caps_the_map_entry_limit() {
-    let at_ceiling = flat_map(MAX_MAP_ENTRIES_LIMIT);
-    let over_ceiling = flat_map(MAX_MAP_ENTRIES_LIMIT + 1);
-    unsafe { tav_cbor_free(decode_bounded(&at_ceiling, 16, usize::MAX).unwrap()) };
-    assert!(decode_bounded(&over_ceiling, 16, usize::MAX).is_err());
-    unsafe { tav_cbor_free(decode(&over_ceiling, MAX_DEPTH_LIMIT, true).unwrap()) };
-}
-
-#[test]
-fn bounded_parsing_honours_the_depth_ceiling_and_clears_its_output() {
-    let nested = |levels: usize| {
-        let mut document = vec![0x81u8; levels];
-        document.push(0x01);
-        document
-    };
-    unsafe { tav_cbor_free(decode_bounded(&nested(MAX_DEPTH_LIMIT), usize::MAX, 1).unwrap()) };
-    assert!(decode_bounded(&nested(MAX_DEPTH_LIMIT + 1), usize::MAX, 1).is_err());
-    assert!(decode_bounded(&nested(4), 2, 1)
-        .unwrap_err()
-        .contains("Maximum CBOR nesting depth"));
-
-    let mut value = ptr::dangling_mut();
-    assert_eq!(
-        status(unsafe { tav_cbor_nondet_parse_bounded([0xff].as_ptr(), 1, 16, 16, &mut value) }),
-        TavErrorCode::CborDecodeFailed
-    );
-    assert!(value.is_null());
-    assert_eq!(
-        status(unsafe { tav_cbor_nondet_parse_bounded(ptr::null(), 1, 16, 16, &mut value) }),
-        TavErrorCode::CborDecodeFailed
-    );
-    assert_eq!(
-        status(unsafe { tav_cbor_nondet_parse_bounded([0].as_ptr(), 1, 16, 16, ptr::null_mut()) }),
-        TavErrorCode::InvalidArgument
-    );
 }
 
 const FIXTURE_LEN: usize = 128 * 1024;
@@ -780,7 +713,7 @@ fn deep_array_fixture() -> Vec<u8> {
 /// default limits.
 #[test]
 #[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
-fn bounded_parsing_meets_the_deadline_through_the_abi() {
+fn nondet_parsing_meets_the_deadline_through_the_abi() {
     const DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
     let (depth, entries) = (cbor::MAX_CBOR_NESTING_DEPTH, cbor::MAX_CBOR_MAP_ENTRIES);
     let (valid, control, nested_keys) = (
@@ -791,11 +724,11 @@ fn bounded_parsing_meets_the_deadline_through_the_abi() {
     let deep_arrays = deep_array_fixture();
 
     let start = std::time::Instant::now();
-    let handle = decode_bounded(&valid, depth, entries).unwrap();
-    assert!(decode_bounded(&control, depth, entries).is_err());
-    assert!(decode_bounded(&nested_keys, depth, entries).is_err());
+    let handle = decode(&valid, depth, false).unwrap();
+    assert!(decode(&control, depth, false).is_err());
+    assert!(decode(&nested_keys, depth, false).is_err());
     // The walk costs a pass over the input for each level of the depth limit.
-    assert!(decode_bounded(&deep_arrays, depth, entries)
+    assert!(decode(&deep_arrays, depth, false)
         .unwrap_err()
         .contains("Maximum CBOR nesting depth"));
     let elapsed = start.elapsed();
@@ -811,38 +744,36 @@ fn bounded_parsing_meets_the_deadline_through_the_abi() {
     unsafe { tav_cbor_free(handle) };
 }
 
-/// The `cbor` crate's map fixture at the hard caps: [`MAX_DEPTH_LIMIT`] nested
-/// maps of [`MAX_MAP_ENTRIES_LIMIT`] entries around an empty map, each the
-/// value of its parent's last key. The validator sorts a full map at every
-/// level of its scratch. About 47 KiB.
-fn hard_cap_maps_fixture() -> Vec<u8> {
+/// The `cbor` crate's map fixture at the depth cap: [`MAX_DEPTH_LIMIT`] nested
+/// maps of [`cbor::MAX_CBOR_MAP_ENTRIES`] entries around an empty map, each
+/// the value of its parent's last key. The validator sorts a full map at
+/// every level of its scratch. About 23 KiB.
+fn depth_cap_maps_fixture() -> Vec<u8> {
     // A map whose last value is whatever follows it.
-    let mut open = flat_map(MAX_MAP_ENTRIES_LIMIT);
+    let mut open = flat_map(cbor::MAX_CBOR_MAP_ENTRIES);
     open.pop();
     let mut document = open.repeat(MAX_DEPTH_LIMIT);
     document.push(0xa0);
     document
 }
 
-/// [`hard_cap_maps_fixture`] with the outermost map's last key repeating the
+/// [`depth_cap_maps_fixture`] with the outermost map's last key repeating the
 /// one before it, which the validator finds last.
-fn hard_cap_maps_duplicate_control() -> Vec<u8> {
-    let mut document = hard_cap_maps_fixture();
+fn depth_cap_maps_duplicate_control() -> Vec<u8> {
+    let entries = cbor::MAX_CBOR_MAP_ENTRIES;
+    let mut document = depth_cap_maps_fixture();
     // The key is a 0x18 head and one byte, and ends where its value starts.
-    let value = flat_map(MAX_MAP_ENTRIES_LIMIT).len() - 1;
-    assert_eq!(
-        document[value - 2..value],
-        [0x18, (MAX_MAP_ENTRIES_LIMIT - 1) as u8]
-    );
-    document[value - 1] = (MAX_MAP_ENTRIES_LIMIT - 2) as u8;
+    let value = flat_map(entries).len() - 1;
+    assert_eq!(document[value - 2..value], [0x18, (entries - 1) as u8]);
+    document[value - 1] = (entries - 2) as u8;
     document
 }
 
-/// The `cbor` crate's array fixture at the hard caps: [`MAX_DEPTH_LIMIT`]
+/// The `cbor` crate's array fixture at the depth cap: [`MAX_DEPTH_LIMIT`]
 /// nested arrays, the innermost holding the zeros that bring the document to
 /// 64 KiB, the longest protected header or UVM endorsement that COSE and CACI
 /// verification parse.
-fn hard_cap_arrays_fixture() -> Vec<u8> {
+fn depth_cap_arrays_fixture() -> Vec<u8> {
     const LEN: usize = 64 * 1024;
     let mut document = vec![0x81; MAX_DEPTH_LIMIT - 1];
     let items = LEN - document.len() - 3;
@@ -852,52 +783,49 @@ fn hard_cap_arrays_fixture() -> Vec<u8> {
     document
 }
 
-/// The `cbor` crate's fixtures at the hard caps parse, or are rejected, in
-/// time through the C ABI, however much more the caller asks for, and neither
-/// limit can be one lower.
+/// The `cbor` crate's fixtures at the depth cap parse, or are rejected, in
+/// time through the C ABI, however much more depth the caller asks for, and
+/// the depth cannot be one lower.
 #[test]
 #[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
-fn bounded_parsing_meets_the_deadline_at_the_hard_caps_through_the_abi() {
+fn nondet_parsing_meets_the_deadline_at_the_depth_cap_through_the_abi() {
     // Generous for a debug build, where the fixtures take about 3 s.
     const DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
-    let (depth, entries) = (MAX_DEPTH_LIMIT, MAX_MAP_ENTRIES_LIMIT);
+    let (depth, entries) = (MAX_DEPTH_LIMIT, cbor::MAX_CBOR_MAP_ENTRIES);
     let (maps, control, arrays) = (
-        hard_cap_maps_fixture(),
-        hard_cap_maps_duplicate_control(),
-        hard_cap_arrays_fixture(),
+        depth_cap_maps_fixture(),
+        depth_cap_maps_duplicate_control(),
+        depth_cap_arrays_fixture(),
     );
     let deep_arrays = deep_array_fixture();
     let (valid, valid_control) = (large_fixture(entries, false), large_fixture(entries, true));
 
     let start = std::time::Instant::now();
-    // Asking for more than the hard caps parses within them.
-    let parsed = [&maps, &arrays, &valid]
-        .map(|document| decode_bounded(document, usize::MAX, usize::MAX).unwrap());
+    // Asking for more than the depth cap parses within it.
+    let parsed =
+        [&maps, &arrays, &valid].map(|document| decode(document, usize::MAX, false).unwrap());
     assert_eq!(
-        decode_bounded(&control, depth, entries).unwrap_err(),
+        decode(&control, depth, false).unwrap_err(),
         "Failed to parse CBOR bytes"
     );
-    assert!(decode_bounded(&valid_control, depth, entries).is_err());
-    assert!(decode_bounded(&deep_arrays, usize::MAX, entries)
+    assert!(decode(&valid_control, depth, false).is_err());
+    assert!(decode(&deep_arrays, usize::MAX, false)
         .unwrap_err()
         .contains("Maximum CBOR nesting depth"));
     let elapsed = start.elapsed();
-    println!("at the hard caps, the fixtures took {elapsed:?} through the C ABI");
+    println!("at the depth cap, the fixtures took {elapsed:?} through the C ABI");
     assert!(elapsed <= DEADLINE, "took {elapsed:?}");
 
     for (handle, document) in parsed.into_iter().zip([&maps, &arrays, &valid]) {
         assert_eq!(&encode_det(handle).unwrap(), document);
         unsafe { tav_cbor_free(handle) };
     }
-    // Neither limit can be one lower, so the defaults reject the fixtures.
-    assert!(decode_bounded(&maps, depth - 1, entries).is_err());
-    assert!(decode_bounded(&maps, depth, entries - 1).is_err());
-    for document in [&maps, &valid] {
-        assert!(decode(document, cbor::MAX_CBOR_NESTING_DEPTH, false).is_err());
-    }
+    // The depth cannot be one lower, so the default rejects the map fixture.
+    assert!(decode(&maps, depth - 1, false).is_err());
+    assert!(decode(&maps, cbor::MAX_CBOR_NESTING_DEPTH, false).is_err());
     // One more map is over the depth cap, however much the caller asks for.
     let deeper = [&[0xa1, 0x00][..], &maps].concat();
-    assert!(decode_bounded(&deeper, usize::MAX, usize::MAX).is_err());
+    assert!(decode(&deeper, usize::MAX, false).is_err());
 }
 
 // --- Inspection ---
@@ -1433,27 +1361,23 @@ fn c_header_publishes_the_default_depth() {
 }
 
 #[test]
-fn c_header_publishes_the_map_entry_limits() {
+fn c_header_publishes_the_map_entry_limit() {
     let header = include_str!("../../include/tav/cbor.h");
-    let defined = |name: &str| {
-        header.lines().find_map(|line| {
-            line.trim()
-                .strip_prefix("#define ")?
-                .strip_prefix(name)?
-                .trim()
-                .parse::<usize>()
-                .ok()
+    let declared: Vec<(&str, usize)> = header
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.trim().strip_prefix("#define ")?.split_once(' ')?;
+            name.contains("MAP_ENTRIES")
+                .then(|| (name, value.trim().parse().unwrap()))
         })
-    };
+        .collect();
     assert_eq!(
-        defined("TAV_CBOR_MAX_MAP_ENTRIES "),
-        Some(MAX_MAP_ENTRIES_LIMIT),
-        "TAV_CBOR_MAX_MAP_ENTRIES must match the Rust constant"
-    );
-    assert_eq!(
-        defined("TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES "),
-        Some(cbor::MAX_CBOR_MAP_ENTRIES),
-        "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES must match the Rust constant"
+        declared,
+        [(
+            "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES",
+            cbor::MAX_CBOR_MAP_ENTRIES
+        )],
+        "the map entry limit in cbor.h must match the Rust constant"
     );
 }
 
