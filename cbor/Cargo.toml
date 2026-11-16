@@ -7,9 +7,4 @@ repository = "https://github.com/microsoft/TEE-Attestation-Verification"
 keywords = ["cbor", "confidentiality"]
 description = "CBOR values backed by deterministic and non-deterministic EverCBOR"
 authors = ["Max Tropets", "Chris Jensen"]
-license = "MIT"
-
-[dependencies]
-# The merge of project-everest/everparse#364 (bounded parsers with a map key depth bound).
-cborrs = { git = "https://github.com/project-everest/everparse.git", rev = "add81b4f6bb0c771be711aa261cdb33421a3293d" }
-cborrs-nondet = { git = "https://github.com/project-everest/everparse.git", rev = "add81b4f6bb0c771be711aa261cdb33421a3293d" }
+license = "MIT AND Apache-2.0"
