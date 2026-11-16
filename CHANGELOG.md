@@ -12,6 +12,7 @@
 ### Changed
 
 - Bump EverCBOR (`cborrs`/`cborrs-nondet`) to the merge of project-everest/everparse#364. (#174)
+- The CBOR crate vendors the EverCBOR sources instead of depending on the EverParse git repository, so it can be published to crates.io. Its licence is now `MIT AND Apache-2.0`. (#179)
 - **Breaking:** non-deterministic CBOR parsing, and so `CborValue::parse_nondet`, `tav_cbor_nondet_parse`, `tav::cbor::nondet_parse`, the C# and WASM parsers, and the COSE and CACI parsers, rejects maps with more than 128 key/value pairs and maps anywhere inside a map key. It validates through EverCBOR's single-pass bounded validator with sort-based duplicate detection, so validation costs time bounded by the input length and the limits. Deterministic parsing and serialization are unchanged. Existing `CborValue` and FFI parser signatures are unchanged. (#174)
 - **Breaking:** explicit Rust `Nondet` parsing limits must allow `max_depth + 1` and `3 * (max_depth + 1) * max_map_entries` scratch words to fit in `usize`; `usize::MAX` is not an unlimited-depth sentinel. Overflow returns `"CBOR limits too large"`, and scratch-allocation failures are reported separately from malformed input. (#174)
 - **Breaking:** the public, doc-hidden Rust `Backend::parse` trait method now takes `max_depth` and `max_map_entries` and returns `Result` instead of `Option`. External backend implementations must update. (#174)

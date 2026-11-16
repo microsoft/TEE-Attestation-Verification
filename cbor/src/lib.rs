@@ -54,6 +54,11 @@
 //! keep the pre-[`Mode`] behaviour: parse in [`Nondet`] mode into an owned
 //! value, and serialize in [`Det`] mode.
 
+// Clippy's cast lint pass does not terminate on the vendored
+// `cbornondetveraux.rs` (clippy 1.96.0). It is only skipped when its lints are
+// allowed for the whole crate, so a module-level allow is not enough.
+#![allow(clippy::all)]
+
 use std::borrow::Cow;
 
 /// Default maximum nesting depth for CBOR parse and serialization, and the
@@ -157,9 +162,53 @@ pub trait Backend<'a>: Sized + Copy {
     fn mk_map(entries: &'a mut [Self::MapEntry]) -> Option<Self>;
 }
 
+// EverParse's verified CBOR sources, vendored byte-for-byte by
+// `scripts/vendor-everparse.sh` (see `vendor/everparse/README.md`). They are
+// mounted at the crate root under the module names of the upstream `cborrs`
+// and `cborrs-nondet` crates, because they refer to each other and to
+// `lowstar` through `crate::` paths.
+mod lowstar {
+    pub mod ignore {
+        pub fn ignore<T>(_: T) {}
+    }
+}
+
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/det/rust/src/cbordet.rs"]
+mod cbordet;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/det/rust/src/cbordetver.rs"]
+mod cbordetver;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/det/rust/src/cbordetveraux.rs"]
+mod cbordetveraux;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/nondet/rust/src/cbornondet.rs"]
+mod cbornondet;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/nondet/rust/src/cbornondetallocimpl.rs"]
+mod cbornondetalloc;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/nondet/rust/src/cbornondetalloc.rs"]
+mod cbornondetalloctypes;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/nondet/rust/src/cbornondetver.rs"]
+mod cbornondetver;
+#[rustfmt::skip]
+#[allow(warnings)]
+#[path = "../vendor/everparse/src/cbor/pulse/nondet/rust/src/cbornondetveraux.rs"]
+mod cbornondetveraux;
+
 mod det_backend {
     use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
-    use cborrs::cbordet as api;
+    use crate::cbordet as api;
 
     /// Serializes into a fresh buffer.
     ///
@@ -276,7 +325,7 @@ mod det_backend {
 
 mod nondet_backend {
     use super::{reserve_for, Backend, RawView, SimpleArena, SIZE_BOUND};
-    use cborrs_nondet::cbornondet as api;
+    use crate::cbornondet as api;
 
     /// See the deterministic counterpart for the note on the elided lifetime.
     fn to_vec(item: api::CborNondet) -> Result<Vec<u8>, String> {
@@ -443,7 +492,7 @@ pub struct Det;
 pub struct Nondet;
 
 impl Mode for Det {
-    type Item<'x> = cborrs::cbordet::CborDet<'x>;
+    type Item<'x> = cbordet::CborDet<'x>;
 
     fn value_to_vec(value: &CborValue<'_>, max_depth: usize) -> Result<Vec<u8>, String> {
         det_backend::value_to_vec(value, max_depth)
@@ -451,7 +500,7 @@ impl Mode for Det {
 }
 
 impl Mode for Nondet {
-    type Item<'x> = cborrs_nondet::cbornondet::CborNondet<'x>;
+    type Item<'x> = cbornondet::CborNondet<'x>;
 
     fn value_to_vec(value: &CborValue<'_>, max_depth: usize) -> Result<Vec<u8>, String> {
         nondet_backend::value_to_vec(value, max_depth)
