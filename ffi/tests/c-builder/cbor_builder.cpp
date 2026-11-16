@@ -748,7 +748,7 @@ TEST_CASE("cbor handle: serialization stops one level past the depth limit")
 
 namespace {
 
-// The preferred head of an item of `major` type whose argument, below 2^16,
+// The preferred head of an item of `major` type whose argument, below 2^32,
 // is `value`.
 std::vector<uint8_t> head(uint8_t major, size_t value)
 {
@@ -761,9 +761,18 @@ std::vector<uint8_t> head(uint8_t major, size_t value)
     {
         return {static_cast<uint8_t>(type | 24), static_cast<uint8_t>(value)};
     }
-    REQUIRE(value <= 0xffff);
+    if (value <= 0xffff)
+    {
+        return {
+          static_cast<uint8_t>(type | 25),
+          static_cast<uint8_t>(value >> 8),
+          static_cast<uint8_t>(value)};
+    }
+    REQUIRE(value <= 0xffffffff);
     return {
-      static_cast<uint8_t>(type | 25),
+      static_cast<uint8_t>(type | 26),
+      static_cast<uint8_t>(value >> 24),
+      static_cast<uint8_t>(value >> 16),
       static_cast<uint8_t>(value >> 8),
       static_cast<uint8_t>(value)};
 }
@@ -896,13 +905,14 @@ std::vector<uint8_t> depth_cap_maps_duplicate_control()
 }
 
 // MAX_DEPTH nested arrays, the innermost holding the zeros that bring the
-// document to 64 KiB, the longest protected header or UVM endorsement that
+// document to 1 MiB, the longest protected header or UVM endorsement that
 // COSE and CACI verification parse.
 std::vector<uint8_t> depth_cap_arrays_fixture()
 {
-    constexpr size_t len = 64 * 1024;
+    constexpr size_t len = 1024 * 1024;
     std::vector<uint8_t> document(MAX_DEPTH - 1, 0x81);
-    const size_t items = len - document.size() - 3;
+    // The innermost array's head is five bytes.
+    const size_t items = len - document.size() - 5;
     const std::vector<uint8_t> items_head = head(4, items);
     document.insert(document.end(), items_head.begin(), items_head.end());
     document.insert(document.end(), items, 0x00);
@@ -1025,8 +1035,8 @@ TEST_CASE("cbor handle: nondet_parse meets the deadline at MAX_DEPTH")
 {
     using Clock = std::chrono::steady_clock;
     // Generous for the unoptimized library this suite links, where the
-    // fixtures take about 3 s.
-    constexpr auto deadline = std::chrono::seconds(15);
+    // fixtures take about 35 s, nearly all of it in the array fixture.
+    constexpr auto deadline = std::chrono::seconds(120);
     // The message of the decode failure that parsing `raw` at MAX_DEPTH ends
     // in.
     const auto failure = [](const std::vector<uint8_t>& raw) -> std::string {

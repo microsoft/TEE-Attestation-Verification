@@ -51,7 +51,7 @@ pub const COSE_ALG_PS512: i64 = -39;
 /// Parsing CBOR can cost time proportional to the nesting depth times the
 /// input length, so the length of these untrusted bytes is bounded before
 /// they are parsed.
-pub const MAX_COSE_PROTECTED_HEADER_LEN: usize = 64 * 1024;
+pub const MAX_COSE_PROTECTED_HEADER_LEN: usize = 1024 * 1024;
 
 /// Decode serialized protected-header bytes, as the verifiers do.
 ///

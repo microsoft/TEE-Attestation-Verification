@@ -602,16 +602,21 @@ const FIXTURE_LEN: usize = 128 * 1024;
 /// Fixture keys share a long prefix, so comparing two scans most bytes.
 const FIXTURE_KEY_LEN: usize = 23;
 
-/// The preferred head of an item of `major` type whose argument, below 2^16,
+/// The preferred head of an item of `major` type whose argument, below 2^32,
 /// is `value`.
 fn head(major: u8, value: usize) -> Vec<u8> {
     let major = major << 5;
     match value {
         0..=23 => vec![major | value as u8],
         24..=0xff => vec![major | 24, value as u8],
-        _ => {
+        0x100..=0xffff => {
             let mut head = vec![major | 25];
-            head.extend_from_slice(&u16::try_from(value).unwrap().to_be_bytes());
+            head.extend_from_slice(&(value as u16).to_be_bytes());
+            head
+        }
+        _ => {
+            let mut head = vec![major | 26];
+            head.extend_from_slice(&u32::try_from(value).unwrap().to_be_bytes());
             head
         }
     }
@@ -784,7 +789,7 @@ fn hard_cap_maps_duplicate_control() -> Vec<u8> {
 
 /// As long as the longest protected header or UVM endorsement that COSE and
 /// CACI verification parse.
-const HARD_CAP_ARRAYS_FIXTURE_LEN: usize = 64 * 1024;
+const HARD_CAP_ARRAYS_FIXTURE_LEN: usize = 1024 * 1024;
 
 /// As many nested arrays as the depth cap allows, the innermost holding the
 /// zeros that bring the document to [`HARD_CAP_ARRAYS_FIXTURE_LEN`]. Every
@@ -793,16 +798,17 @@ const HARD_CAP_ARRAYS_FIXTURE_LEN: usize = 64 * 1024;
 fn hard_cap_arrays_fixture() -> Vec<u8> {
     let (depth, _) = HARD_CAP_BOUNDS;
     let mut document = vec![0x81; depth - 1];
-    let items = HARD_CAP_ARRAYS_FIXTURE_LEN - document.len() - 3;
+    // The innermost array's head is five bytes.
+    let items = HARD_CAP_ARRAYS_FIXTURE_LEN - document.len() - 5;
     document.extend(head(4, items));
     document.resize(document.len() + items, 0x00);
     assert_eq!(document.len(), HARD_CAP_ARRAYS_FIXTURE_LEN);
     document
 }
 
-/// Generous for a debug build, where the array fixture takes about 2.5 s and
+/// Generous for a debug build, where the array fixture takes about 35 s and
 /// the map fixture under a second.
-const HARD_CAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+const HARD_CAP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Like [`within_deadline`] for [`HARD_CAP_DEADLINE`], reporting the time.
 fn within_hard_cap_deadline<T>(what: &str, run: impl FnOnce() -> T) -> T {
@@ -862,7 +868,7 @@ fn bounded_parsing_meets_the_deadline_at_the_hard_caps() {
     }
     assert_eq!(
         array.len().unwrap(),
-        HARD_CAP_ARRAYS_FIXTURE_LEN - depth - 2
+        HARD_CAP_ARRAYS_FIXTURE_LEN - depth - 4
     );
     // Past the depth cap, the walk still makes a pass for each level first.
     let deep_arrays = deep_array_fixture();

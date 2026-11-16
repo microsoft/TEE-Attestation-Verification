@@ -46,7 +46,7 @@ extern "C" {
  * parsing CBOR can cost time proportional to the nesting depth times the input
  * length, so a longer one fails with TAV_ERROR_CACI_COSE without being parsed.
  */
-#define TAV_CACI_MAX_UVM_ENDORSEMENT_LEN 65536
+#define TAV_CACI_MAX_UVM_ENDORSEMENT_LEN 1048576
 
 /*
  * Verify an ACI/UVM endorsement COSE blob against a caller-pinned did:x509 root.

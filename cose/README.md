@@ -31,7 +31,7 @@ recommended limits for untrusted input: larger ones, through
 
 Parsing can cost time proportional to the nesting depth times the input length.
 The verifiers reject a protected header longer than
-`MAX_COSE_PROTECTED_HEADER_LEN` (64 KiB) before decoding it, as
+`MAX_COSE_PROTECTED_HEADER_LEN` (1 MiB) before decoding it, as
 `parse_protected_header` does. Nothing bounds an envelope: bound the length of
 an untrusted one before parsing it.
 

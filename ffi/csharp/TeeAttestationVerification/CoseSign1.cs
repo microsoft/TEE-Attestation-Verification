@@ -7,7 +7,7 @@ namespace TeeAttestationVerification;
 public sealed class CoseSign1 : IDisposable
 {
     // Mirrors TAV_COSE_MAX_PROTECTED_HEADER_LEN, which native verification enforces.
-    private const int MaximumProtectedHeaderLength = 64 * 1024;
+    private const int MaximumProtectedHeaderLength = 1024 * 1024;
 
     private readonly SafeCborValueHandle _handle;
 
@@ -48,7 +48,7 @@ public sealed class CoseSign1 : IDisposable
 
     /// <summary>Parses and returns the protected header as an owned CBOR value.</summary>
     /// <exception cref="VerifyException">
-    /// The protected header is longer than 64 KiB, the limit verification
+    /// The protected header is longer than 1 MiB, the limit verification
     /// applies, or is not valid supported CBOR.
     /// </exception>
     public CborValue GetProtectedHeader()
@@ -70,7 +70,7 @@ public sealed class CoseSign1 : IDisposable
     /// <param name="coseAlgorithm">The signature algorithm required by the relying party.</param>
     /// <exception cref="VerifyException">
     /// Key import, envelope validation, or signature verification fails, or the
-    /// protected header is longer than 64 KiB.
+    /// protected header is longer than 1 MiB.
     /// </exception>
     public void VerifyEmbedded(
         ReadOnlyMemory<byte> spkiDer,
@@ -97,7 +97,7 @@ public sealed class CoseSign1 : IDisposable
     /// <param name="coseAlgorithm">The signature algorithm required by the relying party.</param>
     /// <exception cref="VerifyException">
     /// Key import, envelope validation, or signature verification fails, or the
-    /// protected header is longer than 64 KiB.
+    /// protected header is longer than 1 MiB.
     /// </exception>
     public void VerifyDetached(
         ReadOnlyMemory<byte> payload,
