@@ -116,8 +116,8 @@ public static class AttestationVerifier
 
     /// <summary>Authenticates a CACI UVM endorsement against a trusted DID x509 policy.</summary>
     /// <param name="uvmEndorsement">
-    /// The encoded COSE UVM endorsement. One longer than 1 MiB is rejected
-    /// before it is parsed.
+    /// The encoded COSE UVM endorsement. Its size is unchecked up to 1 GiB:
+    /// bound untrusted input before calling.
     /// </param>
     /// <param name="trustedDidX509">The trusted DID x509 policy string.</param>
     /// <returns>An owned verified CBOR endorsement. Dispose it after use.</returns>

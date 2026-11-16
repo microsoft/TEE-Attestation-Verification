@@ -224,49 +224,29 @@ public sealed class CborAndCoseTests
     }
 
     [Fact]
-    public void ProtectedHeaderOverTheLengthLimitIsRejected()
+    public void LargeProtectedHeaderIsDecoded()
     {
-        int limit = FixtureData.ReadCHeaderLimit(
-            "ffi/include/tav/cose.h", "TAV_COSE_MAX_PROTECTED_HEADER_LEN");
-
-        // At the limit the header is decoded, so verification reaches the
-        // signature, which was made over a different header.
-        using (CborValue root = CborValue.FromBytes(
-            BuildSign1(embeddedPayload: true, PaddedProtectedHeader(limit))))
-        using (CoseSign1 sign1 = root.AsCoseSign1())
-        {
-            using CborValue protectedHeader = sign1.GetProtectedHeader();
-            using CborValue algorithm = protectedHeader.MapAt(1L);
-            Assert.Equal(-7, algorithm.GetInt64());
-            VerifyException signatureError = Assert.Throws<VerifyException>(
-                () => sign1.VerifyEmbedded(Spki, CoseAlgorithm.Es256));
-            Assert.Equal(ErrorCode.CoseVerification, signatureError.Code);
-            Assert.Contains("signature verification failed", signatureError.Message);
-        }
-
-        // A byte longer, the header is rejected by its length alone. The
-        // envelope still parses.
-        string overLimit = $"protected header is {limit + 1} bytes, over the {limit}-byte limit";
+        // The header is decoded whatever its size, so verification reaches
+        // the signature, which was made over a different header.
+        byte[] header = PaddedProtectedHeader((1 << 20) + 1);
         using CborValue embeddedRoot = CborValue.FromBytes(
-            BuildSign1(embeddedPayload: true, PaddedProtectedHeader(limit + 1)));
+            BuildSign1(embeddedPayload: true, header));
         using CoseSign1 embedded = embeddedRoot.AsCoseSign1();
-        Assert.Equal(limit + 1, embedded.GetProtectedBytes().Length);
-        VerifyException headerError = Assert.Throws<VerifyException>(
-            () => embedded.GetProtectedHeader());
-        Assert.Equal(ErrorCode.CborDecodeFailed, headerError.Code);
-        Assert.Equal(overLimit, headerError.Message);
+        using CborValue protectedHeader = embedded.GetProtectedHeader();
+        using CborValue algorithm = protectedHeader.MapAt(1L);
+        Assert.Equal(-7, algorithm.GetInt64());
         VerifyException embeddedError = Assert.Throws<VerifyException>(
             () => embedded.VerifyEmbedded(Spki, CoseAlgorithm.Es256));
         Assert.Equal(ErrorCode.CoseVerification, embeddedError.Code);
-        Assert.Equal(overLimit, embeddedError.Message);
+        Assert.Contains("signature verification failed", embeddedError.Message);
 
         using CborValue detachedRoot = CborValue.FromBytes(
-            BuildSign1(embeddedPayload: false, PaddedProtectedHeader(limit + 1)));
+            BuildSign1(embeddedPayload: false, header));
         using CoseSign1 detached = detachedRoot.AsCoseSign1();
         VerifyException detachedError = Assert.Throws<VerifyException>(
             () => detached.VerifyDetached(Payload, Spki, CoseAlgorithm.Es256));
         Assert.Equal(ErrorCode.CoseVerification, detachedError.Code);
-        Assert.Equal(overLimit, detachedError.Message);
+        Assert.Contains("signature verification failed", detachedError.Message);
     }
 
     [Fact]

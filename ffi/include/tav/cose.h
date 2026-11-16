@@ -28,14 +28,9 @@ extern "C" {
  */
 
 /*
- * Longest protected header, in bytes, that verification decodes. A longer one
- * fails verification with TAV_ERROR_COSE_VERIFICATION without being parsed.
- *
- * Parsing CBOR can cost time proportional to the nesting depth times the input
- * length, so apply the same bound before decoding a protected header with
- * tav_cbor_nondet_parse.
+ * Input sizes are unchecked: bound untrusted input before parsing or verifying
+ * it.
  */
-#define TAV_COSE_MAX_PROTECTED_HEADER_LEN 1048576
 
 typedef enum TavCoseAlgorithm {
     TAV_COSE_ALG_ES256 = -7,

@@ -220,11 +220,10 @@ impl CoseSign1 {
         required_bytes(self.as_native().array_at(3)?, "signature")
     }
 
-    /// Decode the protected header. A header longer than 1 MiB is rejected,
-    /// as it is by `verify_embedded` and `verify_detached`.
+    /// Decode the protected header.
     pub fn protected_header(&self) -> Result<CborValue, String> {
         let protected = borrowed_bytes(self.as_native().array_at(0)?, "protected")?;
-        cose::parse_protected_header(protected).map(CborValue::from_native)
+        cose::CborValue::parse_nondet(protected).map(CborValue::from_native)
     }
 }
 

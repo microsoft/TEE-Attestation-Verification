@@ -114,9 +114,7 @@ can cost time proportional to the depth limit times the input length, and each
 non-deterministic parse allocates scratch sized by the depth limit, whatever
 the input length. Expect a document nested to the hard cap to take up to four
 times as long to parse as one nested to the default; `cbor.h` gives the scratch
-sizes. COSE and CACI verification bound what they parse themselves: protected
-headers at `TAV_COSE_MAX_PROTECTED_HEADER_LEN` and UVM endorsements at
-`TAV_CACI_MAX_UVM_ENDORSEMENT_LEN`, both 1 MiB.
+sizes. COSE and CACI verification leave input sizes unchecked too.
 
 ## SNP verification
 
