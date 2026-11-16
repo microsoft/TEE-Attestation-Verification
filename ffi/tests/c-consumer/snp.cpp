@@ -5,6 +5,10 @@
 
 #include "support.h"
 
+#include <climits>
+#include <cstdlib>
+#include <memory>
+
 using namespace tav_test;
 
 namespace {
@@ -233,3 +237,30 @@ TEST_CASE("snp: a length no slice can have is rejected before any dereference") 
     CHECK(report == nullptr);
     tav_error_free(error);
 }
+
+#if PTRDIFF_MAX > INT_MAX
+TEST_CASE("snp: a PEM longer than INT_MAX is an invalid argument") {
+    MilanInputs in = load_milan_inputs();
+    // Zeroed pages that are never read: the length alone rejects the PEM.
+    const size_t len = static_cast<size_t>(INT_MAX) + 1;
+    std::unique_ptr<uint8_t, void (*)(void *)> ark(
+        static_cast<uint8_t *>(std::calloc(len, 1)), std::free);
+    REQUIRE(ark != nullptr);
+
+    TavSnpAttestationReport *report =
+        reinterpret_cast<TavSnpAttestationReport *>(0x1);
+    TavError *error = tav_verify_snp_attestation(
+        in.report.data(), in.report.size(),
+        ark.get(), len,
+        in.ask.data(), in.ask.size(),
+        in.vcek.data(), in.vcek.size(),
+        &report);
+
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+    CHECK(std::string(tav_error_message(error)) ==
+          "Failed to parse ARK PEM: Input exceeds the OpenSSL API length limit");
+    CHECK(report == nullptr);
+    tav_error_free(error);
+}
+#endif

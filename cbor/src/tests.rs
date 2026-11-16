@@ -787,8 +787,7 @@ fn hard_cap_maps_duplicate_control() -> Vec<u8> {
     document
 }
 
-/// As long as the longest protected header or UVM endorsement that COSE and
-/// CACI verification parse.
+/// Length of [`hard_cap_arrays_fixture`]: 1 MiB.
 const HARD_CAP_ARRAYS_FIXTURE_LEN: usize = 1024 * 1024;
 
 /// As many nested arrays as the depth cap allows, the innermost holding the
@@ -892,6 +891,23 @@ fn bounded_parsing_meets_the_deadline_at_the_hard_caps() {
     within_hard_cap_deadline("its duplicate control", || {
         assert!(bounded(&control, HARD_CAP_BOUNDS).is_err())
     });
+}
+
+/// The crate docs and `tav/cbor.h` give a parsed tree about 40 bytes for
+/// every item on a 64-bit target: an array's children are collected in the
+/// vector that EverCBOR's 40-byte items were read into.
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn a_parsed_item_takes_about_40_bytes() {
+    // [0, 0, ...]
+    const ITEMS: usize = 1024;
+    let mut document = head(4, ITEMS);
+    document.resize(document.len() + ITEMS, 0x00);
+    let CborValue::Array(items) = CborValue::parse_nondet(&document).unwrap() else {
+        panic!("expected an array");
+    };
+    assert_eq!(items.len(), ITEMS);
+    assert!(items.capacity() * std::mem::size_of::<CborValue<'_>>() <= 40 * ITEMS);
 }
 
 // --- Accessor: array index ---

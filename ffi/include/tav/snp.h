@@ -32,7 +32,7 @@ extern "C" {
  *   failure. Inspect failures with tav_error_code and tav_error_message, then
  *   free them with tav_error_free.
  * - Both constructors report invalid inputs and invalid out_report state as
- *   TavError failures. Input sizes are unchecked.
+ *   TavError failures. Input buffers must fit in PTRDIFF_MAX bytes.
  * - Error accessors are defensive for NULL TavError pointers: tav_error_code
  *   returns TAV_ERROR_IS_NULL and tav_error_message returns a static
  *   diagnostic string.

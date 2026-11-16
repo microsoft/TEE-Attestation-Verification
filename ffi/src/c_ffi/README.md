@@ -114,7 +114,8 @@ can cost time proportional to the depth limit times the input length, and each
 non-deterministic parse allocates scratch sized by the depth limit, whatever
 the input length. Expect a document nested to the hard cap to take up to four
 times as long to parse as one nested to the default; `cbor.h` gives the scratch
-sizes. COSE and CACI verification leave input sizes unchecked too.
+sizes and the memory a parsed document takes. COSE and CACI verification leave
+input sizes unchecked too.
 
 ## SNP verification
 

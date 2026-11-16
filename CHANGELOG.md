@@ -30,6 +30,7 @@
 
 - `ChainVerification::WithProvidedArk` verifies the provided ARK's self-signature against the pinned ARK and rejects a corrupted ARK with `InvalidRootCertificate`. (#145)
 - `tav_verify_snp_attestation` copies the report before verification and returns that verified copy, so the returned handle never holds bytes that were not verified. (#151)
+- The OpenSSL backend's `from_pem` and `from_pem_chain` return an error for input longer than `INT_MAX` bytes. (#178)
 
 ## [1.0.8]
 

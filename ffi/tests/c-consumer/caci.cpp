@@ -211,6 +211,47 @@ TEST_CASE("caci: duplicate minimum TCB CPUIDs are rejected") {
     tav_error_free(error);
 }
 
+TEST_CASE("caci: counts no slice can hold are rejected before any dereference") {
+    CaciInputs in = load_caci_inputs();
+    VerifiedArtifacts artifacts;
+    verify_staged_artifacts(in, artifacts);
+
+    struct Case {
+        size_t minimum_tcb_count;
+        size_t policy_digest_count;
+        const char *message;
+    };
+    for (const Case &c : {
+             // The values' length wraps size_t round to 8, one entry's worth.
+             Case{SIZE_MAX / 8 + 2, 1, "minimum_tcb exceeds maximum input size"},
+             // The values' length fits size_t and exceeds PTRDIFF_MAX.
+             Case{SIZE_MAX / 8, 1, "minimum_tcb_values exceeds maximum input size"},
+             // The digests' length wraps size_t round to 32, one digest's worth.
+             Case{1, SIZE_MAX / 32 + 2, "trusted_policy_digests exceeds maximum input size"},
+             // The digests' length fits size_t and exceeds PTRDIFF_MAX.
+             Case{1, SIZE_MAX / 32, "trusted_policy_digests exceeds maximum input size"},
+         }) {
+        TavByteBuffer *report_data = reinterpret_cast<TavByteBuffer *>(0x1);
+        TavError *error = tav_verify_caci_attestation(
+            artifacts.attestation,
+            &kMinimumTcbCpuid,
+            kMinimumTcbValue.data(),
+            c.minimum_tcb_count,
+            in.policy.data(),
+            c.policy_digest_count,
+            artifacts.uvm_endorsement,
+            kUvmFeed, std::strlen(kUvmFeed),
+            kMinimumSvn,
+            &report_data);
+
+        REQUIRE(error != nullptr);
+        CHECK(tav_error_code(error) == TAV_ERROR_INVALID_ARGUMENT);
+        CHECK(std::string(tav_error_message(error)) == c.message);
+        CHECK(report_data == nullptr);
+        tav_error_free(error);
+    }
+}
+
 TEST_CASE("caci: uvm-endorsement handle out-parameter is write-only on failure") {
     // A non-null sentinel must be overwritten with NULL before any fallible work.
     TavCborHandle *uvm = reinterpret_cast<TavCborHandle *>(0x1);
