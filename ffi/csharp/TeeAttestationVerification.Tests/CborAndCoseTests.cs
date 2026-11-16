@@ -52,7 +52,7 @@ public sealed class CborAndCoseTests
         }
 
         int limit = FixtureData.ReadCHeaderLimit(
-            "ffi/include/tav/cbor.h", "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES");
+            "ffi/include/tav/cbor.h", "TAV_CBOR_MAX_MAP_ENTRIES");
         byte[] atLimitBytes = FlatMap(limit);
         using CborValue atLimit = CborValue.FromBytes(atLimitBytes);
         Assert.Equal(limit, atLimit.GetLength());

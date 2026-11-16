@@ -199,10 +199,10 @@ static void parsing_and_serialization(void)
     expect(tav_cbor_nondet_parse(noncanonical, 2, 16, &value), TAV_ERROR_OK);
     tav_cbor_free(value);
 
-    /* Map limits: a map of TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES entries parses and
-     * one entry more is rejected, as is {{}: 0}. Deterministic parsing takes
-     * neither limit. Keys from 24 up take a 0x18 head. */
-    enum { ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES };
+    /* Map limits: a map of TAV_CBOR_MAX_MAP_ENTRIES entries parses and one
+     * entry more is rejected, as is {{}: 0}. Deterministic parsing accepts
+     * all three. Keys from 24 up take a 0x18 head. */
+    enum { ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES };
     _Static_assert(ENTRIES >= 24 && ENTRIES < 255, "the map head below takes a one-byte count");
     uint8_t wide[2 + 3 * (ENTRIES + 1)];
     for (size_t entries = ENTRIES; entries <= ENTRIES + 1; ++entries) {

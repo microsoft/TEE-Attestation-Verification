@@ -865,13 +865,13 @@ std::vector<uint8_t> deep_array_fixture()
     return document;
 }
 
-// MAX_DEPTH nested maps of DEFAULT_MAX_MAP_ENTRIES entries around an empty
-// map, each the value of its parent's last key. The validator sorts a full
-// map at every level of its scratch. About 23 KiB.
+// MAX_DEPTH nested maps of MAX_MAP_ENTRIES entries around an empty map, each
+// the value of its parent's last key. The validator sorts a full map at every
+// level of its scratch. About 23 KiB.
 std::vector<uint8_t> depth_cap_maps_fixture()
 {
     // A map whose last value is whatever follows it.
-    std::vector<uint8_t> open = flat_map(DEFAULT_MAX_MAP_ENTRIES);
+    std::vector<uint8_t> open = flat_map(MAX_MAP_ENTRIES);
     open.pop_back();
     std::vector<uint8_t> document;
     for (size_t level = 0; level < MAX_DEPTH; ++level)
@@ -888,10 +888,10 @@ std::vector<uint8_t> depth_cap_maps_duplicate_control()
 {
     std::vector<uint8_t> document = depth_cap_maps_fixture();
     // The key is a 0x18 head and one byte, and ends where its value starts.
-    const size_t value = flat_map(DEFAULT_MAX_MAP_ENTRIES).size() - 1;
+    const size_t value = flat_map(MAX_MAP_ENTRIES).size() - 1;
     REQUIRE(document[value - 2] == 0x18);
-    REQUIRE(document[value - 1] == DEFAULT_MAX_MAP_ENTRIES - 1);
-    document[value - 1] = static_cast<uint8_t>(DEFAULT_MAX_MAP_ENTRIES - 2);
+    REQUIRE(document[value - 1] == MAX_MAP_ENTRIES - 1);
+    document[value - 1] = static_cast<uint8_t>(MAX_MAP_ENTRIES - 2);
     return document;
 }
 
@@ -914,18 +914,18 @@ std::vector<uint8_t> depth_cap_arrays_fixture()
 
 TEST_CASE("cbor handle: nondet_parse caps map entries and rejects map keys")
 {
-    static_assert(DEFAULT_MAX_MAP_ENTRIES == TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES);
+    static_assert(MAX_MAP_ENTRIES == TAV_CBOR_MAX_MAP_ENTRIES);
 
-    const std::vector<uint8_t> at_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES);
-    const std::vector<uint8_t> over_limit = flat_map(DEFAULT_MAX_MAP_ENTRIES + 1);
-    CHECK(nondet_parse(at_limit).size() == DEFAULT_MAX_MAP_ENTRIES);
+    const std::vector<uint8_t> at_limit = flat_map(MAX_MAP_ENTRIES);
+    const std::vector<uint8_t> over_limit = flat_map(MAX_MAP_ENTRIES + 1);
+    CHECK(nondet_parse(at_limit).size() == MAX_MAP_ENTRIES);
     CHECK(nondet_parse(at_limit).det_serialize() == at_limit);
     // The limit holds whatever depth the caller asks for.
     expect_error([&] { (void)nondet_parse(over_limit); }, ErrorCode::CBOR_DECODE_FAILED);
     expect_error([&] { (void)nondet_parse(over_limit, MAX_DEPTH); }, ErrorCode::CBOR_DECODE_FAILED);
-    // det_parse and serialization take no entry limit.
+    // det_parse and serialization accept the map over the limit.
     const Value det = det_parse(over_limit);
-    CHECK(det.size() == DEFAULT_MAX_MAP_ENTRIES + 1);
+    CHECK(det.size() == MAX_MAP_ENTRIES + 1);
     CHECK(det.det_serialize() == over_limit);
     CHECK(det.nondet_serialize() == over_limit);
 
@@ -1000,8 +1000,8 @@ TEST_CASE("cbor handle: nondet_parse meets the deadline on adversarial fixtures"
 {
     using Clock = std::chrono::steady_clock;
     constexpr auto deadline = std::chrono::seconds(2);
-    const std::vector<uint8_t> fixture = large_fixture(DEFAULT_MAX_MAP_ENTRIES, false);
-    const std::vector<uint8_t> control = large_fixture(DEFAULT_MAX_MAP_ENTRIES, true);
+    const std::vector<uint8_t> fixture = large_fixture(MAX_MAP_ENTRIES, false);
+    const std::vector<uint8_t> control = large_fixture(MAX_MAP_ENTRIES, true);
     const std::vector<uint8_t> nested_keys = nested_key_fixture();
     const std::vector<uint8_t> deep_arrays = deep_array_fixture();
 
@@ -1017,7 +1017,7 @@ TEST_CASE("cbor handle: nondet_parse meets the deadline on adversarial fixtures"
     REQUIRE(parsed.size() > 16);
     for (size_t i = 0; i + 1 < parsed.size(); ++i)
     {
-        CHECK(parsed.array_at(i).size() == DEFAULT_MAX_MAP_ENTRIES);
+        CHECK(parsed.array_at(i).size() == MAX_MAP_ENTRIES);
     }
 }
 
@@ -1046,8 +1046,8 @@ TEST_CASE("cbor handle: nondet_parse meets the deadline at MAX_DEPTH")
     const std::vector<uint8_t> control = depth_cap_maps_duplicate_control();
     const std::vector<uint8_t> arrays = depth_cap_arrays_fixture();
     const std::vector<uint8_t> deep_arrays = deep_array_fixture();
-    const std::vector<uint8_t> fixture = large_fixture(DEFAULT_MAX_MAP_ENTRIES, false);
-    const std::vector<uint8_t> fixture_control = large_fixture(DEFAULT_MAX_MAP_ENTRIES, true);
+    const std::vector<uint8_t> fixture = large_fixture(MAX_MAP_ENTRIES, false);
+    const std::vector<uint8_t> fixture_control = large_fixture(MAX_MAP_ENTRIES, true);
 
     const auto start = Clock::now();
     // Asking for more than MAX_DEPTH parses within it.

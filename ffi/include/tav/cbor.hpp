@@ -27,8 +27,8 @@
 //   Callers must bound the depth they build. Copying, materializing, or
 //   destroying an extremely deep Value can exhaust the process stack and
 //   abort.
-// - nondet_parse rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries
-//   and maps inside map keys. det_parse and serialization apply neither.
+// - nondet_parse rejects maps with more than MAX_MAP_ENTRIES entries and maps
+//   inside map keys. det_parse and serialization apply neither.
 //
 // Untrusted input:
 // - Keep the default depth, and bound the length of the input before parsing
@@ -37,9 +37,9 @@
 //   expect a document nested to MAX_DEPTH to take up to four times as long as
 //   one nested to DEFAULT_MAX_DEPTH.
 // - Every nondet parse allocates and zeroes
-//   3 * (max_depth + 1) * DEFAULT_MAX_MAP_ENTRIES size_t words of scratch,
-//   whatever the input length: about 52 KB at DEFAULT_MAX_DEPTH on a 64-bit
-//   target, and about 0.2 MB at MAX_DEPTH.
+//   3 * (max_depth + 1) * MAX_MAP_ENTRIES size_t words of scratch, whatever
+//   the input length: about 52 KB at DEFAULT_MAX_DEPTH on a 64-bit target,
+//   and about 0.2 MB at MAX_DEPTH.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>
@@ -63,7 +63,7 @@ constexpr size_t MAX_DEPTH = TAV_CBOR_MAX_DEPTH;
 constexpr size_t DEFAULT_MAX_DEPTH = TAV_CBOR_DEFAULT_MAX_DEPTH;
 
 /// Key/value pairs nondet_parse allows in any one map.
-constexpr size_t DEFAULT_MAX_MAP_ENTRIES = TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES;
+constexpr size_t MAX_MAP_ENTRIES = TAV_CBOR_MAX_MAP_ENTRIES;
 
 /// Value kinds. INVALID is reported for an empty Value.
 enum class Kind : int
@@ -415,8 +415,8 @@ inline Value make_tagged(uint64_t tag, Value&& payload)
 
 /// Borrows raw, which must outlive the returned value.
 ///
-/// Rejects maps with more than DEFAULT_MAX_MAP_ENTRIES entries and maps inside
-/// map keys. Map keys use RFC 8949 equivalence. For untrusted input, bound
+/// Rejects maps with more than MAX_MAP_ENTRIES entries and maps inside map
+/// keys. Map keys use RFC 8949 equivalence. For untrusted input, bound
 /// raw.size() and keep the default depth; see the notes at the top of this
 /// header.
 inline Value nondet_parse(std::span<const uint8_t> raw, size_t max_depth = DEFAULT_MAX_DEPTH)

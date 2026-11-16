@@ -615,7 +615,7 @@ fn nondet_parsing_enforces_the_map_entry_limit() {
         assert!(parse_nondet(&[head, &over_limit].concat()).is_err());
     }
 
-    // Det parsing and serialization take no entry limit.
+    // Det parsing and serialization accept the map over the limit.
     let handle = decode(&over_limit, MAX_DEPTH_LIMIT, true).unwrap();
     assert_eq!(encode_det(handle).unwrap(), over_limit);
     assert_eq!(encode_nondet(handle).unwrap(), over_limit);
@@ -1373,10 +1373,7 @@ fn c_header_publishes_the_map_entry_limit() {
         .collect();
     assert_eq!(
         declared,
-        [(
-            "TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES",
-            cbor::MAX_CBOR_MAP_ENTRIES
-        )],
+        [("TAV_CBOR_MAX_MAP_ENTRIES", cbor::MAX_CBOR_MAP_ENTRIES)],
         "the map entry limit in cbor.h must match the Rust constant"
     );
 }

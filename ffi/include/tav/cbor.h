@@ -73,10 +73,9 @@ typedef struct TavCborHandle TavCborHandle;
  *   untrusted input, the limit the C++ wrapper applies unless told otherwise
  *   and the one COSE and CACI verification parse within. TAV_CBOR_MAX_DEPTH
  *   is the hard cap, which a larger request is clamped to.
- * - Map entries: non-deterministic parsing applies
- *   TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES, as COSE and CACI verification do.
- *   Deterministic parsing and serialization apply neither the entry limit
- *   nor the map key rule.
+ * - Map entries: non-deterministic parsing applies TAV_CBOR_MAX_MAP_ENTRIES,
+ *   as COSE and CACI verification do. Deterministic parsing and
+ *   serialization apply neither the entry limit nor the map key rule.
  *
  * Builders do not enforce these limits. Callers must bound the depth they
  * build. Copying, materializing, or dropping an extremely deep value can
@@ -91,16 +90,16 @@ typedef struct TavCborHandle TavCborHandle;
  *   it is nested in. Expect a document nested to the hard cap to take up to
  *   four times as long as one nested to the default.
  * - Every non-deterministic parse allocates and zeroes
- *   3 * (max_depth + 1) * TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES size_t words of
- *   scratch, whatever the input length. On a 64-bit target that is about
- *   52 KB at the default depth and about 0.2 MB at the hard cap.
+ *   3 * (max_depth + 1) * TAV_CBOR_MAX_MAP_ENTRIES size_t words of scratch,
+ *   whatever the input length. On a 64-bit target that is about 52 KB at the
+ *   default depth and about 0.2 MB at the hard cap.
  *
  * COSE and CACI verification bound what they parse themselves; see
  * tav/cose.h and tav/caci.h.
  */
 #define TAV_CBOR_DEFAULT_MAX_DEPTH 16
 #define TAV_CBOR_MAX_DEPTH 64
-#define TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES 128
+#define TAV_CBOR_MAX_MAP_ENTRIES 128
 
 /*
  * Value kinds, named for use with tav_cbor_kind. The enum type itself is not

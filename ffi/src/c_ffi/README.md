@@ -99,14 +99,14 @@ while using a view. For handle-owned payloads, keep the accessor's handle alive.
 | Limit | Value |
 | --- | --- |
 | Nesting depth, `max_depth` | Default `TAV_CBOR_DEFAULT_MAX_DEPTH` (16), hard cap `TAV_CBOR_MAX_DEPTH` (64) |
-| Key/value pairs in any map | `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` (128) |
+| Key/value pairs in any map | `TAV_CBOR_MAX_MAP_ENTRIES` (128) |
 
 Every parser and serializer takes `max_depth`, and a request above the hard cap
 is clamped to it. Non-deterministic parsing also caps the entries of every map
-at `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` and rejects maps inside map keys, which
-bounds validation time by the input length and the limits. The C++ wrapper
-applies the default depth unless told otherwise, and COSE and CACI verification
-parse within it.
+at `TAV_CBOR_MAX_MAP_ENTRIES` and rejects maps inside map keys, which bounds
+validation time by the input length and the limits. The C++ wrapper applies the
+default depth unless told otherwise, and COSE and CACI verification parse
+within it.
 
 Keep the default depth for untrusted input, and bound its length before parsing
 it, since no parser does. A larger depth makes parsing more expensive: parsing

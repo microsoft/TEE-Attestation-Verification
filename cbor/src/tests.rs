@@ -748,8 +748,8 @@ fn bounded_parsing_meets_the_deadline() {
 
 /// The largest limits the C ABI parses within: `TAV_CBOR_MAX_DEPTH`, the most
 /// depth a caller can ask for, and the default entry limit, which it always
-/// applies. This crate caps neither. A parse within them sorts in
-/// `3 * 65 * 128` words of scratch, about 0.2 MB.
+/// applies. This crate takes larger ones as given. A parse within them sorts
+/// in `3 * 65 * 128` words of scratch, about 0.2 MB.
 const HARD_CAP_BOUNDS: (usize, usize) = (64, MAX_CBOR_MAP_ENTRIES);
 
 /// As many nested maps as the depth cap allows around an empty map, each the

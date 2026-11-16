@@ -47,7 +47,7 @@ test('maps inside keys and maps over the entry limit are rejected', () => {
     }
     return Uint8Array.from(bytes);
   };
-  const limit = cHeaderLimit('cbor.h', 'TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES');
+  const limit = cHeaderLimit('cbor.h', 'TAV_CBOR_MAX_MAP_ENTRIES');
   const atLimitBytes = flatMap(limit);
   const atLimit = pkg.CborValue.from_bytes(atLimitBytes);
   assert.equal(atLimit.len(), limit);

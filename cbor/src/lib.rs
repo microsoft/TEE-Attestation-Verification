@@ -27,10 +27,10 @@
 //! limits.
 //!
 //! The defaults are the recommended limits for untrusted input.
-//! [`CborValue::parse_with_limits`] takes others. This crate applies no hard
-//! cap to them; the C ABI caps the depth and applies the default entry limit.
-//! Larger limits make untrusted input more expensive to parse, so do not
-//! raise them for it:
+//! [`CborValue::parse_with_limits`] takes others and applies them as given;
+//! the C ABI caps the depth and applies the default entry limit. Larger
+//! limits make untrusted input more expensive to parse, so do not raise them
+//! for it:
 //!
 //! - After validation, building the [`CborValue`] tree skips over each child
 //!   of every array and map to reach the next, so an item is walked once for
