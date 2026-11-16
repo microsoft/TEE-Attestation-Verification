@@ -1,0 +1,2 @@
+# Vendored upstream sources: collapse in GitHub diffs and exclude from language stats.
+cbor/vendor/** linguist-generated=true linguist-vendored=true
