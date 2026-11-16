@@ -17,8 +17,8 @@ limits, recommended for untrusted input, and this binding offers no larger
 ones. It does not bound its input, and parsing can cost time proportional to
 the nesting depth times the input length: bound the length of untrusted input
 before parsing it. Verification bounds what it parses itself:
-`verify_uvm_endorsement_async` rejects an endorsement longer than 64 KiB, and
-`CoseSign1` rejects a protected header longer than 64 KiB.
+`verify_uvm_endorsement_async` rejects an endorsement longer than 1 MiB, and
+`CoseSign1` rejects a protected header longer than 1 MiB.
 
 ## Consuming a release tarball
 

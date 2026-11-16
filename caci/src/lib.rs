@@ -61,7 +61,7 @@ pub const SNP_REPORT_DATA_LEN: usize = attestation_report_field_len(|report| &re
 /// The endorsement is parsed before anything authenticates it, and parsing
 /// CBOR can cost time proportional to the nesting depth times the input
 /// length, so the length is bounded first.
-pub const MAX_UVM_ENDORSEMENT_LEN: usize = 64 * 1024;
+pub const MAX_UVM_ENDORSEMENT_LEN: usize = 1024 * 1024;
 const MAX_GUEST_VMPL: u32 = 3;
 const JSON_LAUNCH_MEASUREMENT: &str = "x-ms-sevsnpvm-launchmeasurement";
 const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";

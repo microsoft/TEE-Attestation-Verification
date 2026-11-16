@@ -561,16 +561,21 @@ fn serialization_honours_the_depth_ceiling() {
 
 // --- Map limits ---
 
-/// The preferred head of an item of `major` type whose argument, below 2^16,
+/// The preferred head of an item of `major` type whose argument, below 2^32,
 /// is `value`.
 fn head(major: u8, value: usize) -> Vec<u8> {
     let major = major << 5;
     match value {
         0..=23 => vec![major | value as u8],
         24..=0xff => vec![major | 24, value as u8],
-        _ => {
+        0x100..=0xffff => {
             let mut head = vec![major | 25];
-            head.extend_from_slice(&u16::try_from(value).unwrap().to_be_bytes());
+            head.extend_from_slice(&(value as u16).to_be_bytes());
+            head
+        }
+        _ => {
+            let mut head = vec![major | 26];
+            head.extend_from_slice(&u32::try_from(value).unwrap().to_be_bytes());
             head
         }
     }
@@ -771,12 +776,13 @@ fn depth_cap_maps_duplicate_control() -> Vec<u8> {
 
 /// The `cbor` crate's array fixture at the depth cap: [`MAX_DEPTH_LIMIT`]
 /// nested arrays, the innermost holding the zeros that bring the document to
-/// 64 KiB, the longest protected header or UVM endorsement that COSE and CACI
+/// 1 MiB, the longest protected header or UVM endorsement that COSE and CACI
 /// verification parse.
 fn depth_cap_arrays_fixture() -> Vec<u8> {
-    const LEN: usize = 64 * 1024;
+    const LEN: usize = 1024 * 1024;
     let mut document = vec![0x81; MAX_DEPTH_LIMIT - 1];
-    let items = LEN - document.len() - 3;
+    // The innermost array's head is five bytes.
+    let items = LEN - document.len() - 5;
     document.extend(head(4, items));
     document.resize(document.len() + items, 0x00);
     assert_eq!(document.len(), LEN);
@@ -789,8 +795,9 @@ fn depth_cap_arrays_fixture() -> Vec<u8> {
 #[test]
 #[cfg_attr(miri, ignore = "Miri runs the fixtures far slower than the deadline")]
 fn nondet_parsing_meets_the_deadline_at_the_depth_cap_through_the_abi() {
-    // Generous for a debug build, where the fixtures take about 3 s.
-    const DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+    // Generous for a debug build, where the fixtures take about 35 s, nearly
+    // all of it in the array fixture.
+    const DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
     let (depth, entries) = (MAX_DEPTH_LIMIT, cbor::MAX_CBOR_MAP_ENTRIES);
     let (maps, control, arrays) = (
         depth_cap_maps_fixture(),
