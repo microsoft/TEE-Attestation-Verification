@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Buffers;
+
 namespace TeeAttestationVerification.Tests;
 
 public sealed class PemAndSnpTests
@@ -114,6 +116,19 @@ public sealed class PemAndSnpTests
     }
 
     [Fact]
+    public void VerifySnpAttestationReadsReportLongerThanOneGibibyte()
+    {
+        MilanInputs input = FixtureData.LoadMilan();
+        using UnreadableMemoryManager oversized = new((1024 * 1024 * 1024) + 1);
+
+        // No managed length check runs first, so the input is read.
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+            AttestationVerifier.VerifySnpAttestation(
+                oversized.Memory, input.Ark, input.Ask, input.Vcek));
+        Assert.Equal(UnreadableMemoryManager.ReadMessage, error.Message);
+    }
+
+    [Fact]
     public void FromUnverifiedBytesExposesTamperedReportFields()
     {
         MilanInputs input = FixtureData.LoadMilan();
@@ -137,4 +152,26 @@ public sealed class PemAndSnpTests
     }
 
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
+
+    // Reports a length without backing storage, and throws when read.
+    private sealed class UnreadableMemoryManager(int length) : MemoryManager<byte>
+    {
+        internal const string ReadMessage = "Input was read.";
+
+        public override Memory<byte> Memory => CreateMemory(length);
+
+        public override Span<byte> GetSpan() =>
+            throw new InvalidOperationException(ReadMessage);
+
+        public override MemoryHandle Pin(int elementIndex = 0) =>
+            throw new InvalidOperationException(ReadMessage);
+
+        public override void Unpin()
+        {
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+        }
+    }
 }
