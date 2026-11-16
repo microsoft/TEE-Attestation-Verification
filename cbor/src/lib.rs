@@ -27,9 +27,10 @@
 //! limits.
 //!
 //! The defaults are the recommended limits for untrusted input.
-//! [`CborValue::parse_with_limits`] takes others. This crate applies no hard
-//! cap to them; the C ABI does. Larger limits make untrusted input more
-//! expensive to parse, so do not raise them for it:
+//! [`CborValue::parse_with_limits`] takes others and applies them as given;
+//! the C ABI caps the depth and applies the default entry limit. Larger
+//! limits make untrusted input more expensive to parse, so do not raise them
+//! for it:
 //!
 //! - After validation, building the [`CborValue`] tree skips over each child
 //!   of every array and map to reach the next, so an item is walked once for
@@ -556,17 +557,6 @@ impl<'a> CborValue<'a> {
     /// within the default limits.
     pub fn parse_nondet(bytes: &'a [u8]) -> Result<Self, String> {
         Self::parse::<Nondet>(bytes)
-    }
-
-    /// Parse leniently within `max_depth` and `max_map_entries`.
-    ///
-    /// See [`Self::parse_with_limits`] for scratch requirements and errors.
-    pub fn parse_nondet_bounded(
-        bytes: &'a [u8],
-        max_depth: usize,
-        max_map_entries: usize,
-    ) -> Result<Self, String> {
-        Self::parse_with_limits::<Nondet>(bytes, max_depth, max_map_entries)
     }
 
     /// Parse strictly, rejecting encodings that are not deterministic.
