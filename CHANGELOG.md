@@ -5,7 +5,7 @@
 ### Added
 
 - C++ RAII wrapper for SNP attestation verification: `<tav/snp.hpp>` (`tav::snp::Report`), `<tav/errors.hpp>` (`tav::Exception`), and `<tav/byte_buffer.hpp>` (`tav::ByteBuffer`). (#160)
-- `CborValue::parse_with_limits`, which takes the map entry limit explicitly, with `MAX_CBOR_MAP_ENTRIES` (128) as the default. The C ABI and the C++ wrapper apply the default and publish it as `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` and `tav::cbor::DEFAULT_MAX_MAP_ENTRIES`. The defaults are the recommended limits for untrusted input: larger ones make it more expensive to parse. (#174)
+- `CborValue::parse_with_limits`, which takes the map entry limit explicitly, with `MAX_CBOR_MAP_ENTRIES` (128) as the default. The C ABI and the C++ wrapper apply the default and publish it as `TAV_CBOR_DEFAULT_MAX_MAP_ENTRIES` and `tav::cbor::DEFAULT_MAX_MAP_ENTRIES`. The defaults are the recommended limits for untrusted input: larger ones make it more expensive to parse. (#174, #175)
 - `parse_protected_header` and `MAX_COSE_PROTECTED_HEADER_LEN` in the COSE crate, and `MAX_UVM_ENDORSEMENT_LEN` in the CACI crate, published as `TAV_COSE_MAX_PROTECTED_HEADER_LEN` and `TAV_CACI_MAX_UVM_ENDORSEMENT_LEN` in the C ABI. (#174)
 - `TAV_CBOR_DEFAULT_MAX_DEPTH` (16) in the C ABI and `tav::cbor::DEFAULT_MAX_DEPTH` in the C++ wrapper, matching `MAX_CBOR_NESTING_DEPTH`. (#174)
 
