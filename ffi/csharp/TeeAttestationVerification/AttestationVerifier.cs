@@ -12,10 +12,11 @@ public static class AttestationVerifier
 {
     private const int TcbVersionLength = 8;
     private const int PolicyDigestLength = 32;
-    private const int MaximumMinimumTcbEntries =
-        NativeInput.MaximumInputLength / TcbVersionLength;
-    private const int MaximumPolicyDigestEntries =
-        NativeInput.MaximumInputLength / PolicyDigestLength;
+    // The entries are flattened into one managed array.
+    private static readonly int MaximumMinimumTcbEntries =
+        Array.MaxLength / TcbVersionLength;
+    private static readonly int MaximumPolicyDigestEntries =
+        Array.MaxLength / PolicyDigestLength;
 
     private static readonly Regex PemCertificatePattern = new(
         "-----BEGIN CERTIFICATE-----[\\s\\S]*?-----END CERTIFICATE-----",
@@ -78,10 +79,10 @@ public static class AttestationVerifier
         string askPem,
         string vcekPem)
     {
-        byte[] report = NativeInput.Snapshot(reportBytes, nameof(reportBytes));
-        byte[] ark = NativeInput.Utf8(arkPem, nameof(arkPem));
-        byte[] ask = NativeInput.Utf8(askPem, nameof(askPem));
-        byte[] vcek = NativeInput.Utf8(vcekPem, nameof(vcekPem));
+        byte[] report = NativeInput.Snapshot(reportBytes);
+        byte[] ark = NativeInput.Utf8(arkPem);
+        byte[] ask = NativeInput.Utf8(askPem);
+        byte[] vcek = NativeInput.Utf8(vcekPem);
         unsafe
         {
             fixed (byte* reportPointer = report)
@@ -116,8 +117,8 @@ public static class AttestationVerifier
 
     /// <summary>Authenticates a CACI UVM endorsement against a trusted DID x509 policy.</summary>
     /// <param name="uvmEndorsement">
-    /// The encoded COSE UVM endorsement. Its size is unchecked up to 1 GiB:
-    /// bound untrusted input before calling.
+    /// The encoded COSE UVM endorsement. Its size is unchecked: bound
+    /// untrusted input before calling.
     /// </param>
     /// <param name="trustedDidX509">The trusted DID x509 policy string.</param>
     /// <returns>An owned verified CBOR endorsement. Dispose it after use.</returns>
@@ -126,9 +127,8 @@ public static class AttestationVerifier
         ReadOnlyMemory<byte> uvmEndorsement,
         string trustedDidX509)
     {
-        byte[] endorsement = NativeInput.Snapshot(
-            uvmEndorsement, nameof(uvmEndorsement));
-        byte[] trustedDid = NativeInput.Utf8(trustedDidX509, nameof(trustedDidX509));
+        byte[] endorsement = NativeInput.Snapshot(uvmEndorsement);
+        byte[] trustedDid = NativeInput.Utf8(trustedDidX509);
         unsafe
         {
             fixed (byte* endorsementPointer = endorsement)
@@ -186,7 +186,7 @@ public static class AttestationVerifier
         (uint[] cpuids, byte[] tcbValues) = SnapshotMinimumTcb(minimumTcb);
         (byte[] policies, int policyCount) =
             SnapshotPolicyDigests(trustedCaciExecutionPolicies);
-        byte[] feed = NativeInput.Utf8(uvmFeed, nameof(uvmFeed));
+        byte[] feed = NativeInput.Utf8(uvmFeed);
 
         unsafe
         {

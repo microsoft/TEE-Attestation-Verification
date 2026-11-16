@@ -56,7 +56,7 @@ public sealed class CoseSign1 : IDisposable
         ReadOnlyMemory<byte> spkiDer,
         CoseAlgorithm coseAlgorithm)
     {
-        byte[] key = NativeInput.Snapshot(spkiDer, nameof(spkiDer));
+        byte[] key = NativeInput.Snapshot(spkiDer);
         unsafe
         {
             fixed (byte* keyPointer = key)
@@ -83,8 +83,8 @@ public sealed class CoseSign1 : IDisposable
         ReadOnlyMemory<byte> spkiDer,
         CoseAlgorithm coseAlgorithm)
     {
-        byte[] payloadSnapshot = NativeInput.Snapshot(payload, nameof(payload));
-        byte[] key = NativeInput.Snapshot(spkiDer, nameof(spkiDer));
+        byte[] payloadSnapshot = NativeInput.Snapshot(payload);
+        byte[] key = NativeInput.Snapshot(spkiDer);
         unsafe
         {
             fixed (byte* payloadPointer = payloadSnapshot)

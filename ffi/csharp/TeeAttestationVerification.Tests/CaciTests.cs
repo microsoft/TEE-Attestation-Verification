@@ -154,9 +154,8 @@ public sealed class CaciTests
     private sealed class OversizedMinimumTcbCollection :
         IReadOnlyCollection<(uint Cpuid, ReadOnlyMemory<byte> Tcb)>
     {
-        public int Count => (NativeMaximumInputLength / 8) + 1;
-
-        private const int NativeMaximumInputLength = 1024 * 1024 * 1024;
+        // One entry more than fits flattened into a managed array.
+        public int Count => (Array.MaxLength / 8) + 1;
 
         public IEnumerator<(uint Cpuid, ReadOnlyMemory<byte> Tcb)> GetEnumerator() =>
             throw new InvalidOperationException("Oversized input must not be enumerated.");

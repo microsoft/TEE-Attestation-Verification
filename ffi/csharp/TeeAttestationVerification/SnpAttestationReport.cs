@@ -32,7 +32,7 @@ public sealed class SnpAttestationReport : IDisposable
     public static SnpAttestationReport FromUnverifiedBytes(
         ReadOnlyMemory<byte> reportBytes)
     {
-        byte[] report = NativeInput.Snapshot(reportBytes, nameof(reportBytes));
+        byte[] report = NativeInput.Snapshot(reportBytes);
         unsafe
         {
             fixed (byte* reportPointer = report)

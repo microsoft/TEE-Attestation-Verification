@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-using System.Buffers;
-
 namespace TeeAttestationVerification.Tests;
 
 public sealed class PemAndSnpTests
@@ -113,11 +111,6 @@ public sealed class PemAndSnpTests
         Assert.Throws<ArgumentNullException>(() =>
             AttestationVerifier.VerifySnpAttestation(
                 input.Report, null!, input.Ask, input.Vcek));
-
-        using OversizedMemoryManager oversized = new();
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            AttestationVerifier.VerifySnpAttestation(
-                oversized.Value, input.Ark, input.Ask, input.Vcek));
     }
 
     [Fact]
@@ -144,23 +137,4 @@ public sealed class PemAndSnpTests
     }
 
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
-
-    private sealed class OversizedMemoryManager : MemoryManager<byte>
-    {
-        internal ReadOnlyMemory<byte> Value => CreateMemory((1024 * 1024 * 1024) + 1);
-
-        public override Span<byte> GetSpan() =>
-            throw new InvalidOperationException("Oversized input must be rejected before access.");
-
-        public override MemoryHandle Pin(int elementIndex = 0) =>
-            throw new InvalidOperationException("Oversized input must be rejected before pinning.");
-
-        public override void Unpin()
-        {
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-        }
-    }
 }

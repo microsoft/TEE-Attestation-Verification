@@ -215,12 +215,12 @@ TEST_CASE("snp: unverified report constructor validates pointers") {
     tav_error_free(error);
 }
 
-TEST_CASE("snp: oversized input is rejected before any dereference") {
+TEST_CASE("snp: a length no slice can have is rejected before any dereference") {
     uint8_t dummy = 0;
     TavSnpAttestationReport *report = nullptr;
 
     TavError *error = tav_verify_snp_attestation(
-        &dummy, kMaxInputLen + 1,
+        &dummy, static_cast<size_t>(PTRDIFF_MAX) + 1,
         &dummy, 1,
         &dummy, 1,
         &dummy, 1,
