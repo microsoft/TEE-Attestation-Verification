@@ -119,6 +119,18 @@ jobs:
           rustup update stable
           rustup default stable
 
+      - name: Package Rust crates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-artifacts
+          cargo package --workspace --locked
+          for crate in crypto cbor cose lib caci ffi; do
+            cp "target/package/tee-attestation-verification-${crate}-${VERSION}.crate" \
+              release-artifacts/
+          done
+
       - name: Setup WASM tooling
         shell: bash
         run: |
