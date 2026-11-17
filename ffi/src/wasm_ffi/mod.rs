@@ -13,9 +13,11 @@
 //!
 //! > **Note:** an exported `async fn` runs its body at first poll (a microtask
 //! > after the `Promise` is returned), not synchronously. Owned args (`Vec<u8>`,
-//! > `&str`) are copied at the boundary and always safe; live JS arrays and
-//! > borrowed wasm handles are read only then, so callers must not mutate those
-//! > arrays or free those handles until the promise resolves.
+//! > `&str`) are copied at the boundary and always safe; a live JS array is read
+//! > only then, so callers must not mutate it until the promise settles. No
+//! > exported `async fn` borrows a wasm handle: an export that takes handles is
+//! > a plain `fn` that copies what it needs before it returns its `Promise`, so
+//! > a handle may be freed as soon as the call returns.
 
 #[cfg(target_family = "wasm")]
 pub(crate) mod caci;

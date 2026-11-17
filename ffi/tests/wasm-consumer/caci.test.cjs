@@ -169,3 +169,38 @@ test('verify_caci_attestation returns report data and rejects an empty policy se
     /at least one trusted CACI execution policy/,
   );
 });
+
+// Ownership: verify_caci_attestation copies its inputs before it returns, so
+// the caller may free the handles and reuse the policy array while the promise
+// is still pending.
+test('verify_caci_attestation reads its inputs before it returns', async () => {
+  const { manifest, report, endorsements, uvmEndorsement, policies } = loadCaciInputs();
+
+  const attestation = await pkg.verify_snp_attestation_with_cert_chain_async(report, endorsements);
+  const uvm = await pkg.verify_uvm_endorsement_async(uvmEndorsement, TRUSTED_DIDX509);
+
+  const pending = pkg.verify_caci_attestation(
+    attestation,
+    JSON.stringify(manifest.minimum_tcb),
+    policies,
+    uvm,
+    manifest.uvm_feed,
+    BigInt(manifest.minimum_svn),
+  );
+  attestation.free();
+  uvm.free();
+  policies.length = 0;
+  // Let the allocator reuse what was just freed before the promise first runs.
+  for (let i = 0; i < 16; i++) {
+    pkg.CborValue.from_bytes(Uint8Array.of(0x00));
+  }
+
+  // REPORT_DATA of the aci-report.hex fixture.
+  assert.equal(Buffer.from(await pending).toString('hex'), `deadbeef${'00'.repeat(60)}`);
+
+  // Failure mode: a handle freed before the call is refused by the call itself.
+  assert.throws(
+    () => pkg.verify_caci_attestation(attestation, '', [], uvm, manifest.uvm_feed, 0n),
+    /null pointer passed to rust/,
+  );
+});
