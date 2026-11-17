@@ -140,32 +140,14 @@ internal static class NativeMemory
     }
 }
 
-// Validates and snapshots managed inputs before native calls.
+// Snapshots managed inputs before native calls.
 internal static class NativeInput
 {
-    internal const int MaximumInputLength = 1024 * 1024 * 1024;
+    internal static byte[] Snapshot(ReadOnlyMemory<byte> input) => input.ToArray();
 
-    internal static byte[] Snapshot(ReadOnlyMemory<byte> input, string name)
-    {
-        ValidateLength(input.Length, name);
-        return input.ToArray();
-    }
-
-    internal static byte[] Utf8(string input, string name)
+    internal static byte[] Utf8(string input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        int length = Encoding.UTF8.GetByteCount(input);
-        ValidateLength(length, name);
         return Encoding.UTF8.GetBytes(input);
-    }
-
-    private static void ValidateLength(int length, string name)
-    {
-        if (length > MaximumInputLength)
-        {
-            throw new ArgumentOutOfRangeException(
-                name,
-                $"Input exceeds the {MaximumInputLength}-byte maximum.");
-        }
     }
 }

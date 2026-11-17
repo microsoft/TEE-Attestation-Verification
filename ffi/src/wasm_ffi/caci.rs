@@ -48,7 +48,7 @@ pub async fn verify_snp_attestation_with_cert_chain_async(
 
 /// Verify an ACI/UVM endorsement COSE blob with a caller-pinned did:x509 root.
 ///
-/// An endorsement longer than 1 MiB is rejected before it is parsed.
+/// The endorsement size is unchecked: bound untrusted input before calling.
 #[wasm_bindgen]
 #[cfg(async_crypto)]
 pub async fn verify_uvm_endorsement_async(

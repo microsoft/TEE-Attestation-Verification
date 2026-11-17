@@ -349,33 +349,25 @@ TEST_CASE("cose: detached verification requires a nil payload") {
     }
 }
 
-TEST_CASE("cose: verification rejects a protected header over the length limit") {
-    // At the limit the header is decoded, so verification reaches the signature,
-    // which was made over a different header. A byte longer, the header is
-    // rejected by its length alone. The envelope still parses either way.
-    const std::string over_limit_message =
-        "over the " + std::to_string(TAV_COSE_MAX_PROTECTED_HEADER_LEN) + "-byte limit";
-    for (bool over_limit : {false, true}) {
-        const auto phdr =
-            padded_protected_header(TAV_COSE_MAX_PROTECTED_HEADER_LEN + (over_limit ? 1 : 0));
-        for (bool embedded : {true, false}) {
-            const auto env = build_sign1(phdr, embedded);
-            CborHandle root, sign1;
-            REQUIRE(tav_cbor_nondet_parse(env.data(), env.size(), 64, root.out()) == nullptr);
-            REQUIRE(tav_validate_cose_sign1(root.value, sign1.out()) == nullptr);
-            TavError *error = embedded
-                ? tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
-                                                 TAV_COSE_ALG_ES256)
-                : tav_verify_cose_sign1_detached(
-                      sign1.value, reinterpret_cast<const uint8_t *>(kPayload.data()),
-                      kPayload.size(), kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
-            REQUIRE(error != nullptr);
-            const std::string message = tav_error_message(error);
-            CHECK((message.find(over_limit_message) != std::string::npos) == over_limit);
-            CHECK((message.find("signature verification failed") != std::string::npos) ==
-                  !over_limit);
-            check_error(error, TAV_ERROR_COSE_VERIFICATION);
-        }
+TEST_CASE("cose: verification decodes a large protected header") {
+    // The header is decoded whatever its size, so verification reaches the
+    // signature, which was made over a different header.
+    const auto phdr = padded_protected_header((size_t{1} << 20) + 1);
+    for (bool embedded : {true, false}) {
+        const auto env = build_sign1(phdr, embedded);
+        CborHandle root, sign1;
+        REQUIRE(tav_cbor_nondet_parse(env.data(), env.size(), 64, root.out()) == nullptr);
+        REQUIRE(tav_validate_cose_sign1(root.value, sign1.out()) == nullptr);
+        TavError *error = embedded
+            ? tav_verify_cose_sign1_embedded(sign1.value, kSpki.data(), kSpki.size(),
+                                             TAV_COSE_ALG_ES256)
+            : tav_verify_cose_sign1_detached(
+                  sign1.value, reinterpret_cast<const uint8_t *>(kPayload.data()),
+                  kPayload.size(), kSpki.data(), kSpki.size(), TAV_COSE_ALG_ES256);
+        REQUIRE(error != nullptr);
+        const std::string message = tav_error_message(error);
+        CHECK(message.find("signature verification failed") != std::string::npos);
+        check_error(error, TAV_ERROR_COSE_VERIFICATION);
     }
 }
 

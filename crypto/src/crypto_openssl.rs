@@ -27,6 +27,7 @@ use openssl_sys::{
     EXFLAG_CA,
 };
 use std::cmp::Ordering;
+use std::ffi::c_int;
 
 use super::{
     compatible_key_and_signature, CertificateBackend, CryptoBackend, DigestAlgorithm,
@@ -112,10 +113,12 @@ impl CertificateBackend for Crypto {
     type Certificate = Certificate;
 
     fn from_pem(pem: &[u8]) -> Result<Self::Certificate> {
+        native_len(pem)?;
         openssl::x509::X509::from_pem(pem).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
     fn from_pem_chain(pem: &[u8]) -> Result<Vec<Self::Certificate>> {
+        native_len(pem)?;
         openssl::x509::X509::stack_from_pem(pem)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
@@ -524,4 +527,13 @@ fn ec_curve_nid(algorithm: EcSignatureKeyAlgorithm) -> Nid {
         EcSignatureKeyAlgorithm::P384 => Nid::SECP384R1,
         EcSignatureKeyAlgorithm::P521 => Nid::SECP521R1,
     }
+}
+
+/// OpenSSL reads PEM through a memory BIO, which takes its length as a C
+/// `int`.
+fn native_len(input: &[u8]) -> Result<c_int> {
+    input
+        .len()
+        .try_into()
+        .map_err(|_| "Input exceeds the OpenSSL API length limit".into())
 }

@@ -8,7 +8,7 @@
 use std::os::raw::c_char;
 
 use super::cbor::{into_handle, TavCborHandle};
-use super::utils::{input_bytes, input_text, owned_out_ptr, TavByteBuffer, MAX_INPUT_LEN};
+use super::utils::{input_bytes, input_text, owned_out_ptr, TavByteBuffer};
 use crate::c_ffi::snp::TavSnpAttestationReport;
 use crate::{into_result, TavError, TavErrorCode};
 use attestation::snp::report::TcbVersionRaw;
@@ -65,14 +65,9 @@ unsafe fn minimum_tcb_entries(
             "minimum_tcb_cpuids pointer is null",
         ));
     }
-    if count > MAX_INPUT_LEN / TCB_VERSION_LEN {
-        return Err(TavError::invalid_argument(
-            "minimum_tcb exceeds maximum input size",
-        ));
-    }
     let values_len = count
         .checked_mul(TCB_VERSION_LEN)
-        .ok_or_else(|| TavError::invalid_argument("minimum_tcb_values length overflow"))?;
+        .ok_or_else(|| TavError::invalid_argument("minimum_tcb exceeds maximum input size"))?;
     let values = unsafe { input_bytes(values, values_len, "minimum_tcb_values", false) }?;
     let cpuids = unsafe { std::slice::from_raw_parts(cpuids, count) };
 
@@ -101,12 +96,9 @@ unsafe fn parse_trusted_policy_digests(
             "at least one trusted policy digest is required",
         ));
     }
-    if count > MAX_INPUT_LEN / SNP_HOST_DATA_LEN {
-        return Err(TavError::invalid_argument(
-            "trusted_policy_digests exceeds maximum input size",
-        ));
-    }
-    let len = count * SNP_HOST_DATA_LEN;
+    let len = count.checked_mul(SNP_HOST_DATA_LEN).ok_or_else(|| {
+        TavError::invalid_argument("trusted_policy_digests exceeds maximum input size")
+    })?;
     let bytes = unsafe { input_bytes(data, len, "trusted_policy_digests", false) }?;
     Ok(bytes
         .chunks_exact(SNP_HOST_DATA_LEN)
@@ -204,32 +196,4 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
         .map_err(TavError::from)?;
         write_owned_bytes(report_data, out_report_data)
     })
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn c_header_publishes_the_uvm_endorsement_limit() {
-        // Every `#define TAV_CACI_<NAME> <value>`; TAV_CACI_API has no value.
-        let declared: Vec<(&str, usize)> = include_str!("../../include/tav/caci.h")
-            .lines()
-            .filter_map(|line| {
-                let (name, value) = line
-                    .trim()
-                    .strip_prefix("#define ")?
-                    .trim()
-                    .split_once(' ')?;
-                name.starts_with("TAV_CACI_")
-                    .then(|| (name, value.trim().parse().unwrap()))
-            })
-            .collect();
-        assert_eq!(
-            declared,
-            [(
-                "TAV_CACI_MAX_UVM_ENDORSEMENT_LEN",
-                caci::MAX_UVM_ENDORSEMENT_LEN
-            )],
-            "the C header's limits must match the Rust constants"
-        );
-    }
 }

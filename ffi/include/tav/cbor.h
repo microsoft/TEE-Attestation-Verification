@@ -94,8 +94,10 @@ typedef struct TavCborHandle TavCborHandle;
  *   whatever the input length. On a 64-bit target that is about 52 KB at the
  *   default depth and about 0.2 MB at the hard cap.
  *
- * COSE and CACI verification bound what they parse themselves; see
- * tav/cose.h and tav/caci.h.
+ * A parsed document takes about 40 bytes for every item on a 64-bit target,
+ * so input made of one-byte items takes about 40 times its length in memory.
+ *
+ * COSE and CACI verification leave input sizes unchecked too.
  */
 #define TAV_CBOR_DEFAULT_MAX_DEPTH 16
 #define TAV_CBOR_MAX_DEPTH 64
