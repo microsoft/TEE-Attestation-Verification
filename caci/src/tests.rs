@@ -226,6 +226,17 @@ mod synchronous {
             .unwrap();
             assert_eq!(report_data, report.report_data, "{}", fixture.name);
 
+            let report_data = crate::synchronous::verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &pad_cose_protected(uvm.clone()),
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .unwrap();
+            assert_eq!(report_data, report.report_data, "{}", fixture.name);
+
             match crate::synchronous::verify_caci_attestation(
                 report,
                 Vec::new(),
@@ -608,6 +619,18 @@ mod asynchronous {
                 Vec::new(),
                 vec![report.host_data],
                 &uvm,
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .await
+            .unwrap();
+            assert_eq!(report_data, report.report_data, "{}", fixture.name);
+
+            let report_data = verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &pad_cose_protected(uvm.clone()),
                 ACI_FEED,
                 ACI_SVN,
             )
@@ -1066,6 +1089,24 @@ fn replace_cose_feed<'a>(mut endorsement: CborValue<'a>, feed: &str) -> CborValu
     sign1_items_mut(&mut endorsement)[0] =
         CborValue::bytes(protected_header.to_bytes_det().unwrap());
 
+    endorsement
+}
+
+/// Adds a `"pad"` entry of 1 MiB to the protected header.
+fn pad_cose_protected<'a>(mut endorsement: CborValue<'a>) -> CborValue<'a> {
+    let protected = match &sign1_items_mut(&mut endorsement)[0] {
+        CborValue::ByteString(protected) => protected.to_vec(),
+        other => panic!("expected protected header byte string, got {other:?}"),
+    };
+    let mut protected_header = CborValue::parse_nondet(&protected).unwrap();
+    match &mut protected_header {
+        CborValue::Map(entries) => {
+            entries.push((CborValue::text("pad"), CborValue::bytes(vec![0; 1 << 20])))
+        }
+        other => panic!("expected protected header map, got {other:?}"),
+    }
+    sign1_items_mut(&mut endorsement)[0] =
+        CborValue::bytes(protected_header.to_bytes_det().unwrap());
     endorsement
 }
 
