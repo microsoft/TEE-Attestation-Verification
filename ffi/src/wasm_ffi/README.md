@@ -2,9 +2,9 @@
 
 `wasm_bindgen` bindings exposing SNP, COSE, and CACI verification to
 JavaScript. See the module doc comment in `mod.rs` for the lifetime contract
-on async entry points (owned args are copied at the boundary; borrowed
-handles and live JS arrays must not be mutated or freed until the returned
-promise settles).
+on async entry points (owned args are copied at the boundary; a live JS array
+passed to an `async fn` must not be mutated until the returned promise
+settles; a handle may be freed as soon as the call returns).
 
 `CborValue` and `CoseSign1` wrappers retain a shared immutable CBOR document.
 Navigation creates independent wrappers over that document without cloning
