@@ -126,7 +126,7 @@ jobs:
 
           mkdir -p release-artifacts
           cargo package --workspace --locked
-          for crate in crypto cbor cose lib caci ffi; do
+          for crate in crypto cbor cose lib caci; do
             cp "target/package/tee-attestation-verification-${crate}-${VERSION}.crate" \
               release-artifacts/
           done

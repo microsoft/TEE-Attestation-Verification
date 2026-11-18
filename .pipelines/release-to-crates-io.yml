@@ -25,7 +25,6 @@ parameters:
   - cose
   - lib
   - caci
-  - ffi
 
 variables:
   releaseUrlBase: https://github.com/microsoft/TEE-Attestation-Verification/releases/download
