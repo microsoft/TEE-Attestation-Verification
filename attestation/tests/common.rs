@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 
 use tee_attestation_verification_lib::snp::verify::ChainVerification;
-#[cfg(feature = "kds")]
-use tee_attestation_verification_lib::SevVerifier;
 use tee_attestation_verification_lib::{
     certificate_from_der, certificate_from_pem, AttestationReport, Certificate,
 };
@@ -356,34 +354,4 @@ pub async fn test_verify_attestation_suite_async() {
             result.expect(&format!("{}: Expected verification to succeed", tag))
         };
     }
-}
-
-#[cfg(all(feature = "kds", async_crypto))]
-pub async fn verify_attestation_bytes(bytes: &[u8]) -> Result<(), String> {
-    let attestation_report = AttestationReport::read_from_bytes(bytes)
-        .map_err(|e| format!("Failed to read attestation report: {:?}", e))?;
-
-    let mut verifier = SevVerifier::new()
-        .await
-        .map_err(|e| format!("Failed to initialize verifier: {:?}", e))?;
-
-    verifier
-        .verify_attestation(&attestation_report)
-        .await
-        .map_err(|e| format!("Verification call failed: {:?}", e))
-}
-
-#[cfg(all(feature = "kds", async_crypto))]
-pub async fn verify_milan_attestation() -> Result<(), String> {
-    verify_attestation_bytes(MILAN_ATTESTATION).await
-}
-
-#[cfg(all(feature = "kds", async_crypto))]
-pub async fn verify_genoa_attestation() -> Result<(), String> {
-    verify_attestation_bytes(GENOA_ATTESTATION).await
-}
-
-#[cfg(all(feature = "kds", async_crypto))]
-pub async fn verify_turin_attestation() -> Result<(), String> {
-    verify_attestation_bytes(TURIN_ATTESTATION).await
 }
