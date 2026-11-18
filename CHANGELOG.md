@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1]
+
+[2.0.1]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-2.0.1
+
+### Added
+
+- GitHub releases include the packaged Rust crates (`.crate` files) for the crypto, CBOR, COSE, attestation and CACI crates. (#181)
+
 ## [2.0.0]
 
 [2.0.0]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-2.0.0
