@@ -688,6 +688,7 @@ dependencies = [
 name = "tee-attestation-verification-caci"
 version = "2.0.1"
 dependencies = [
+ "der",
  "serde_json",
  "tee-attestation-verification-cose",
  "tee-attestation-verification-crypto",

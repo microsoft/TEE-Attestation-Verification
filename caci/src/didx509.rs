@@ -8,6 +8,40 @@ use crypto::CryptoBackend;
 
 use crate::AciError;
 use crypto::base64::base64_encode_no_padding;
+use crypto::CertificateBackend;
+use der::{asn1::ObjectIdentifier, Decode};
+
+pub(crate) fn verify_signer_eku(
+    trusted_didx509: &str,
+    leaf: &crypto::Certificate,
+) -> Result<(), AciError> {
+    let Some((_, policy)) = trusted_didx509.split_once("::") else {
+        return Ok(());
+    };
+    let required = policy
+        .strip_prefix("eku:")
+        .filter(|oid| {
+            !oid.split('.')
+                .any(|arc| arc.len() > 1 && arc.starts_with('0'))
+        })
+        .and_then(|oid| ObjectIdentifier::new(oid).ok())
+        .ok_or_else(|| AciError::DidX509("expected trusted DID policy ::eku:<OID>".into()))?;
+
+    // RFC 5280 section 4.2.1.12: ExtKeyUsageSyntax is a SEQUENCE OF KeyPurposeId.
+    let value = crypto::Crypto::get_extension_value_by_oid(leaf, "2.5.29.37")
+        .map_err(|e| AciError::Certificate(e.to_string()))?
+        .ok_or_else(|| {
+            AciError::DidX509("UVM signing certificate has no extended key usage".into())
+        })?;
+    let usages = Vec::<ObjectIdentifier>::from_der(&value)
+        .map_err(|e| AciError::Certificate(format!("invalid extended key usage: {e}")))?;
+    if !usages.contains(&required) {
+        return Err(AciError::DidX509(format!(
+            "UVM signing certificate does not list EKU {required}"
+        )));
+    }
+    Ok(())
+}
 
 #[cfg(sync_crypto)]
 pub(crate) fn verify_didx509_root(

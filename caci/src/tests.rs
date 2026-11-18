@@ -61,6 +61,7 @@ async fn trusted_eku_is_checked_on_the_uvm_signing_leaf() {
             // Both signing leaves list .1 and .2; the signed issuer names only .2.
             ("::eku:1.3.6.1.4.1.311.76.59.1.1", true),
             ("::eku:1.3.6.1.4.1.311.76.59.1.3", false),
+            ("::eku:1.3.6.1.4.1.311.76.59.1.02", false),
             ("::eku:1.3.6.1.4.1.311.76.59.1.2::eku:1.2.3", false),
             ("::eku:", false),
             ("::subject:CN:ContainerPlat", false),

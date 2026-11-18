@@ -135,8 +135,9 @@ pub mod synchronous {
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`. The endorsement size is
-    /// unchecked: bound untrusted input before calling.
+    /// chain root matches `trusted_didx509`. If the trusted DID ends in
+    /// `::eku:<OID>`, the signing certificate must list that EKU. The
+    /// endorsement size is unchecked: bound untrusted input before calling.
     pub fn verify_uvm_endorsement<'a>(
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
@@ -235,6 +236,8 @@ pub mod synchronous {
                 )));
             }
         }
+
+        didx509::verify_signer_eku(trusted_didx509, &leaf)?;
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
@@ -363,8 +366,9 @@ pub mod asynchronous {
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
-    /// call [`verify_caci_attestation`] afterwards to bind the UVM
+    /// chain root matches `trusted_didx509`. If the trusted DID ends in
+    /// `::eku:<OID>`, the signing certificate must list that EKU. This is stage
+    /// 2 of the ACI flow; call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
     /// The endorsement size is unchecked: bound untrusted input before
     /// calling.
@@ -467,6 +471,8 @@ pub mod asynchronous {
                 )));
             }
         }
+
+        didx509::verify_signer_eku(trusted_didx509, &leaf)?;
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(

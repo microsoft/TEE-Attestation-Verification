@@ -8,7 +8,9 @@ root of trust.
 
 We establish trust in an ACI container using the following relying-party-policy:
 - The hardware attestation has a trust chain rooted in AMD
-- The UVM endorsements have a trust chain rooted in a trusted did:x509
+- The UVM endorsement chain must match the root pinned by the caller's `did:x509`.
+  If the pin includes `::eku:<OID>`, the signing certificate must explicitly list
+  that EKU. A bare root pin has no EKU requirement; other predicates are rejected.
 - The hardware attestation's measurement is the endorsed UVM measurement
 - The security policy digest (`attestation.host_data`) is trusted
 - The UVM feed, UVM SVN, and SNP TCB version meet the relying party's policy
