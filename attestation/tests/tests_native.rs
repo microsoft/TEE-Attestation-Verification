@@ -26,7 +26,6 @@ mod r#async {
         init_logger();
         common::test_verify_attestation_suite_async().await;
     }
-
 }
 
 #[cfg(sync_crypto)]
