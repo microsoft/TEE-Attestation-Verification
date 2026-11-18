@@ -306,6 +306,25 @@ fn certificate_parse_wrappers_reject_invalid_input() {
     Crypto::from_der(b"not der").expect_err("Invalid DER should fail");
 }
 
+/// rust-openssl asserts that PEM input fits a C `int`, so the backend rejects
+/// longer input before handing it over.
+#[test]
+#[cfg(all(crypto_backend = "crypto_openssl", target_pointer_width = "64"))]
+fn pem_longer_than_a_c_int_is_rejected() {
+    // Zeroed pages that are never read: the length alone rejects the input.
+    let pem = vec![0u8; std::ffi::c_int::MAX as usize + 1];
+
+    for error in [
+        Crypto::from_pem(&pem).expect_err("Oversized PEM should fail"),
+        Crypto::from_pem_chain(&pem).expect_err("Oversized PEM chain should fail"),
+    ] {
+        assert_eq!(
+            error.to_string(),
+            "Input exceeds the OpenSSL API length limit"
+        );
+    }
+}
+
 #[test]
 fn extension_lookup_rejects_malformed_oid() {
     let cert = cert(MILAN_VCEK);

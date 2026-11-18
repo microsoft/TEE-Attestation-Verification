@@ -12,7 +12,6 @@ const test = require('node:test');
 const {
   pkg,
   TRUSTED_DIDX509,
-  cHeaderLimit,
   loadMilanInputs,
   loadCaciInputs,
   assertStringError,
@@ -67,8 +66,7 @@ test('verify_uvm_endorsement returns a CBOR payload and rejects an untrusted roo
   );
 });
 
-test('verify_uvm_endorsement rejects an endorsement over the length limit unparsed', async () => {
-  const limit = cHeaderLimit('caci.h', 'TAV_CACI_MAX_UVM_ENDORSEMENT_LEN');
+test('verify_uvm_endorsement parses a large endorsement', async () => {
   // A CBOR byte string of zeros, `length` bytes long in all.
   const byteStringDocument = (length) => {
     const document = new Uint8Array(length);
@@ -77,16 +75,11 @@ test('verify_uvm_endorsement rejects an endorsement over the length limit unpars
     return document;
   };
 
-  // At the limit the document reaches the parser, which finds a byte string
+  // The document is parsed whatever its size: the parser finds a byte string
   // where a COSE_Sign1 belongs.
   await assertRejectsStringError(
-    pkg.verify_uvm_endorsement_async(byteStringDocument(limit), TRUSTED_DIDX509),
+    pkg.verify_uvm_endorsement_async(byteStringDocument(2 ** 20 + 1), TRUSTED_DIDX509),
     /^COSE error: expected tagged COSE_Sign1 envelope$/,
-  );
-  // A byte longer, the length alone rejects it.
-  await assertRejectsStringError(
-    pkg.verify_uvm_endorsement_async(byteStringDocument(limit + 1), TRUSTED_DIDX509),
-    new RegExp(`^COSE error: UVM endorsement is ${limit + 1} bytes, over the ${limit}-byte limit$`),
   );
 });
 
@@ -167,5 +160,40 @@ test('verify_caci_attestation returns report data and rejects an empty policy se
       BigInt(manifest.minimum_svn),
     ),
     /at least one trusted CACI execution policy/,
+  );
+});
+
+// Ownership: verify_caci_attestation copies its inputs before it returns, so
+// the caller may free the handles and reuse the policy array while the promise
+// is still pending.
+test('verify_caci_attestation reads its inputs before it returns', async () => {
+  const { manifest, report, endorsements, uvmEndorsement, policies } = loadCaciInputs();
+
+  const attestation = await pkg.verify_snp_attestation_with_cert_chain_async(report, endorsements);
+  const uvm = await pkg.verify_uvm_endorsement_async(uvmEndorsement, TRUSTED_DIDX509);
+
+  const pending = pkg.verify_caci_attestation(
+    attestation,
+    JSON.stringify(manifest.minimum_tcb),
+    policies,
+    uvm,
+    manifest.uvm_feed,
+    BigInt(manifest.minimum_svn),
+  );
+  attestation.free();
+  uvm.free();
+  policies.length = 0;
+  // Let the allocator reuse what was just freed before the promise first runs.
+  for (let i = 0; i < 16; i++) {
+    pkg.CborValue.from_bytes(Uint8Array.of(0x00));
+  }
+
+  // REPORT_DATA of the aci-report.hex fixture.
+  assert.equal(Buffer.from(await pending).toString('hex'), `deadbeef${'00'.repeat(60)}`);
+
+  // Failure mode: a handle freed before the call is refused by the call itself.
+  assert.throws(
+    () => pkg.verify_caci_attestation(attestation, '', [], uvm, manifest.uvm_feed, 0n),
+    /null pointer passed to rust/,
   );
 });

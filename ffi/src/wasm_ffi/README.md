@@ -2,9 +2,9 @@
 
 `wasm_bindgen` bindings exposing SNP, COSE, and CACI verification to
 JavaScript. See the module doc comment in `mod.rs` for the lifetime contract
-on async entry points (owned args are copied at the boundary; borrowed
-handles and live JS arrays must not be mutated or freed until the returned
-promise settles).
+on async entry points (owned args are copied at the boundary; a live JS array
+passed to an `async fn` must not be mutated until the returned promise
+settles; a handle may be freed as soon as the call returns).
 
 `CborValue` and `CoseSign1` wrappers retain a shared immutable CBOR document.
 Navigation creates independent wrappers over that document without cloning
@@ -16,9 +16,8 @@ than 128 key/value pairs, and maps inside map keys. These are the default
 limits, recommended for untrusted input, and this binding offers no larger
 ones. It does not bound its input, and parsing can cost time proportional to
 the nesting depth times the input length: bound the length of untrusted input
-before parsing it. Verification bounds what it parses itself:
-`verify_uvm_endorsement_async` rejects an endorsement longer than 1 MiB, and
-`CoseSign1` rejects a protected header longer than 1 MiB.
+before parsing it. `verify_uvm_endorsement_async` and `CoseSign1` leave input
+sizes unchecked too.
 
 ## Consuming a release tarball
 

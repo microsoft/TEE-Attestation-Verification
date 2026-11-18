@@ -19,12 +19,6 @@ target-compatible backend.
 | `crypto_webcrypto` | WASM only | | ✓ | WebCrypto API |
 | `crypto_windows` | Windows | ✓ | ✓ | Windows CNG and Crypt32 |
 
-## Optional Features
-
-| Feature | Description |
-|---|---|
-| `kds` | Enables automatic certificate fetching from AMD's Key Distribution Service. Uses `curl`/`tokio` on native, `globalThis.fetch` on WASM. |
-
 ## Usage
 
 Add the library to your `Cargo.toml`:
@@ -52,25 +46,6 @@ tav::verify_attestation(
     &vcek,
     &ChainVerification::WithPinnedArk { ask: &ask },
 )?;
-```
-
-### KDS verification (automatic certificate fetching)
-
-Enable the `kds` feature to let the library fetch certificates from AMD's KDS:
-
-```toml
-[dependencies]
-tee-attestation-verification-lib = { git = "https://github.com/microsoft/TEE-Attestation-Verification", tag = "tav-X.X.X", features = ["kds"] }
-```
-
-```rust
-use tee_attestation_verification_lib::{AttestationReport, SevVerifier};
-use zerocopy::FromBytes;
-
-let attestation_report = AttestationReport::read_from_bytes(attestation_bytes)?;
-
-let mut verifier = SevVerifier::new().await?;
-verifier.verify_attestation(&attestation_report).await?;
 ```
 
 ## What verification checks

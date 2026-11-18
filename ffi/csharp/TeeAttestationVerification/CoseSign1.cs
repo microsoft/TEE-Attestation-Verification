@@ -6,9 +6,6 @@ namespace TeeAttestationVerification;
 /// <summary>An owned native view of a validated COSE_Sign1 envelope.</summary>
 public sealed class CoseSign1 : IDisposable
 {
-    // Mirrors TAV_COSE_MAX_PROTECTED_HEADER_LEN, which native verification enforces.
-    private const int MaximumProtectedHeaderLength = 1024 * 1024;
-
     private readonly SafeCborValueHandle _handle;
 
     private CoseSign1(SafeCborValueHandle handle)
@@ -47,36 +44,19 @@ public sealed class CoseSign1 : IDisposable
     }
 
     /// <summary>Parses and returns the protected header as an owned CBOR value.</summary>
-    /// <exception cref="VerifyException">
-    /// The protected header is longer than 1 MiB, the limit verification
-    /// applies, or is not valid supported CBOR.
-    /// </exception>
-    public CborValue GetProtectedHeader()
-    {
-        byte[] protectedBytes = GetProtectedBytes();
-        if (protectedBytes.Length > MaximumProtectedHeaderLength)
-        {
-            throw new VerifyException(
-                ErrorCode.CborDecodeFailed,
-                $"protected header is {protectedBytes.Length} bytes, " +
-                $"over the {MaximumProtectedHeaderLength}-byte limit");
-        }
-
-        return CborValue.FromBytes(protectedBytes);
-    }
+    public CborValue GetProtectedHeader() => CborValue.FromBytes(GetProtectedBytes());
 
     /// <summary>Verifies a COSE_Sign1 envelope with an embedded payload.</summary>
     /// <param name="spkiDer">The verification public key in SubjectPublicKeyInfo DER form.</param>
     /// <param name="coseAlgorithm">The signature algorithm required by the relying party.</param>
     /// <exception cref="VerifyException">
-    /// Key import, envelope validation, or signature verification fails, or the
-    /// protected header is longer than 1 MiB.
+    /// Key import, envelope validation, or signature verification fails.
     /// </exception>
     public void VerifyEmbedded(
         ReadOnlyMemory<byte> spkiDer,
         CoseAlgorithm coseAlgorithm)
     {
-        byte[] key = NativeInput.Snapshot(spkiDer, nameof(spkiDer));
+        byte[] key = NativeInput.Snapshot(spkiDer);
         unsafe
         {
             fixed (byte* keyPointer = key)
@@ -96,16 +76,15 @@ public sealed class CoseSign1 : IDisposable
     /// <param name="spkiDer">The verification public key in SubjectPublicKeyInfo DER form.</param>
     /// <param name="coseAlgorithm">The signature algorithm required by the relying party.</param>
     /// <exception cref="VerifyException">
-    /// Key import, envelope validation, or signature verification fails, or the
-    /// protected header is longer than 1 MiB.
+    /// Key import, envelope validation, or signature verification fails.
     /// </exception>
     public void VerifyDetached(
         ReadOnlyMemory<byte> payload,
         ReadOnlyMemory<byte> spkiDer,
         CoseAlgorithm coseAlgorithm)
     {
-        byte[] payloadSnapshot = NativeInput.Snapshot(payload, nameof(payload));
-        byte[] key = NativeInput.Snapshot(spkiDer, nameof(spkiDer));
+        byte[] payloadSnapshot = NativeInput.Snapshot(payload);
+        byte[] key = NativeInput.Snapshot(spkiDer);
         unsafe
         {
             fixed (byte* payloadPointer = payloadSnapshot)

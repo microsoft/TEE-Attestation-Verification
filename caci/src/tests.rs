@@ -186,22 +186,14 @@ mod synchronous {
             other => panic!("expected Cose error, got {other:?}"),
         }
 
-        // The length is bounded before parsing: a document at the limit
-        // reaches the parser, one a byte longer does not.
-        match crate::synchronous::verify_uvm_endorsement(
-            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN),
-            TRUSTED_ACI_DIDX509,
-        ) {
+        // The endorsement is parsed whatever its size: the parser finds a
+        // byte string where a COSE_Sign1 belongs.
+        let mut large = vec![0x5a, 0x00, 0x10, 0x00, 0x00];
+        large.resize(large.len() + (1 << 20), 0);
+        match crate::synchronous::verify_uvm_endorsement(&large, TRUSTED_ACI_DIDX509) {
             Err(AciError::Cose(actual)) => {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
-            other => panic!("expected Cose error, got {other:?}"),
-        }
-        match crate::synchronous::verify_uvm_endorsement(
-            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN + 1),
-            TRUSTED_ACI_DIDX509,
-        ) {
-            Err(AciError::Cose(actual)) => assert_eq!(actual, oversized_endorsement_error()),
             other => panic!("expected Cose error, got {other:?}"),
         }
     }
@@ -228,6 +220,17 @@ mod synchronous {
                 Vec::new(),
                 vec![report.host_data],
                 &uvm,
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .unwrap();
+            assert_eq!(report_data, report.report_data, "{}", fixture.name);
+
+            let report_data = crate::synchronous::verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &pad_cose_protected(uvm.clone()),
                 ACI_FEED,
                 ACI_SVN,
             )
@@ -278,24 +281,6 @@ mod synchronous {
                     "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
                 ),
                 other => panic!("expected Policy error for {}, got {other:?}", fixture.name),
-            }
-
-            let oversized_header = replace_cose_protected(
-                uvm.clone(),
-                vec![0; cose::MAX_COSE_PROTECTED_HEADER_LEN + 1],
-            );
-            match crate::synchronous::verify_caci_attestation(
-                report,
-                Vec::new(),
-                vec![report.host_data],
-                &oversized_header,
-                ACI_FEED,
-                ACI_SVN,
-            ) {
-                Err(AciError::Cose(actual)) => {
-                    assert_eq!(actual, oversized_protected_header_error())
-                }
-                other => panic!("expected Cose error for {}, got {other:?}", fixture.name),
             }
 
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
@@ -598,26 +583,14 @@ mod asynchronous {
             other => panic!("expected Cose error, got {other:?}"),
         }
 
-        // The length is bounded before parsing: a document at the limit
-        // reaches the parser, one a byte longer does not.
-        match crate::asynchronous::verify_uvm_endorsement(
-            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN),
-            TRUSTED_ACI_DIDX509,
-        )
-        .await
-        {
+        // The endorsement is parsed whatever its size: the parser finds a
+        // byte string where a COSE_Sign1 belongs.
+        let mut large = vec![0x5a, 0x00, 0x10, 0x00, 0x00];
+        large.resize(large.len() + (1 << 20), 0);
+        match crate::asynchronous::verify_uvm_endorsement(&large, TRUSTED_ACI_DIDX509).await {
             Err(AciError::Cose(actual)) => {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
-            other => panic!("expected Cose error, got {other:?}"),
-        }
-        match crate::asynchronous::verify_uvm_endorsement(
-            &byte_string_document(MAX_UVM_ENDORSEMENT_LEN + 1),
-            TRUSTED_ACI_DIDX509,
-        )
-        .await
-        {
-            Err(AciError::Cose(actual)) => assert_eq!(actual, oversized_endorsement_error()),
             other => panic!("expected Cose error, got {other:?}"),
         }
     }
@@ -646,6 +619,18 @@ mod asynchronous {
                 Vec::new(),
                 vec![report.host_data],
                 &uvm,
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .await
+            .unwrap();
+            assert_eq!(report_data, report.report_data, "{}", fixture.name);
+
+            let report_data = verify_caci_attestation(
+                report,
+                Vec::new(),
+                vec![report.host_data],
+                &pad_cose_protected(uvm.clone()),
                 ACI_FEED,
                 ACI_SVN,
             )
@@ -696,26 +681,6 @@ mod asynchronous {
                     "UVM feed \"not-confidential-aci\" does not match trusted feed ContainerPlat-AMD-UVM"
                 ),
                 other => panic!("expected Policy error for {}, got {other:?}", fixture.name),
-            }
-
-            let oversized_header = replace_cose_protected(
-                uvm.clone(),
-                vec![0; cose::MAX_COSE_PROTECTED_HEADER_LEN + 1],
-            );
-            match verify_caci_attestation(
-                report,
-                Vec::new(),
-                vec![report.host_data],
-                &oversized_header,
-                ACI_FEED,
-                ACI_SVN,
-            )
-            .await
-            {
-                Err(AciError::Cose(actual)) => {
-                    assert_eq!(actual, oversized_protected_header_error())
-                }
-                other => panic!("expected Cose error for {}, got {other:?}", fixture.name),
             }
 
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
@@ -1089,34 +1054,6 @@ fn replace_cose_payload<'a>(mut endorsement: CborValue<'a>, payload: Vec<u8>) ->
     endorsement
 }
 
-fn replace_cose_protected<'a>(mut endorsement: CborValue<'a>, protected: Vec<u8>) -> CborValue<'a> {
-    sign1_items_mut(&mut endorsement)[0] = CborValue::bytes(protected);
-    endorsement
-}
-
-/// A CBOR byte string of zeros, `len` bytes long in all.
-fn byte_string_document(len: usize) -> Vec<u8> {
-    let mut document = vec![0x5a];
-    document.extend_from_slice(&((len - 5) as u32).to_be_bytes());
-    document.resize(len, 0);
-    document
-}
-
-fn oversized_endorsement_error() -> String {
-    format!(
-        "UVM endorsement is {} bytes, over the {MAX_UVM_ENDORSEMENT_LEN}-byte limit",
-        MAX_UVM_ENDORSEMENT_LEN + 1
-    )
-}
-
-fn oversized_protected_header_error() -> String {
-    format!(
-        "protected header is {} bytes, over the {}-byte limit",
-        cose::MAX_COSE_PROTECTED_HEADER_LEN + 1,
-        cose::MAX_COSE_PROTECTED_HEADER_LEN
-    )
-}
-
 fn replace_cose_feed<'a>(mut endorsement: CborValue<'a>, feed: &str) -> CborValue<'a> {
     let protected = match &sign1_items_mut(&mut endorsement)[0] {
         CborValue::ByteString(protected) => protected.to_vec(),
@@ -1152,6 +1089,24 @@ fn replace_cose_feed<'a>(mut endorsement: CborValue<'a>, feed: &str) -> CborValu
     sign1_items_mut(&mut endorsement)[0] =
         CborValue::bytes(protected_header.to_bytes_det().unwrap());
 
+    endorsement
+}
+
+/// Adds a `"pad"` entry of 1 MiB to the protected header.
+fn pad_cose_protected<'a>(mut endorsement: CborValue<'a>) -> CborValue<'a> {
+    let protected = match &sign1_items_mut(&mut endorsement)[0] {
+        CborValue::ByteString(protected) => protected.to_vec(),
+        other => panic!("expected protected header byte string, got {other:?}"),
+    };
+    let mut protected_header = CborValue::parse_nondet(&protected).unwrap();
+    match &mut protected_header {
+        CborValue::Map(entries) => {
+            entries.push((CborValue::text("pad"), CborValue::bytes(vec![0; 1 << 20])))
+        }
+        other => panic!("expected protected header map, got {other:?}"),
+    }
+    sign1_items_mut(&mut endorsement)[0] =
+        CborValue::bytes(protected_header.to_bytes_det().unwrap());
     endorsement
 }
 

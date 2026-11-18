@@ -905,8 +905,7 @@ std::vector<uint8_t> depth_cap_maps_duplicate_control()
 }
 
 // MAX_DEPTH nested arrays, the innermost holding the zeros that bring the
-// document to 1 MiB, the longest protected header or UVM endorsement that
-// COSE and CACI verification parse.
+// document to 1 MiB.
 std::vector<uint8_t> depth_cap_arrays_fixture()
 {
     constexpr size_t len = 1024 * 1024;

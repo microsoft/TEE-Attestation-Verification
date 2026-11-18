@@ -50,7 +50,7 @@ public sealed class CborValue : IDisposable
     /// <exception cref="VerifyException">The input is not valid supported CBOR.</exception>
     public static unsafe CborValue FromBytes(ReadOnlyMemory<byte> bytes)
     {
-        byte[] snapshot = NativeInput.Snapshot(bytes, nameof(bytes));
+        byte[] snapshot = NativeInput.Snapshot(bytes);
         fixed (byte* bytesPointer = snapshot)
         {
             IntPtr error = NativeMethods.CborFromBytes(
@@ -185,7 +185,7 @@ public sealed class CborValue : IDisposable
     /// <exception cref="VerifyException">This value is not a map or the key is absent.</exception>
     public unsafe CborValue MapAt(string key)
     {
-        byte[] utf8 = NativeInput.Utf8(key, nameof(key));
+        byte[] utf8 = NativeInput.Utf8(key);
         fixed (byte* keyPointer = utf8)
         {
             IntPtr error = NativeMethods.CborMakeString(
@@ -228,7 +228,7 @@ public sealed class CborValue : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
     public unsafe bool TryGetValue(string key, out CborValue? value)
     {
-        byte[] utf8 = NativeInput.Utf8(key, nameof(key));
+        byte[] utf8 = NativeInput.Utf8(key);
         fixed (byte* keyPointer = utf8)
         {
             IntPtr error = NativeMethods.CborMakeString(

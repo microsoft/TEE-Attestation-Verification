@@ -40,6 +40,9 @@
 //   3 * (max_depth + 1) * MAX_MAP_ENTRIES size_t words of scratch, whatever
 //   the input length: about 52 KB at DEFAULT_MAX_DEPTH on a 64-bit target,
 //   and about 0.2 MB at MAX_DEPTH.
+// - A parsed document takes about 40 bytes for every item on a 64-bit target,
+//   so input made of one-byte items takes about 40 times its length in
+//   memory.
 
 #include <tav/cbor.h>
 #include <tav/byte_buffer.hpp>

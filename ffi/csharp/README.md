@@ -8,7 +8,7 @@ verification through the native C ABI.
 Add the package from your configured NuGet feed:
 
 ```bash
-dotnet add package TeeAttestationVerification --version 1.0.8
+dotnet add package TeeAttestationVerification --version 2.0.0
 ```
 
 Supported runtime identifiers:
@@ -138,11 +138,10 @@ do not depend on managed input buffers.
 `CborValue.FromBytes` rejects nesting deeper than 16 levels, maps with more
 than 128 key/value pairs, and maps inside map keys. These are the native
 library's default limits, recommended for untrusted input, and this binding
-offers no larger ones. It accepts up to 1 GiB, and parsing can cost time
+offers no larger ones. Input sizes are unchecked, and parsing can cost time
 proportional to the nesting depth times the input length: bound the length of
-untrusted input before parsing it. Verification bounds what it parses itself:
-`VerifyUvmEndorsement` rejects an endorsement longer than 1 MiB, and
-`CoseSign1` rejects a protected header longer than 1 MiB.
+untrusted input before parsing it or passing it to `VerifyUvmEndorsement` or
+`CoseSign1`.
 
 Native failures throw `VerifyException`; its `Code` property identifies the
 error. Invalid managed arguments throw standard .NET exceptions.

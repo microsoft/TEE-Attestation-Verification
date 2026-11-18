@@ -19,10 +19,6 @@
 //! - `crypto_webcrypto`: WASM WebCrypto-backed verification.
 //! - `crypto_windows`: Windows CNG and Crypt32-backed verification.
 //!
-//! ## Additional features
-//!
-//! - `kds`: enables certificate fetching from AMD KDS.
-//!
 //! # Usage
 //!
 //! [`AttestationReport`] provides the parsing and inspection APIs for SEV-SNP attestation reports.
@@ -79,20 +75,6 @@ pub fn certificate_from_pem(pem: &[u8]) -> Result<Certificate, Box<dyn std::erro
 pub fn certificate_from_der(der: &[u8]) -> Result<Certificate, Box<dyn std::error::Error>> {
     Crypto::from_der(der)
 }
-
-#[cfg(feature = "kds")]
-mod certificate_chain;
-#[cfg(feature = "kds")]
-mod kds;
-#[cfg(feature = "kds")]
-pub mod sev_verification;
-#[cfg(feature = "kds")]
-pub use certificate_chain::AmdCertificates;
-#[cfg(feature = "kds")]
-pub use sev_verification::SevVerifier;
-
-#[cfg(all(target_arch = "wasm32", feature = "kds"))]
-pub mod wasm;
 
 #[cfg(test)]
 mod tests {

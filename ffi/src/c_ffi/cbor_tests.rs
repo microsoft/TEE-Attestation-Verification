@@ -776,8 +776,7 @@ fn depth_cap_maps_duplicate_control() -> Vec<u8> {
 
 /// The `cbor` crate's array fixture at the depth cap: [`MAX_DEPTH_LIMIT`]
 /// nested arrays, the innermost holding the zeros that bring the document to
-/// 1 MiB, the longest protected header or UVM endorsement that COSE and CACI
-/// verification parse.
+/// 1 MiB.
 fn depth_cap_arrays_fixture() -> Vec<u8> {
     const LEN: usize = 1024 * 1024;
     let mut document = vec![0x81; MAX_DEPTH_LIMIT - 1];
