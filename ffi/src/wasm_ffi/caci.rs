@@ -2,11 +2,12 @@
 // Licensed under the MIT License.
 
 use crate::wasm_ffi::cose::CborValue as WasmCborValue;
-use js_sys::{Array, Uint8Array};
+use js_sys::{Array, Promise, Uint8Array};
 use serde::de::{MapAccess, Visitor};
 use serde::Deserializer;
 use std::fmt;
 use wasm_bindgen::{prelude::*, JsCast};
+use wasm_bindgen_futures::future_to_promise;
 
 use crate::wasm_ffi::snp::SnpAttestationReport;
 use attestation::snp::{report::TcbVersionRaw, Cpuid};
@@ -67,41 +68,72 @@ pub async fn verify_uvm_endorsement_async(
 /// strings to TCB hex strings, for example `{ "00a10f11": "04000000000018db" }`.
 /// In the future this can be checked against a transparent statement from CACI.
 ///
-/// Caller contract: `attestation` and `uvm` are borrowed wasm handles and
-/// `trusted_caci_execution_policies` is a live JS array, all read once when the
-/// returned promise is first polled (see the `wasm_ffi` module docs). Do not free those
-/// handles or mutate the array until that promise settles.
-#[wasm_bindgen]
-pub async fn verify_caci_attestation(
+/// Every input is copied before this function returns, so `attestation` and
+/// `uvm` may be freed, and the array reused, while the returned promise is
+/// pending. The promise resolves to the verified `REPORT_DATA` and rejects with
+/// an error string.
+#[wasm_bindgen(unchecked_return_type = "Promise<Uint8Array>")]
+pub fn verify_caci_attestation(
     attestation: &SnpAttestationReport,
     minimum_tcb_json: &str,
     trusted_caci_execution_policies: Array,
     uvm: &WasmCborValue,
     uvm_feed: &str,
     minimum_svn: u64,
-) -> Result<Vec<u8>, String> {
-    let minimum_tcb = parse_minimum_tcb_json(minimum_tcb_json)?;
-    let trusted_caci_execution_policies = byte_array_values(
-        trusted_caci_execution_policies,
-        "trusted CACI execution policy",
-    )?
-    .iter()
-    .map(|policy| parse_host_data_policy(policy))
-    .collect::<Result<Vec<_>, _>>()?;
-    if trusted_caci_execution_policies.is_empty() {
-        return Err("at least one trusted CACI execution policy digest is required".to_string());
+) -> Promise {
+    let attestation = *attestation.report();
+    let uvm = uvm.clone();
+    let uvm_feed = uvm_feed.to_string();
+    let policy = CaciPolicy::parse(minimum_tcb_json, trusted_caci_execution_policies);
+    future_to_promise(async move {
+        let CaciPolicy {
+            minimum_tcb,
+            trusted_caci_execution_policies,
+        } = policy.map_err(|e| JsValue::from_str(&e))?;
+        let report_data = asynchronous::verify_caci_attestation(
+            attestation,
+            minimum_tcb,
+            trusted_caci_execution_policies,
+            uvm.as_native(),
+            &uvm_feed,
+            minimum_svn,
+        )
+        .await
+        .map_err(|e| JsValue::from_str(&wasm_error(e)))?;
+        Ok(Uint8Array::from(report_data.as_slice()).into())
+    })
+}
+
+/// The relying-party policy arguments of [`verify_caci_attestation`], parsed
+/// into owned values.
+struct CaciPolicy {
+    minimum_tcb: Vec<(Cpuid, TcbVersionRaw)>,
+    trusted_caci_execution_policies: Vec<[u8; SNP_HOST_DATA_LEN]>,
+}
+
+impl CaciPolicy {
+    fn parse(
+        minimum_tcb_json: &str,
+        trusted_caci_execution_policies: Array,
+    ) -> Result<Self, String> {
+        let minimum_tcb = parse_minimum_tcb_json(minimum_tcb_json)?;
+        let trusted_caci_execution_policies = byte_array_values(
+            trusted_caci_execution_policies,
+            "trusted CACI execution policy",
+        )?
+        .iter()
+        .map(|policy| parse_host_data_policy(policy))
+        .collect::<Result<Vec<_>, _>>()?;
+        if trusted_caci_execution_policies.is_empty() {
+            return Err(
+                "at least one trusted CACI execution policy digest is required".to_string(),
+            );
+        }
+        Ok(Self {
+            minimum_tcb,
+            trusted_caci_execution_policies,
+        })
     }
-    asynchronous::verify_caci_attestation(
-        *attestation.report(),
-        minimum_tcb,
-        trusted_caci_execution_policies,
-        uvm.as_native(),
-        uvm_feed,
-        minimum_svn,
-    )
-    .await
-    .map(|report_data| report_data.to_vec())
-    .map_err(wasm_error)
 }
 
 fn byte_array_values(values: Array, name: &str) -> Result<Vec<Vec<u8>>, String> {
