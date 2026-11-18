@@ -1,0 +1,224 @@
+# Publish the GitHub release (not a draft) before running this pipeline.
+# Configure ESRP owners and approvers when queuing a run.
+trigger: none
+pr: none
+
+parameters:
+- name: releaseTag
+  displayName: Published GitHub release tag (tav-<version>)
+  type: string
+  default: ''
+- name: owners
+  displayName: ESRP release owners (comma-separated Microsoft emails)
+  type: string
+  default: ''
+- name: approvers
+  displayName: ESRP release approvers (comma-separated Microsoft emails)
+  type: string
+  default: ''
+# ESRP does not sort dependencies. Keep this list in dependency order.
+- name: crates
+  type: object
+  default:
+  - crypto
+  - cbor
+  - cose
+  - lib
+  - caci
+
+variables:
+  releaseUrlBase: https://github.com/microsoft/TEE-Attestation-Verification/releases/download
+  packagesDirectory: $(Pipeline.Workspace)/rust-packages
+  cratesIoUserAgent: https://github.com/microsoft/TEE-Attestation-Verification
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+- job: publish_crates
+  displayName: Publish Rust crates in dependency order
+  timeoutInMinutes: 480
+  steps:
+  - checkout: none
+
+  - task: Bash@3
+    displayName: Validate configuration and download release checksums
+    env:
+      RELEASE_TAG: ${{ parameters.releaseTag }}
+      RELEASE_URL_BASE: $(releaseUrlBase)
+      PACKAGES_DIR: $(packagesDirectory)
+      OWNERS: ${{ parameters.owners }}
+      APPROVERS: ${{ parameters.approvers }}
+    inputs:
+      targetType: inline
+      script: |
+        set -euo pipefail
+
+        for value in \
+          "${OWNERS}" \
+          "${APPROVERS}"; do
+          if [[ -z "${value}" ]]; then
+            echo "##vso[task.logissue type=error]ESRP owners and approvers parameters must be set."
+            exit 1
+          fi
+        done
+
+        if [[ ! "${RELEASE_TAG}" =~ ^tav-([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+          echo "##vso[task.logissue type=error]Release tag must use the tav-<version> format."
+          exit 1
+        fi
+        version="${BASH_REMATCH[1]}"
+        mkdir -p "${PACKAGES_DIR}"
+        curl --fail --location --silent --show-error --retry 5 --retry-delay 10 \
+          --connect-timeout 15 --max-time 120 \
+          --output "${PACKAGES_DIR}/SHA256SUMS" \
+          "${RELEASE_URL_BASE}/${RELEASE_TAG}/SHA256SUMS"
+
+        echo "##vso[task.setvariable variable=crateVersion]${version}"
+
+  # Verify every release asset before publishing any crates.
+  - ${{ each crate in parameters.crates }}:
+    - task: Bash@3
+      displayName: Download and verify ${{ crate }}
+      env:
+        RELEASE_TAG: ${{ parameters.releaseTag }}
+        RELEASE_URL_BASE: $(releaseUrlBase)
+        PACKAGES_DIR: $(packagesDirectory)
+        CRATE_NAME: tee-attestation-verification-${{ crate }}
+        CRATE_VERSION: $(crateVersion)
+      inputs:
+        targetType: inline
+        script: |
+          set -euo pipefail
+
+          crate_file="${CRATE_NAME}-${CRATE_VERSION}.crate"
+          crate_directory="${PACKAGES_DIR}/${CRATE_NAME}/crate"
+          mkdir -p "${crate_directory}"
+          curl --fail --location --silent --show-error --retry 5 --retry-delay 10 \
+            --connect-timeout 15 --max-time 120 \
+            --output "${crate_directory}/${crate_file}" \
+            "${RELEASE_URL_BASE}/${RELEASE_TAG}/${crate_file}"
+
+          checksum_file="$(mktemp)"
+          listing_file="$(mktemp)"
+          trap 'rm -f "${checksum_file}" "${listing_file}"' EXIT
+          awk -v file="${crate_file}" '$2 == file { print }' \
+            "${PACKAGES_DIR}/SHA256SUMS" > "${checksum_file}"
+          if [[ "$(wc -l < "${checksum_file}")" -ne 1 ]]; then
+            echo "##vso[task.logissue type=error]Expected exactly one SHA256SUMS entry for ${crate_file}."
+            exit 1
+          fi
+          (cd "${crate_directory}" && sha256sum --check --strict "${checksum_file}")
+
+          tar -tzf "${crate_directory}/${crate_file}" > "${listing_file}"
+          if ! grep --quiet --fixed-strings --line-regexp \
+            "${CRATE_NAME}-${CRATE_VERSION}/Cargo.toml" "${listing_file}"; then
+            echo "##vso[task.logissue type=error]Missing Cargo.toml in ${crate_file}."
+            exit 1
+          fi
+
+    # ESRP requires a ZIP submission containing the .crate file.
+    - task: ArchiveFiles@2
+      displayName: Prepare ESRP submission for ${{ crate }}
+      inputs:
+        rootFolderOrFile: '$(packagesDirectory)/tee-attestation-verification-${{ crate }}/crate'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: '$(packagesDirectory)/tee-attestation-verification-${{ crate }}/submission/package.zip'
+        replaceExistingArchive: true
+
+  - ${{ each crate in parameters.crates }}:
+    - task: Bash@3
+      displayName: Check whether ${{ crate }} is already published
+      env:
+        CRATE_NAME: tee-attestation-verification-${{ crate }}
+        CRATE_VERSION: $(crateVersion)
+        USER_AGENT: $(cratesIoUserAgent)
+      inputs:
+        targetType: inline
+        script: |
+          set -euo pipefail
+
+          status="$(curl --silent --show-error --retry 5 --retry-delay 10 \
+            --connect-timeout 15 --max-time 60 \
+            --output /dev/null --write-out '%{http_code}' --user-agent "${USER_AGENT}" \
+            "https://crates.io/api/v1/crates/${CRATE_NAME}/${CRATE_VERSION}")"
+          case "${status}" in
+            200)
+              echo "${CRATE_NAME} ${CRATE_VERSION} is already published; skipping ESRP."
+              echo "##vso[task.setvariable variable=crateAlreadyPublished]true"
+              ;;
+            404)
+              echo "##vso[task.setvariable variable=crateAlreadyPublished]false"
+              ;;
+            *)
+              echo "##vso[task.logissue type=error]Unexpected crates.io response ${status} for ${CRATE_NAME} ${CRATE_VERSION}."
+              exit 1
+              ;;
+          esac
+
+    - task: EsrpRelease@14
+      displayName: Publish ${{ crate }} to crates.io via ESRP
+      condition: and(succeeded(), ne(variables['crateAlreadyPublished'], 'true'))
+      inputs:
+        connectedservicename: 'ACI-Confidential-Computing-ESRP-Test'
+        usemanagedidentity: true
+        keyvaultname: '$(esrpKeyVaultName)'
+        signcertname: '$(esrpSignCertName)'
+        clientid: '$(esrpClientId)'
+        intent: PackageDistribution
+        contenttype: Rust
+        contentsource: Folder
+        folderlocation: '$(packagesDirectory)/tee-attestation-verification-${{ crate }}/submission'
+        waitforreleasecompletion: true
+        owners: '${{ parameters.owners }}'
+        approvers: '${{ parameters.approvers }}'
+        serviceendpointurl: https://api.esrp.microsoft.com
+        mainpublisher: ESRPRELPACMAN
+        domaintenantid: 975f013f-7f24-47e8-a7d3-abc4752bf346
+
+    - task: Bash@3
+      displayName: Wait for ${{ crate }} before publishing dependents
+      env:
+        CRATE_NAME: tee-attestation-verification-${{ crate }}
+        CRATE_VERSION: $(crateVersion)
+        USER_AGENT: $(cratesIoUserAgent)
+      inputs:
+        targetType: inline
+        script: |
+          set -euo pipefail
+
+          deadline=$((SECONDS + 3600))
+          api_url="https://crates.io/api/v1/crates/${CRATE_NAME}/${CRATE_VERSION}"
+          index_url="https://index.crates.io/${CRATE_NAME:0:2}/${CRATE_NAME:2:2}/${CRATE_NAME}"
+          index_file="$(mktemp)"
+          trap 'rm -f "${index_file}"' EXIT
+
+          while true; do
+            api_status=000
+            index_status=000
+            if ! api_status="$(curl --silent --show-error --output /dev/null \
+              --connect-timeout 15 --max-time 60 --write-out '%{http_code}' \
+              --user-agent "${USER_AGENT}" "${api_url}")"; then
+              echo "##vso[task.logissue type=warning]crates.io API request failed; retrying."
+            fi
+            if ! index_status="$(curl --location --silent --show-error \
+              --connect-timeout 15 --max-time 60 --output "${index_file}" \
+              --write-out '%{http_code}' --user-agent "${USER_AGENT}" "${index_url}")"; then
+              echo "##vso[task.logissue type=warning]crates.io index request failed; retrying."
+            fi
+
+            if [[ "${api_status}" == "200" && "${index_status}" == "200" ]] && \
+              grep --quiet --fixed-strings "\"vers\":\"${CRATE_VERSION}\"" "${index_file}"; then
+              echo "${CRATE_NAME} ${CRATE_VERSION} is available on crates.io."
+              exit 0
+            fi
+
+            if (( SECONDS >= deadline )); then
+              echo "##vso[task.logissue type=error]Timed out waiting for ${CRATE_NAME} ${CRATE_VERSION} to appear on crates.io."
+              exit 1
+            fi
+
+            echo "Waiting for ${CRATE_NAME} ${CRATE_VERSION} (API ${api_status}, index ${index_status})..."
+            sleep 30
+          done
