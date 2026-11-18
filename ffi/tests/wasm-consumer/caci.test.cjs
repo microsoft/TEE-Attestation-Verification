@@ -12,7 +12,6 @@ const test = require('node:test');
 const {
   pkg,
   TRUSTED_DIDX509,
-  cHeaderLimit,
   loadMilanInputs,
   loadCaciInputs,
   assertStringError,
@@ -67,8 +66,7 @@ test('verify_uvm_endorsement returns a CBOR payload and rejects an untrusted roo
   );
 });
 
-test('verify_uvm_endorsement rejects an endorsement over the length limit unparsed', async () => {
-  const limit = cHeaderLimit('caci.h', 'TAV_CACI_MAX_UVM_ENDORSEMENT_LEN');
+test('verify_uvm_endorsement parses a large endorsement', async () => {
   // A CBOR byte string of zeros, `length` bytes long in all.
   const byteStringDocument = (length) => {
     const document = new Uint8Array(length);
@@ -77,16 +75,11 @@ test('verify_uvm_endorsement rejects an endorsement over the length limit unpars
     return document;
   };
 
-  // At the limit the document reaches the parser, which finds a byte string
+  // The document is parsed whatever its size: the parser finds a byte string
   // where a COSE_Sign1 belongs.
   await assertRejectsStringError(
-    pkg.verify_uvm_endorsement_async(byteStringDocument(limit), TRUSTED_DIDX509),
+    pkg.verify_uvm_endorsement_async(byteStringDocument(2 ** 20 + 1), TRUSTED_DIDX509),
     /^COSE error: expected tagged COSE_Sign1 envelope$/,
-  );
-  // A byte longer, the length alone rejects it.
-  await assertRejectsStringError(
-    pkg.verify_uvm_endorsement_async(byteStringDocument(limit + 1), TRUSTED_DIDX509),
-    new RegExp(`^COSE error: UVM endorsement is ${limit + 1} bytes, over the ${limit}-byte limit$`),
   );
 });
 

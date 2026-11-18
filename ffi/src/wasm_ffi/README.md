@@ -16,9 +16,8 @@ than 128 key/value pairs, and maps inside map keys. These are the default
 limits, recommended for untrusted input, and this binding offers no larger
 ones. It does not bound its input, and parsing can cost time proportional to
 the nesting depth times the input length: bound the length of untrusted input
-before parsing it. Verification bounds what it parses itself:
-`verify_uvm_endorsement_async` rejects an endorsement longer than 1 MiB, and
-`CoseSign1` rejects a protected header longer than 1 MiB.
+before parsing it. `verify_uvm_endorsement_async` and `CoseSign1` leave input
+sizes unchecked too.
 
 ## Consuming a release tarball
 

@@ -43,5 +43,4 @@ let verified_report_data = tav::verify_caci_attestation(
 ```
 
 `verify_uvm_endorsement` parses the endorsement before anything authenticates
-it, so it rejects one longer than `MAX_UVM_ENDORSEMENT_LEN` (1 MiB) without
-parsing it.
+it, and its size is unchecked: bound untrusted input before calling.

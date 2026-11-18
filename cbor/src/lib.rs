@@ -40,7 +40,9 @@
 //!   `3 * (max_depth + 1) * max_map_entries` words whatever the input length.
 //!
 //! Nothing here bounds the input length: bound the length of untrusted input
-//! before parsing it.
+//! before parsing it. The parsed tree takes about 40 bytes for every item on
+//! a 64-bit target, so input made of one-byte items takes about 40 times its
+//! length in memory.
 //!
 //! [`CborValue`] holds its byte and text payloads in [`Cow`], so parsing
 //! borrows: string payloads point into the input buffer, which must outlive

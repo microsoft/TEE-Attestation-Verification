@@ -259,8 +259,7 @@ test('CoseSign1.verify_detached accepts a nil payload and rejects an embedded on
   );
 });
 
-test('CoseSign1 rejects a protected header over the length limit', async () => {
-  const limit = cHeaderLimit('cose.h', 'TAV_COSE_MAX_PROTECTED_HEADER_LEN');
+test('CoseSign1 decodes a large protected header', async () => {
   // The protected header {1: -7, "pad": h'00...'} in exactly `length` bytes.
   const paddedProtectedHeader = (length) => {
     const header = new Uint8Array(length);
@@ -268,32 +267,17 @@ test('CoseSign1 rejects a protected header over the length limit', async () => {
     new DataView(header.buffer).setUint32(8, length - 12);
     return header;
   };
-  const overLimit = new RegExp(`^protected header is ${limit + 1} bytes, over the ${limit}-byte limit$`);
 
-  // At the limit the header is decoded, so verification reaches the signature,
-  // which was made over a different header.
-  const atLimit = paddedProtectedHeader(limit);
-  assert.equal(coseSign1(buildSign1(true, atLimit)).protected_header().map_at_int(1n).int(), -7n);
+  // The header is decoded whatever its size, so verification reaches the
+  // signature, which was made over a different header.
+  const large = paddedProtectedHeader(2 ** 20 + 1);
+  assert.equal(coseSign1(buildSign1(true, large)).protected_header().map_at_int(1n).int(), -7n);
   await assertRejectsStringError(
-    coseSign1(buildSign1(true, atLimit)).verify_embedded(COSE_SPKI, COSE_ALG_ES256),
+    coseSign1(buildSign1(true, large)).verify_embedded(COSE_SPKI, COSE_ALG_ES256),
     /signature verification failed/,
   );
   await assertRejectsStringError(
-    coseSign1(buildSign1(false, atLimit)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
+    coseSign1(buildSign1(false, large)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
     /signature verification failed/,
-  );
-
-  // A byte longer, the header is rejected by its length alone. The envelope
-  // still parses.
-  const over = paddedProtectedHeader(limit + 1);
-  assert.equal(coseSign1(buildSign1(true, over)).protected().length, limit + 1);
-  assertStringError(() => coseSign1(buildSign1(true, over)).protected_header(), overLimit);
-  await assertRejectsStringError(
-    coseSign1(buildSign1(true, over)).verify_embedded(COSE_SPKI, COSE_ALG_ES256),
-    overLimit,
-  );
-  await assertRejectsStringError(
-    coseSign1(buildSign1(false, over)).verify_detached(COSE_PAYLOAD, COSE_SPKI, COSE_ALG_ES256),
-    overLimit,
   );
 });

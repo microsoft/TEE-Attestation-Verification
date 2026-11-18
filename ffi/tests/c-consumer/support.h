@@ -28,9 +28,6 @@ extern "C" {
 
 namespace tav_test {
 
-// Mirrors c_ffi::utils::MAX_INPUT_LEN (1 GiB); not exported by the headers.
-constexpr size_t kMaxInputLen = 1024ull * 1024ull * 1024ull;
-
 inline std::vector<uint8_t> read_file(const std::string &relative) {
     std::string path = std::string(TAV_REPO_ROOT) + "/" + relative;
     FILE *file = std::fopen(path.c_str(), "rb");

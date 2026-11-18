@@ -113,11 +113,19 @@ public sealed class PemAndSnpTests
         Assert.Throws<ArgumentNullException>(() =>
             AttestationVerifier.VerifySnpAttestation(
                 input.Report, null!, input.Ask, input.Vcek));
+    }
 
-        using OversizedMemoryManager oversized = new();
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+    [Fact]
+    public void VerifySnpAttestationReadsReportLongerThanOneGibibyte()
+    {
+        MilanInputs input = FixtureData.LoadMilan();
+        using UnreadableMemoryManager oversized = new((1024 * 1024 * 1024) + 1);
+
+        // No managed length check runs first, so the input is read.
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
             AttestationVerifier.VerifySnpAttestation(
-                oversized.Value, input.Ark, input.Ask, input.Vcek));
+                oversized.Memory, input.Ark, input.Ask, input.Vcek));
+        Assert.Equal(UnreadableMemoryManager.ReadMessage, error.Message);
     }
 
     [Fact]
@@ -145,15 +153,18 @@ public sealed class PemAndSnpTests
 
     private static string Hex(byte[] bytes) => Convert.ToHexString(bytes).ToLowerInvariant();
 
-    private sealed class OversizedMemoryManager : MemoryManager<byte>
+    // Reports a length without backing storage, and throws when read.
+    private sealed class UnreadableMemoryManager(int length) : MemoryManager<byte>
     {
-        internal ReadOnlyMemory<byte> Value => CreateMemory((1024 * 1024 * 1024) + 1);
+        internal const string ReadMessage = "Input was read.";
+
+        public override Memory<byte> Memory => CreateMemory(length);
 
         public override Span<byte> GetSpan() =>
-            throw new InvalidOperationException("Oversized input must be rejected before access.");
+            throw new InvalidOperationException(ReadMessage);
 
         public override MemoryHandle Pin(int elementIndex = 0) =>
-            throw new InvalidOperationException("Oversized input must be rejected before pinning.");
+            throw new InvalidOperationException(ReadMessage);
 
         public override void Unpin()
         {

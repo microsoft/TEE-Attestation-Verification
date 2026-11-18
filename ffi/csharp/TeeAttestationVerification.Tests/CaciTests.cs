@@ -128,27 +128,15 @@ public sealed class CaciTests
     }
 
     [Fact]
-    public void UvmEndorsementOverTheLengthLimitIsRejectedUnparsed()
+    public void LargeUvmEndorsementReachesTheParser()
     {
-        int limit = FixtureData.ReadCHeaderLimit(
-            "ffi/include/tav/caci.h", "TAV_CACI_MAX_UVM_ENDORSEMENT_LEN");
-
-        // At the limit the document reaches the parser, which finds a byte
+        // The document is parsed whatever its size: the parser finds a byte
         // string where a COSE_Sign1 belongs.
-        VerifyException atLimit = Assert.Throws<VerifyException>(() =>
+        VerifyException error = Assert.Throws<VerifyException>(() =>
             AttestationVerifier.VerifyUvmEndorsement(
-                ByteStringDocument(limit), FixtureData.TrustedDidX509));
-        Assert.Equal(ErrorCode.CaciCose, atLimit.Code);
-        Assert.Contains("expected tagged COSE_Sign1 envelope", atLimit.Message);
-
-        // A byte longer, the length alone rejects it.
-        VerifyException overLimit = Assert.Throws<VerifyException>(() =>
-            AttestationVerifier.VerifyUvmEndorsement(
-                ByteStringDocument(limit + 1), FixtureData.TrustedDidX509));
-        Assert.Equal(ErrorCode.CaciCose, overLimit.Code);
-        Assert.Contains(
-            $"UVM endorsement is {limit + 1} bytes, over the {limit}-byte limit",
-            overLimit.Message);
+                ByteStringDocument((1 << 20) + 1), FixtureData.TrustedDidX509));
+        Assert.Equal(ErrorCode.CaciCose, error.Code);
+        Assert.Contains("expected tagged COSE_Sign1 envelope", error.Message);
     }
 
     // A CBOR byte string of zeros, length bytes long in all.
@@ -166,9 +154,8 @@ public sealed class CaciTests
     private sealed class OversizedMinimumTcbCollection :
         IReadOnlyCollection<(uint Cpuid, ReadOnlyMemory<byte> Tcb)>
     {
-        public int Count => (NativeMaximumInputLength / 8) + 1;
-
-        private const int NativeMaximumInputLength = 1024 * 1024 * 1024;
+        // One entry more than fits flattened into a managed array.
+        public int Count => (Array.MaxLength / 8) + 1;
 
         public IEnumerator<(uint Cpuid, ReadOnlyMemory<byte> Tcb)> GetEnumerator() =>
             throw new InvalidOperationException("Oversized input must not be enumerated.");

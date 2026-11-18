@@ -9,8 +9,7 @@ ABI boundary.
 
 The CBOR and COSE tests use the shared `TavCborHandle` API. Coverage includes
 borrowed parsing, deep-copied payloads, direct and nested child views, validated
-COSE_Sign1 views, parent-first freeing, map key equality, depth limits, and the
-length limits on protected headers and UVM endorsements.
+COSE_Sign1 views, parent-first freeing, map key equality, and depth limits.
 Failed reads preserve scalar and borrowed outputs; failed navigation clears
 owned output slots.
 
