@@ -25,7 +25,7 @@
 
 ### Removed
 
-- **Breaking:** the `kds` feature of `tee-attestation-verification-lib`, with `SevVerifier`, `AmdCertificates`, the `verify-attestation` CLI, and the KDS-backed WASM `verify_attestation_report`. Fetch the VCEK and ASK from AMD KDS yourself and pass them to `snp::verify`. (#184)
+- **Breaking:** the `kds` feature of `tee-attestation-verification-lib`, with `SevVerifier`, `AmdCertificates`, the `verify-attestation` CLI, and the KDS-backed WASM `verify_attestation_report`. We recommend manually fetching the VCEK and ASK from AMD KDS and pass them to `snp::verify`. (#184)
 - The deprecated native `tav_cbor_value_*` functions, `TavCborValue` alias, and `TavCborKind` enum. COSE validation and verification and the independent WASM CBOR API remain supported.
 
 ### Fixed
