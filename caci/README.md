@@ -44,3 +44,26 @@ let verified_report_data = tav::verify_caci_attestation(
 
 `verify_uvm_endorsement` parses the endorsement before anything authenticates
 it, and its size is unchecked: bound untrusted input before calling.
+
+## Signed TCB info
+
+`synchronous::verify_tcb_info` (or `asynchronous::verify_tcb_info` with an async
+crypto backend) accepts COSE_Sign1 bytes with protected content type
+`application/vnd.tcb-reference-info.v1+cose`. It verifies the signature and
+embedded certificate chain against a caller-pinned `did:x509` root before
+decoding the manifest payload.
+
+```rust
+let watermarks = tav::verify_tcb_info(tcb_info_cose, trusted_tcb_info_didx509)?;
+let minimum_tcb: Vec<_> = watermarks
+    .into_iter()
+    .map(|entry| (entry.cpuid, entry.tcb))
+    .collect();
+```
+
+The verifier returns AMD SEV-SNP entries only. An absent or empty SNP section
+returns an empty list; if your policy requires SNP watermarks, reject an empty
+list before using it as `minimum_tcb`. Future TEE entries are ignored after CBOR
+decoding within the library's usual CBOR limits. The verifier does not check
+SCITT receipts or prevent manifest rollback. Pin the TCB signer's root
+independently of the input and bound untrusted input size before calling.

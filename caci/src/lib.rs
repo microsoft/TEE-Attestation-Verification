@@ -21,6 +21,7 @@
 
 mod didx509;
 mod parse;
+mod tcb_info;
 
 use attestation::snp::report::{AttestationReport, TcbVersionForGeneration, TcbVersionRaw};
 use attestation::snp::verify::{ChainVerification, VerificationError};
@@ -40,6 +41,7 @@ use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int,
 
 pub use attestation::snp;
 pub use cose::CborValue;
+pub use tcb_info::AmdSevSnpWatermark;
 
 const fn attestation_report_field_len<const N: usize>(
     _: fn(&AttestationReport) -> &[u8; N],
@@ -56,6 +58,85 @@ const MAX_GUEST_VMPL: u32 = 3;
 const JSON_LAUNCH_MEASUREMENT: &str = "x-ms-sevsnpvm-launchmeasurement";
 const JSON_GUEST_SVN: &str = "x-ms-sevsnpvm-guestsvn";
 const JSON_GUEST_SVN_INT: &str = "x-ms-sevsnpvm-guestsvn-int";
+
+#[derive(Clone, Copy)]
+enum SignedDocument {
+    UvmEndorsement,
+    TcbInfo,
+}
+
+fn protected_content_type(protected: &CborValue<'_>) -> Result<String, AciError> {
+    protected
+        .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
+        .or_else(|_| protected.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
+        .map_err(|_| AciError::Cose("protected content type not found".to_string()))
+        .and_then(|value| required_text(value, "protected content type"))
+}
+
+fn signer_claims(
+    protected: &CborValue<'_>,
+    document: SignedDocument,
+) -> Result<(String, Option<std::time::Duration>), AciError> {
+    use std::time::Duration;
+
+    let content_type = protected_content_type(protected)?;
+    match (document, content_type.as_str()) {
+        (SignedDocument::UvmEndorsement, "application/json")
+            if protected.map_at_str("iss").is_ok()
+                && protected.map_at_str("signingtime").is_ok() =>
+        {
+            let issuer =
+                required_text(protected.map_at_str("iss").map_err(AciError::Cose)?, "iss")?;
+            let signing_time = parse::parse_signing_time(
+                protected
+                    .map_at_str("signingtime")
+                    .map_err(AciError::Cose)?,
+            )?;
+            Ok((issuer, Some(signing_time)))
+        }
+        (SignedDocument::UvmEndorsement, "application/octet-stream")
+        | (SignedDocument::TcbInfo, tcb_info::CONTENT_TYPE)
+            if protected.map_at_int(cose::COSE_HEADER_CWT_CLAIMS).is_ok() =>
+        {
+            let claims = protected
+                .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
+                .map_err(AciError::Cose)?;
+            let issuer = required_text(
+                claims
+                    .map_at_int(cose::CWT_CLAIMS_ISSUER)
+                    .map_err(AciError::Cose)?,
+                "CWT iss",
+            )?;
+            let signing_time = claims
+                .map_at_int(cose::CWT_CLAIMS_IAT)
+                .ok()
+                .map(|iat| {
+                    let seconds = match iat {
+                        CborValue::Tagged { tag: 1, payload } => {
+                            required_int(payload, "CWT iat").ok()
+                        }
+                        CborValue::Int(seconds) => Some(*seconds),
+                        _ => None,
+                    };
+                    seconds
+                        .and_then(|seconds| u64::try_from(seconds).ok())
+                        .map(Duration::from_secs)
+                        .ok_or_else(|| AciError::Cose(format!("CWT iat invalid {iat:?}")))
+                })
+                .transpose()?;
+            Ok((issuer, signing_time))
+        }
+        _ => Err(match document {
+            SignedDocument::UvmEndorsement => AciError::Measurement(format!(
+                "unsupported ACI payload content type {content_type}"
+            )),
+            SignedDocument::TcbInfo => AciError::Cose(format!(
+                "expected protected content type {} and CWT claims for TCB info",
+                tcb_info::CONTENT_TYPE
+            )),
+        }),
+    }
+}
 
 #[cfg(sync_crypto)]
 /// Synchronous staged CACI verification.
@@ -141,7 +222,34 @@ pub mod synchronous {
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        verify_signed_document(
+            uvm_endorsement,
+            trusted_didx509,
+            SignedDocument::UvmEndorsement,
+        )
+        .map(|(document, _)| document)
+    }
+
+    /// Authenticate a signed TCB info manifest and return its AMD SEV-SNP watermarks.
+    ///
+    /// Uses the protected CWT issuer, `x5chain`, and caller-pinned `did:x509` root.
+    /// This does not verify SCITT receipts or enforce manifest freshness. Bound
+    /// the size of untrusted input before calling.
+    pub fn verify_tcb_info(
+        tcb_info: &[u8],
+        trusted_didx509: &str,
+    ) -> Result<Vec<AmdSevSnpWatermark>, AciError> {
+        let (_, payload) =
+            verify_signed_document(tcb_info, trusted_didx509, SignedDocument::TcbInfo)?;
+        tcb_info::parse_manifest(&payload)
+    }
+
+    fn verify_signed_document<'a>(
+        bytes: &'a [u8],
+        trusted_didx509: &str,
+        document: SignedDocument,
+    ) -> Result<(CborValue<'a>, Vec<u8>), AciError> {
+        let parsed = CborValue::parse_nondet(bytes).map_err(AciError::Cose)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -158,83 +266,15 @@ pub mod synchronous {
 
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        let content_type = protected_header
-            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
-            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
-            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
-            .and_then(|value| required_text(value, "protected content type"))?;
-        match content_type.as_str() {
-            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
-            "application/json"
-                if protected_header.map_at_str("iss").is_ok()
-                    && protected_header.map_at_str("signingtime").is_ok() =>
-            {
-                let issuer = required_text(
-                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-                    "iss",
-                )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
-
-                let signing_time = protected_header
-                    .map_at_str("signingtime")
-                    .ok()
-                    .map(parse::parse_signing_time)
-                    .transpose()?;
-                <crypto::Crypto as CryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            "application/octet-stream"
-                if protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .is_ok() =>
-            {
-                let cwt_claims = protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .map_err(AciError::Cose)?;
-                let issuer = required_text(
-                    cwt_claims
-                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
-                        .map_err(AciError::Cose)?,
-                    "CWT iss",
-                )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
-
-                let signing_time = cwt_claims
-                    .map_at_int(cose::CWT_CLAIMS_IAT)
-                    .ok()
-                    .map(|iat| {
-                        let iat = match iat {
-                            CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat").map_err(|_| ())
-                            }
-                            CborValue::Int(iat) => Ok(*iat),
-                            _ => Err(()),
-                        }
-                        .and_then(|iat| iat.try_into().map_err(|_| ()))
-                        .map(std::time::Duration::from_secs)
-                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
-                        Ok(iat)
-                    })
-                    .transpose()?;
-                <crypto::Crypto as CryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            other => {
-                return Err(AciError::Measurement(format!(
-                    "unsupported ACI payload content type {other}"
-                )));
-            }
-        }
+        let (issuer, signing_time) = signer_claims(&protected_header, document)?;
+        verify_didx509_root(trusted_didx509, &issuer, &x5chain)?;
+        <crypto::Crypto as CryptoBackend>::verify_chain(
+            &root,
+            &intermediate_refs,
+            &leaf,
+            signing_time,
+        )
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
@@ -252,7 +292,7 @@ pub mod synchronous {
         cose::synchronous::cose_verify1(&key, algorithm, &protected, &payload, &signature)
             .map_err(AciError::Signature)?;
 
-        Ok(parsed)
+        Ok((parsed, payload))
     }
 
     /// Verify Confidential CACI relying-party policy over staged verified artifacts.
@@ -372,7 +412,35 @@ pub mod asynchronous {
         uvm_endorsement: &'a [u8],
         trusted_didx509: &str,
     ) -> Result<CborValue<'a>, AciError> {
-        let parsed = CborValue::parse_nondet(uvm_endorsement).map_err(AciError::Cose)?;
+        verify_signed_document(
+            uvm_endorsement,
+            trusted_didx509,
+            SignedDocument::UvmEndorsement,
+        )
+        .await
+        .map(|(document, _)| document)
+    }
+
+    /// Authenticate a signed TCB info manifest and return its AMD SEV-SNP watermarks.
+    ///
+    /// Uses the protected CWT issuer, `x5chain`, and caller-pinned `did:x509` root.
+    /// This does not verify SCITT receipts or enforce manifest freshness. Bound
+    /// the size of untrusted input before calling.
+    pub async fn verify_tcb_info(
+        tcb_info: &[u8],
+        trusted_didx509: &str,
+    ) -> Result<Vec<AmdSevSnpWatermark>, AciError> {
+        let (_, payload) =
+            verify_signed_document(tcb_info, trusted_didx509, SignedDocument::TcbInfo).await?;
+        tcb_info::parse_manifest(&payload)
+    }
+
+    async fn verify_signed_document<'a>(
+        bytes: &'a [u8],
+        trusted_didx509: &str,
+        document: SignedDocument,
+    ) -> Result<(CborValue<'a>, Vec<u8>), AciError> {
+        let parsed = CborValue::parse_nondet(bytes).map_err(AciError::Cose)?;
         let sign1 = cose::cose_sign1(&parsed).map_err(AciError::Cose)?;
         // Sign1 fields
         let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
@@ -388,85 +456,16 @@ pub mod asynchronous {
         )?;
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
-        let content_type = protected_header
-            .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
-            .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
-            .map_err(|_| AciError::Cose("protected content type not found".to_string()))
-            .and_then(|value| required_text(value, "protected content type"))?;
-        match content_type.as_str() {
-            // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
-            "application/json"
-                if protected_header.map_at_str("iss").is_ok()
-                    && protected_header.map_at_str("signingtime").is_ok() =>
-            {
-                let issuer = required_text(
-                    protected_header.map_at_str("iss").map_err(AciError::Cose)?,
-                    "iss",
-                )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
-
-                let signing_time = protected_header
-                    .map_at_str("signingtime")
-                    .ok()
-                    .map(parse::parse_signing_time)
-                    .transpose()?;
-                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .await
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            "application/octet-stream"
-                if protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .is_ok() =>
-            {
-                let cwt_claims = protected_header
-                    .map_at_int(cose::COSE_HEADER_CWT_CLAIMS)
-                    .map_err(AciError::Cose)?;
-                let issuer = required_text(
-                    cwt_claims
-                        .map_at_int(cose::CWT_CLAIMS_ISSUER)
-                        .map_err(AciError::Cose)?,
-                    "CWT iss",
-                )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
-
-                let signing_time = cwt_claims
-                    .map_at_int(cose::CWT_CLAIMS_IAT)
-                    .ok()
-                    .map(|iat| {
-                        let iat = match iat {
-                            CborValue::Tagged { tag: 1, payload } => {
-                                required_int(payload, "CWT iat").map_err(|_| ())
-                            }
-                            CborValue::Int(iat) => Ok(*iat),
-                            _ => Err(()),
-                        }
-                        .and_then(|iat| iat.try_into().map_err(|_| ()))
-                        .map(std::time::Duration::from_secs)
-                        .map_err(|_| AciError::Cose(format!("CWT iat invalid {iat:?}")))?;
-                        Ok(iat)
-                    })
-                    .transpose()?;
-                <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
-                    &root,
-                    &intermediate_refs,
-                    &leaf,
-                    signing_time,
-                )
-                .await
-                .map_err(|e| AciError::Certificate(e.to_string()))?;
-            }
-            other => {
-                return Err(AciError::Measurement(format!(
-                    "unsupported ACI payload content type {other}"
-                )));
-            }
-        }
+        let (issuer, signing_time) = signer_claims(&protected_header, document)?;
+        verify_didx509_root_async(trusted_didx509, &issuer, &x5chain).await?;
+        <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
+            &root,
+            &intermediate_refs,
+            &leaf,
+            signing_time,
+        )
+        .await
+        .map_err(|e| AciError::Certificate(e.to_string()))?;
 
         // Verify signature
         let algorithm = cose::signature_key_algorithm_for_cose_alg(required_int(
@@ -487,7 +486,7 @@ pub mod asynchronous {
             .await
             .map_err(AciError::Signature)?;
 
-        Ok(parsed)
+        Ok((parsed, payload))
     }
 
     /// Verify Confidential CACI relying-party policy over staged verified artifacts.
@@ -576,11 +575,7 @@ fn verify_caci_attestation_impl(
     let protected = required_bstr(sign1.array_at(0).map_err(AciError::Cose)?, "protected")?;
     let protected_header = CborValue::parse_nondet(&protected).map_err(AciError::Cose)?;
 
-    let content_type = protected_header
-        .map_at_int(cose::COSE_HEADER_CONTENT_TYPE)
-        .or_else(|_| protected_header.map_at_int(cose::COSE_HEADER_PREIMAGE_CONTENT_TYPE))
-        .map_err(|_| AciError::Cose("protected content type not found".to_string()))
-        .and_then(|value| required_text(value, "protected content type"))?;
+    let content_type = protected_content_type(&protected_header)?;
     match content_type.as_str() {
         // Legacy UVM endorsements carry claims in protected headers and a JSON payload.
         "application/json" if protected_header.map_at_str("feed").is_ok() => {

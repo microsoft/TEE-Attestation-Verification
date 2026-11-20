@@ -16,6 +16,9 @@ const REFERENCE_INFO_SCITT_CWT_BASE64: &str =
 const REPORT_SCITT_CWT_HEX: &str = include_str!("../tests/fixtures/report-scitt-cwt.hex");
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
+const TCB_INFO: &[u8] = include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.cose");
+const TRUSTED_TEST_TCB_INFO_DIDX509: &str =
+    "did:x509:0:sha256:wVkSM46SDpw4LuyEYoH6r5ym07whL5lWxNlGN-UPtf4";
 const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
 const ACI_SVN: u64 = 104;
 const MILAN_CPUID: u32 = 0x00A00F11;
@@ -50,12 +53,73 @@ fn fixture_cases() -> [CaciFixture; 2] {
     [LEGACY_FIXTURE, TRANSPARENT_FIXTURE]
 }
 
+fn assert_tcb_info_fixture(watermarks: &[AmdSevSnpWatermark]) {
+    assert_eq!(watermarks.len(), 2);
+    for (cpuid, description, tcb) in [
+        (
+            MILAN_CPUID,
+            "AMD EPYC 7763 64-Core Processor",
+            [0xdb, 0x18, 0, 0, 0, 0, 0, 4],
+        ),
+        (
+            GENOA_CPUID,
+            "AMD EPYC 9V74 80-Core Processor",
+            [0x54, 0x17, 0, 0, 0, 0, 0, 10],
+        ),
+    ] {
+        let entry = watermarks
+            .iter()
+            .find(|watermark| watermark.cpuid == snp::Cpuid::from(cpuid))
+            .unwrap();
+        assert_eq!(entry.description, description);
+        assert_eq!(entry.tcb.raw, tcb);
+    }
+}
+
+fn tcb_info_with_tampered_payload() -> Vec<u8> {
+    let cose = CborValue::parse_nondet(TCB_INFO).unwrap();
+    // Replace the signed payload with a different, valid (empty) manifest.
+    replace_cose_payload(cose, vec![0xa0])
+        .to_bytes_det()
+        .unwrap()
+}
+
 #[cfg(sync_crypto)]
 mod synchronous {
     use super::*;
 
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn verifies_tcb_info() {
+        use crate::synchronous::{verify_tcb_info, verify_uvm_endorsement};
+
+        assert_tcb_info_fixture(&verify_tcb_info(TCB_INFO, TRUSTED_TEST_TCB_INFO_DIDX509).unwrap());
+        assert!(matches!(
+            verify_tcb_info(TCB_INFO, TRUSTED_ACI_DIDX509),
+            Err(AciError::DidX509(_))
+        ));
+        assert!(matches!(
+            verify_tcb_info(
+                &tcb_info_with_tampered_payload(),
+                TRUSTED_TEST_TCB_INFO_DIDX509
+            ),
+            Err(AciError::Signature(_))
+        ));
+        assert!(matches!(
+            verify_tcb_info(
+                &reference_info_fixture(TRANSPARENT_FIXTURE),
+                TRUSTED_ACI_DIDX509
+            ),
+            Err(AciError::Cose(_))
+        ));
+        assert!(matches!(
+            verify_uvm_endorsement(TCB_INFO, TRUSTED_TEST_TCB_INFO_DIDX509),
+            Err(AciError::Measurement(_))
+        ));
+    }
 
     #[cfg_attr(not(target_family = "wasm"), test)]
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
@@ -423,6 +487,26 @@ mod asynchronous {
 
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn verifies_tcb_info() {
+        use crate::asynchronous::verify_tcb_info;
+
+        assert_tcb_info_fixture(
+            &verify_tcb_info(TCB_INFO, TRUSTED_TEST_TCB_INFO_DIDX509)
+                .await
+                .unwrap(),
+        );
+        assert!(matches!(
+            verify_tcb_info(
+                &tcb_info_with_tampered_payload(),
+                TRUSTED_TEST_TCB_INFO_DIDX509
+            )
+            .await,
+            Err(AciError::Signature(_))
+        ));
+    }
 
     async fn verify_caci_attestation(
         attestation: AttestationReport,
