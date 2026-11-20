@@ -8,6 +8,50 @@ use crypto::CryptoBackend;
 
 use crate::AciError;
 use crypto::base64::base64_encode_no_padding;
+use crypto::CertificateBackend;
+use x509_cert::{
+    der::{oid::ObjectIdentifier, Decode},
+    ext::pkix::ExtendedKeyUsage,
+};
+
+/// Check the supported DID policies against the actual signing certificate.
+pub(crate) fn verify_issuer(
+    trusted_iss: &str,
+    iss: &str,
+    leaf: &crypto::Certificate,
+) -> Result<(), AciError> {
+    if trusted_iss != iss {
+        return Err(AciError::DidX509(
+            "signed iss does not match the full trusted issuer".into(),
+        ));
+    }
+
+    let (_, policies) = trusted_iss
+        .split_once("::")
+        .ok_or_else(|| AciError::DidX509("trusted issuer must specify an EKU policy".into()))?;
+    let required_ekus = policies
+        .split("::")
+        .map(|policy| {
+            policy
+                .strip_prefix("eku:")
+                .and_then(|oid| oid.parse::<ObjectIdentifier>().ok())
+                .ok_or_else(|| AciError::DidX509("unsupported or invalid issuer policy".into()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let extension = crypto::Crypto::get_extension_value_by_oid(leaf, "2.5.29.37")
+        .map_err(|e| AciError::Certificate(e.to_string()))?
+        .ok_or_else(|| AciError::DidX509("signing certificate has no EKU extension".into()))?;
+    let ekus =
+        ExtendedKeyUsage::from_der(&extension).map_err(|e| AciError::Certificate(e.to_string()))?;
+    for required in required_ekus {
+        if !ekus.0.contains(&required) {
+            return Err(AciError::DidX509(format!(
+                "signing certificate does not contain required EKU {required}"
+            )));
+        }
+    }
+    Ok(())
+}
 
 #[cfg(sync_crypto)]
 pub(crate) fn verify_didx509_root(

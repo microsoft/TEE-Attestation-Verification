@@ -15,32 +15,51 @@ We establish trust in an ACI container using the following relying-party-policy:
 - The verified `attestation.report_data` is returned for caller-specific key
   release or encryption
 
-The API of this library tries to expose this process to the user.
+Authenticate the SNP report and each signed endorsement separately, then
+pass the verified artifacts to the CACI policy check.
 
 ```rust
-use tee_attestation_verification_caci::{snp, synchronous as tav};
+use tee_attestation_verification_caci::{synchronous as tav, EndorsementPolicy};
 
-let report = tav::verify_attestation(
-    attestation_report_bytes,
-    amd_endorsements,
-)?;
-let trusted_didx509 =
-    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
-let caci_uvm_endorsement = tav::verify_uvm_endorsement(
-    aci_cose_sign1,
-    trusted_didx509,
-)?;
-let minimum_tcb: Vec<(snp::Cpuid, snp::report::TcbVersionRaw)> =
-    vec![(container_cpuid, minimum_tcb_version)];
+let report = tav::verify_attestation(attestation_report_bytes, amd_endorsements)?;
+let uvm_policy = EndorsementPolicy {
+    trusted_iss: trusted_uvm_iss,
+    expected_sub: "ContainerPlat-AMD-UVM",
+    minimum_svn: minimum_uvm_svn,
+};
+let tcb_policy = EndorsementPolicy {
+    trusted_iss: trusted_tcb_iss,
+    expected_sub: trusted_tcb_sub,
+    minimum_svn: minimum_tcb_endorsement_svn,
+};
+let uvm = tav::verify_uvm_endorsement(uvm_cose_sign1, &uvm_policy)?;
+let tcb = tav::verify_tcb_endorsement(tcb_cose_sign1, &tcb_policy)?;
 let verified_report_data = tav::verify_caci_attestation(
     report,
-    minimum_tcb,
+    &tcb,
     vec![trusted_caci_execution_policy], // SHA-256 digest of the loaded security policy.
-    &caci_uvm_endorsement,
-    "ContainerPlat-AMD-UVM",
-    minimum_uvm_svn,
+    &uvm,
 )?;
 ```
 
-`verify_uvm_endorsement` parses the endorsement before anything authenticates
-it, and its size is unchecked: bound untrusted input before calling.
+The `asynchronous` module exposes the same stages with async functions.
+Each endorsement has its own policy. The signed `iss` must exactly match the
+configured `did:x509`, and the signing leaf must contain the EKU(s) required by
+that DID. Only `eku` DID policy clauses are supported. The verifier checks the
+signed CWT `sub` and `svn`; for legacy UVM endorsements it uses the signed
+`feed` and numeric guest SVN instead. Bound untrusted input before parsing.
+
+## Signed TCB info
+
+`verify_tcb_endorsement` accepts COSE_Sign1 bytes with protected content type
+`application/vnd.tcb-reference-info.v1+cose`. The manifest's signed SVN is
+independent of the per-CPU TCB watermarks in its payload. The CACI policy
+check rejects a report if its CPU generation has no watermark or its
+reported TCB is below an applicable watermark. Future TEE entries are ignored
+within the library's CBOR limits. The verifier does not check SCITT receipts
+or maintain rollback state; configure the minimum acceptable endorsement SVN.
+
+The existing C, C++, C#, and WASM bindings still use the caller-supplied TCB
+minima and root-pinned UVM flow. The equivalent Rust compatibility calls are
+`verify_uvm_endorsement_with_root_pin` and
+`verify_caci_attestation_with_minimum_tcb`.

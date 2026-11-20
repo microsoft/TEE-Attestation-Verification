@@ -694,6 +694,7 @@ dependencies = [
  "tee-attestation-verification-lib",
  "tokio",
  "wasm-bindgen-test",
+ "x509-cert",
 ]
 
 [[package]]
