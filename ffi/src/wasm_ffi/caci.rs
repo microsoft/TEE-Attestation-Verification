@@ -56,9 +56,10 @@ pub async fn verify_uvm_endorsement_async(
     uvm_endorsement: Vec<u8>,
     trusted_didx509: &str,
 ) -> Result<WasmCborValue, String> {
-    let inner = asynchronous::verify_uvm_endorsement(&uvm_endorsement, trusted_didx509)
-        .await
-        .map_err(wasm_error)?;
+    let inner =
+        asynchronous::verify_uvm_endorsement_with_root_pin(&uvm_endorsement, trusted_didx509)
+            .await
+            .map_err(wasm_error)?;
     Ok(WasmCborValue::from_native(inner))
 }
 
@@ -90,7 +91,7 @@ pub fn verify_caci_attestation(
             minimum_tcb,
             trusted_caci_execution_policies,
         } = policy.map_err(|e| JsValue::from_str(&e))?;
-        let report_data = asynchronous::verify_caci_attestation(
+        let report_data = asynchronous::verify_caci_attestation_with_minimum_tcb(
             attestation,
             minimum_tcb,
             trusted_caci_execution_policies,

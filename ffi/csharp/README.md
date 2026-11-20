@@ -118,7 +118,8 @@ sealed record AmdEndorsements(string ArkPem, string AskPem, string VcekPem);
 
 `VerifySnpAttestation` authenticates the AMD certificate chain and SNP report,
 `VerifyUvmEndorsement` authenticates `reference-info-base64`, and
-`VerifyCaciAttestation` applies the relying-party policy before returning the
+The C# binding accepts caller-supplied minimum TCB values, not signed TCB
+endorsements. `VerifyCaciAttestation` applies the relying-party policy before returning the
 verified 64-byte report data. The trusted DID, UVM feed, and minimum SVN are
 specified by the
 [Confidential ACI scheme](https://github.com/microsoft/confidential-aci-examples/blob/main/docs/Confidential_ACI_SCHEME.md#reference-info-base64).
