@@ -157,4 +157,176 @@ mod tests {
             assert!(extended_key_usage(value).is_err(), "{value:x?}");
         }
     }
+
+    /// Decodes with OpenSSL, also reporting whether the input is DER: whether
+    /// OpenSSL encodes what it decoded back to the same bytes.
+    #[cfg(crypto_backend = "crypto_openssl")]
+    fn openssl_extended_key_usage(value: &[u8]) -> Option<(Vec<String>, bool)> {
+        use foreign_types_shared::{ForeignType, ForeignTypeRef};
+        use openssl::{asn1::Asn1Object, stack::Stack};
+        use std::ffi::{c_int, c_long, c_uchar, c_void};
+
+        extern "C" {
+            fn d2i_EXTENDED_KEY_USAGE(
+                out: *mut *mut c_void,
+                input: *mut *const c_uchar,
+                len: c_long,
+            ) -> *mut c_void;
+            fn i2d_EXTENDED_KEY_USAGE(usage: *const c_void, out: *mut *mut c_uchar) -> c_int;
+        }
+
+        let mut input = value.as_ptr();
+        // SAFETY: input points to value.len() readable bytes, which OpenSSL does not retain.
+        let usage = unsafe {
+            d2i_EXTENDED_KEY_USAGE(std::ptr::null_mut(), &mut input, value.len() as c_long)
+        };
+        if usage.is_null() {
+            // SAFETY: clearing the thread's error queue has no preconditions.
+            unsafe { openssl_sys::ERR_clear_error() };
+            return None;
+        }
+        // SAFETY: a non-null EXTENDED_KEY_USAGE is an owned stack of ASN1_OBJECT.
+        let usage = unsafe { Stack::<Asn1Object>::from_ptr(usage.cast()) };
+        // SAFETY: OpenSSL leaves input within value, or one past its end.
+        if unsafe { input.offset_from(value.as_ptr()) } as usize != value.len() {
+            return None;
+        }
+
+        // SAFETY: a null output asks only for the encoded length.
+        let len = unsafe { i2d_EXTENDED_KEY_USAGE(usage.as_ptr().cast(), std::ptr::null_mut()) };
+        let mut encoded = vec![0u8; len.try_into().unwrap()];
+        // SAFETY: encoded is writable for the length OpenSSL just reported.
+        unsafe { i2d_EXTENDED_KEY_USAGE(usage.as_ptr().cast(), &mut encoded.as_mut_ptr()) };
+
+        let oids = usage.iter().map(|oid| {
+            let mut text = [0u8; 4096];
+            // SAFETY: oid is a live ASN1_OBJECT and text is writable for the length passed.
+            // The final argument selects the dotted-decimal form.
+            let len = unsafe {
+                openssl_sys::OBJ_obj2txt(
+                    text.as_mut_ptr().cast(),
+                    text.len() as c_int,
+                    oid.as_ptr(),
+                    1,
+                )
+            };
+            String::from_utf8(text[..len.try_into().unwrap()].to_vec()).unwrap()
+        });
+        Some((oids.collect(), encoded == value))
+    }
+
+    /// Builds an input that is usually close to a valid extended key usage.
+    #[cfg(crypto_backend = "crypto_openssl")]
+    fn random_extended_key_usage(random: &mut impl rand::Rng) -> Vec<u8> {
+        use rand::RngExt;
+
+        fn tlv(random: &mut impl rand::Rng, tag: u8, contents: &[u8]) -> Vec<u8> {
+            let tag = if random.random_range(0..32) == 0 {
+                random.random()
+            } else {
+                tag
+            };
+            let length = (contents.len() as u32).to_be_bytes();
+            let length = &length[length.iter().position(|&b| b != 0).unwrap_or(3)..];
+            let padding = match random.random_range(0..16) {
+                0 => random.random_range(0..3),
+                _ => 0,
+            };
+            let mut encoded = vec![tag];
+            if random.random_range(0..16) == 0 {
+                // Indefinite length, ended by an end-of-contents marker.
+                encoded.push(0x80);
+                encoded.extend_from_slice(contents);
+                encoded.extend_from_slice(&[0, 0]);
+                return encoded;
+            }
+            if padding > 0 || contents.len() >= 0x80 {
+                encoded.push(0x80 | (padding + length.len()) as u8);
+                encoded.extend(std::iter::repeat_n(0, padding));
+            }
+            encoded.extend_from_slice(length);
+            encoded.extend_from_slice(contents);
+            encoded
+        }
+
+        let mut key_purposes = Vec::new();
+        let max_key_purposes = 1 << random.random_range(0..5);
+        for _ in 0..random.random_range(0..=max_key_purposes) {
+            let mut oid = Vec::new();
+            for _ in 0..random.random_range(0..8) {
+                // 19 base-128 digits is the most that fits 128 bits.
+                let max_digits = 4 << random.random_range(0..4);
+                for digit in (0..random.random_range(1..=max_digits)).rev() {
+                    let continuation = if digit > 0 { 0x80 } else { 0 };
+                    // A leading zero digit is padding, which DER forbids.
+                    let low = [
+                        0x7f,
+                        random.random_range(1..0x80),
+                        random.random_range(0..0x80),
+                    ];
+                    oid.push(continuation | low[random.random_range(0..3)]);
+                }
+            }
+            key_purposes.extend(tlv(random, OBJECT_IDENTIFIER, &oid));
+        }
+        let mut value = tlv(random, SEQUENCE, &key_purposes);
+
+        match random.random_range(0..8) {
+            0 if !value.is_empty() => {
+                let at = random.random_range(0..value.len());
+                value[at] = random.random();
+            }
+            1 if !value.is_empty() => value.truncate(random.random_range(0..value.len())),
+            2 => value.push(random.random()),
+            _ => {}
+        }
+        value
+    }
+
+    /// OpenSSL decodes more than DER. On DER, the two decoders must agree,
+    /// except that OpenSSL has no limit on the size of an arc. Anything else
+    /// that OpenSSL decodes must be rejected here.
+    #[test]
+    #[cfg(crypto_backend = "crypto_openssl")]
+    fn extended_key_usage_matches_openssl_on_random_data() {
+        use rand::{rngs::StdRng, rngs::SysRng, SeedableRng, TryRng};
+
+        let seed = SysRng
+            .try_next_u64()
+            .expect("system RNG should provide a test seed");
+        eprintln!("extended key usage random seed: {seed:#018x}");
+        let mut random = StdRng::seed_from_u64(seed);
+
+        let exceeds_128_bits = |oid: &String| {
+            let mut arcs = oid.split('.').map(str::parse::<u128>);
+            // The second arc is encoded as 80 more than its value when the first is 2.
+            arcs.nth(1)
+                .unwrap()
+                .map_or(true, |arc| arc > u128::MAX - 80)
+                || arcs.any(|arc| arc.is_err())
+        };
+        let mut agreed = 0;
+        for _ in 0..20_000 {
+            let value = random_extended_key_usage(&mut random);
+            let context = format!("seed {seed:#018x}, input {value:02x?}");
+            match (
+                extended_key_usage(&value),
+                openssl_extended_key_usage(&value),
+            ) {
+                (Ok(oids), Some((expected, is_der))) => {
+                    assert_eq!(oids, expected, "{context}");
+                    assert!(is_der, "accepted an input that is not DER: {context}");
+                    agreed += 1;
+                }
+                (Ok(_), None) => panic!("accepted an input that OpenSSL rejects: {context}"),
+                (Err(error), Some((expected, true))) => assert!(
+                    expected.iter().any(exceeds_128_bits),
+                    "rejected DER that OpenSSL accepts: {error}: {context}"
+                ),
+                (Err(_), _) => {}
+            }
+        }
+        // The generator must keep producing inputs that exercise the comparison.
+        assert!(agreed > 1000, "only {agreed} inputs were accepted");
+    }
 }
