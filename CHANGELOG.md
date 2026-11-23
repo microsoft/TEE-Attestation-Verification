@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- CACI now requires the UVM signing certificate to list the EKU specified by the caller's `did:x509` pin. Pins without a predicate are unchanged; unsupported predicates are rejected.
+- CACI now requires the UVM signing certificate to list the EKU specified by the caller's `did:x509` pin. Pins without a predicate are unchanged; unsupported predicates are rejected. (#187)
 
 ## [2.0.1]
 
