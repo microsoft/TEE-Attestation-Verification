@@ -349,7 +349,8 @@ fn basic_constraints_decode_from_a_certificate_authority() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 fn extended_key_usage_decodes_dotted_decimal_oids() {
     // id-kp-codeSigning and id-kp-clientAuth.
     assert_eq!(

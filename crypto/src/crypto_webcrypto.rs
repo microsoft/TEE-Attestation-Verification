@@ -175,10 +175,6 @@ impl CertificateBackend for Crypto {
         cert.inner.key_usage()
     }
 
-    fn extended_key_usage(cert: &Self::Certificate) -> Result<Option<Vec<String>>> {
-        cert.inner.extended_key_usage()
-    }
-
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
         cert.inner.extension_criticality(oid)
     }
