@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- CACI `verify_uvm_endorsement`, and so `tav_verify_caci_uvm_endorsement`, WASM `verify_uvm_endorsement_async`, and C# `VerifyUvmEndorsement`, requires the UVM signing certificate to list the extended key usage named by the trusted `did:x509`. The trusted DID must have the form `did:x509:0:sha256:<root fingerprint>::eku:<oid>` and equal the endorsement's issuer exactly. The endorsement's `x5chain` must contain at least two certificates. Previously only the root fingerprint was compared, so a trusted DID with no predicate was accepted and the `eku` predicate was ignored.
+- CACI `verify_uvm_endorsement`, and so `tav_verify_caci_uvm_endorsement`, WASM `verify_uvm_endorsement_async`, and C# `VerifyUvmEndorsement`, requires the UVM signing certificate to list the extended key usage named by the trusted `did:x509`. The trusted DID must have the form `did:x509:0:sha256:<root fingerprint>::eku:<oid>` and equal the endorsement's issuer exactly. The endorsement's `x5chain` must contain at least two certificates. Previously only the root fingerprint was compared, so a trusted DID with no predicate was accepted and the `eku` predicate was ignored. (#188)
 
 ## [2.0.1]
 
