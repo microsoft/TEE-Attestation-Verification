@@ -125,6 +125,9 @@ pub trait CertificateBackend {
     /// Return decoded RFC 5280 keyUsage metadata if present.
     fn key_usage(cert: &Self::Certificate) -> Result<Option<KeyUsage>>;
 
+    /// Get the extended key usage OIDs in dotted-decimal form, if present.
+    fn extended_key_usage(cert: &Self::Certificate) -> Result<Option<Vec<String>>>;
+
     /// Return the criticality of an extension by dotted-decimal OID if present.
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>>;
 

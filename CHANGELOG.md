@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- `CertificateBackend::extended_key_usage`, returning a certificate's extended key usage OIDs. (#188)
+
 ### Fixed
 
 - CACI `verify_uvm_endorsement` enforces the `eku` predicate of the trusted `did:x509`, which is now required. (#188)

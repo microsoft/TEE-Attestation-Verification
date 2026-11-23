@@ -6,7 +6,9 @@ use x509_cert::der::{
     asn1::AnyRef, oid::ObjectIdentifier, pem::LineEnding, referenced::OwnedToRef, Decode,
     DecodePem, Encode, EncodePem,
 };
-use x509_cert::ext::pkix::{BasicConstraints as X509BasicConstraints, KeyUsage as X509KeyUsage};
+use x509_cert::ext::pkix::{
+    BasicConstraints as X509BasicConstraints, ExtendedKeyUsage, KeyUsage as X509KeyUsage,
+};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 use x509_cert::{
     certificate::{CertificateInner, Profile},
@@ -140,6 +142,14 @@ impl Certificate {
             .map(|(_, key_usage)| KeyUsage {
                 key_cert_sign: key_usage.key_cert_sign(),
             }))
+    }
+
+    pub fn extended_key_usage(&self) -> Result<Option<Vec<String>>> {
+        Ok(self
+            .inner
+            .tbs_certificate()
+            .get_extension::<ExtendedKeyUsage>()?
+            .map(|(_, usage)| usage.0.iter().map(ToString::to_string).collect()))
     }
 
     pub fn extension_criticality(&self, oid: &str) -> Result<Option<bool>> {

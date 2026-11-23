@@ -592,6 +592,10 @@ mod tests {
             Ok(cert.key_usage)
         }
 
+        fn extended_key_usage(_cert: &Self::Certificate) -> Result<Option<Vec<String>>> {
+            unimplemented!("not used by policy tests")
+        }
+
         fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {
             Ok(cert.extensions.get(oid).copied())
         }

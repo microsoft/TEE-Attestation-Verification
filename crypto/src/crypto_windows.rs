@@ -42,6 +42,8 @@ const FILETIME_UNIX_EPOCH_OFFSET_TICKS: u64 = 116_444_736_000_000_000;
 const BASIC_CONSTRAINTS_OID: &str = "2.5.29.19";
 // RFC 5280 §4.2.1.3: https://www.rfc-editor.org/rfc/rfc5280.html#section-4.2.1.3
 const KEY_USAGE_OID: &str = "2.5.29.15";
+/// RFC 5280 section 4.2.1.12: id-ce-extKeyUsage OBJECT IDENTIFIER ::= { id-ce 37 }.
+const EXTENDED_KEY_USAGE_OID: &str = "2.5.29.37";
 
 pub struct Crypto;
 
@@ -402,6 +404,27 @@ impl CertificateBackend for Crypto {
         })
     }
 
+    fn extended_key_usage(cert: &Certificate) -> Result<Option<Vec<String>>> {
+        cert.with_context(|context| {
+            let Some(ext) = context.extension(EXTENDED_KEY_USAGE_OID)? else {
+                return Ok(None);
+            };
+            let encoded = unsafe { native_slice(ext.Value.pbData, ext.Value.cbData, context)? };
+            let decoded = decode::<Crypto32::CTL_USAGE>(encoded)?;
+            let oids = unsafe {
+                native_slice(
+                    decoded.rgpszUsageIdentifier,
+                    decoded.cUsageIdentifier,
+                    &decoded,
+                )?
+            };
+            oids.iter()
+                .map(|oid| Ok(unsafe { oid.to_string() }?))
+                .collect::<Result<Vec<_>>>()
+                .map(Some)
+        })
+    }
+
     fn extension_criticality(cert: &Certificate, oid: &str) -> Result<Option<bool>> {
         cert.with_context(|context| Ok(context.extension(oid)?.map(|ext| ext.fCritical.as_bool())))
     }
@@ -563,6 +586,11 @@ impl DecodeType for Crypto32::CERT_ECC_SIGNATURE {
 
 impl DecodeType for Crypto32::CERT_BASIC_CONSTRAINTS2_INFO {
     const KIND: PCSTR = Crypto32::X509_BASIC_CONSTRAINTS2;
+}
+
+// CERT_ENHKEY_USAGE is an alias of CTL_USAGE.
+impl DecodeType for Crypto32::CTL_USAGE {
+    const KIND: PCSTR = Crypto32::X509_ENHANCED_KEY_USAGE;
 }
 
 impl DecodeType for Crypto32::CERT_PUBLIC_KEY_INFO {

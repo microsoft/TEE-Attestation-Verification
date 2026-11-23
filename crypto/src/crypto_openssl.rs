@@ -8,7 +8,7 @@
 //! verification. It is the native backend selected when `crypto_openssl` is
 //! enabled for a non-`wasm32` target.
 
-use foreign_types_shared::ForeignType;
+use foreign_types_shared::{ForeignType, ForeignTypeRef};
 use openssl::asn1::{Asn1Object, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
@@ -21,10 +21,10 @@ use openssl::stack::Stack;
 use openssl::x509::verify::X509VerifyFlags;
 use openssl::x509::verify::X509VerifyParam;
 use openssl_sys::{
-    ASN1_STRING_get0_data, ASN1_STRING_length, OBJ_obj2txt, X509_EXTENSION_get_critical,
-    X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext, X509_get_ext_by_OBJ,
-    X509_get_ext_count, X509_get_extension_flags, X509_get_key_usage, X509v3_KU_KEY_CERT_SIGN,
-    EXFLAG_CA,
+    ASN1_STRING_get0_data, ASN1_STRING_length, NID_ext_key_usage, OBJ_obj2txt,
+    X509_EXTENSION_get_critical, X509_EXTENSION_get_data, X509_EXTENSION_get_object, X509_get_ext,
+    X509_get_ext_by_OBJ, X509_get_ext_count, X509_get_ext_d2i, X509_get_extension_flags,
+    X509_get_key_usage, X509v3_KU_KEY_CERT_SIGN, EXFLAG_CA,
 };
 use std::cmp::Ordering;
 use std::ffi::c_int;
@@ -244,6 +244,36 @@ impl CertificateBackend for Crypto {
         Ok(Some(super::KeyUsage {
             key_cert_sign: key_usage & X509v3_KU_KEY_CERT_SIGN != 0,
         }))
+    }
+
+    fn extended_key_usage(cert: &Self::Certificate) -> Result<Option<Vec<String>>> {
+        let mut critical = 0;
+        // SAFETY: cert owns a live X509, and critical is a valid out-pointer.
+        let usage = unsafe {
+            X509_get_ext_d2i(
+                cert.as_ptr(),
+                NID_ext_key_usage,
+                &mut critical,
+                std::ptr::null_mut(),
+            )
+        };
+        if usage.is_null() {
+            // OpenSSL reports -1 when the extension is absent.
+            return match critical {
+                -1 => Ok(None),
+                _ => Err("Certificate has a malformed extended key usage".into()),
+            };
+        }
+        // SAFETY: X509_get_ext_d2i returned an owned EXTENDED_KEY_USAGE, a stack of ASN1_OBJECT.
+        let usage = unsafe { Stack::<Asn1Object>::from_ptr(usage.cast()) };
+        usage
+            .iter()
+            .map(|oid| {
+                dotted_decimal_oid(oid.as_ptr())
+                    .ok_or_else(|| "Failed to format extended key usage OID".into())
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some)
     }
 
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>> {

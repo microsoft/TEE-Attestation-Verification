@@ -9,6 +9,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
 const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
+const EXTENDED_KEY_USAGE_LEAF: &[u8] = include_bytes!("test_data/extended_key_usage_leaf.pem");
 const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 const GENOA_ARK: &[u8] = include_bytes!("test_data/genoa_ark.pem");
 const GENOA_ASK: &[u8] = include_bytes!("test_data/genoa_ask.pem");
@@ -344,6 +345,24 @@ fn basic_constraints_decode_from_a_certificate_authority() {
 
     assert_eq!(
         Crypto::basic_constraints(&cert(MILAN_VCEK)).expect("Basic constraints should decode"),
+        None
+    );
+}
+
+#[test]
+fn extended_key_usage_decodes_dotted_decimal_oids() {
+    // id-kp-codeSigning and id-kp-clientAuth.
+    assert_eq!(
+        Crypto::extended_key_usage(&cert(EXTENDED_KEY_USAGE_LEAF))
+            .expect("Extended key usage should decode"),
+        Some(vec![
+            "1.3.6.1.5.5.7.3.3".to_string(),
+            "1.3.6.1.5.5.7.3.2".to_string()
+        ])
+    );
+
+    assert_eq!(
+        Crypto::extended_key_usage(&cert(MILAN_ASK)).expect("Extended key usage should decode"),
         None
     );
 }
