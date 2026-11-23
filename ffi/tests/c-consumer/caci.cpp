@@ -157,6 +157,25 @@ TEST_CASE("caci: staged verification of the fixture attestation succeeds") {
     tav_byte_buffer_free(report_data);
 }
 
+TEST_CASE("caci: a trusted did:x509 without an eku predicate is rejected") {
+    // Without an eku predicate the DID would trust every certificate under the root.
+    CaciInputs in = load_caci_inputs();
+    constexpr const char root_only[] =
+        "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s";
+    TavCborHandle *uvm = reinterpret_cast<TavCborHandle *>(0x1);
+    TavError *error = tav_verify_caci_uvm_endorsement(
+        in.uvm.data(), in.uvm.size(),
+        root_only, std::strlen(root_only),
+        &uvm);
+
+    REQUIRE(error != nullptr);
+    CHECK(tav_error_code(error) == TAV_ERROR_CACI_DID_X509);
+    const std::string message = tav_error_message(error);
+    CHECK(message.find("expected did:x509:0:sha256:<fingerprint>::eku:<oid>") != std::string::npos);
+    CHECK(uvm == nullptr);
+    tav_error_free(error);
+}
+
 TEST_CASE("caci: an untrusted policy digest is rejected") {
     CaciInputs in = load_caci_inputs();
     VerifiedArtifacts artifacts;

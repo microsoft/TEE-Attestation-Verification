@@ -42,5 +42,26 @@ let verified_report_data = tav::verify_caci_attestation(
 )?;
 ```
 
+## did:x509 support
+
+`trusted_didx509` must have the form
+`did:x509:0:sha256:<root fingerprint>::eku:<oid>`, where the fingerprint is the
+unpadded base64url SHA-256 digest of the DER root certificate and the OID is in
+dotted-decimal form. `verify_uvm_endorsement` accepts an endorsement only if:
+
+- its issuer is exactly `trusted_didx509`,
+- its `x5chain` has at least two certificates, the last of which has that
+  SHA-256 fingerprint, and
+- the first (signing) certificate lists that OID as an extended key usage.
+
+This is a subset of the
+[did:x509 specification](https://github.com/microsoft/did-x509/blob/main/specification.md).
+Any other trusted DID is rejected, including one with no predicate, with a
+`subject`, `san`, `fulcio-issuer`, or `fulcio` predicate, with more than one
+predicate, or with a `sha384` or `sha512` fingerprint. A fingerprint of an
+intermediate certificate does not match.
+
+## Untrusted input
+
 `verify_uvm_endorsement` parses the endorsement before anything authenticates
 it, and its size is unchecked: bound untrusted input before calling.

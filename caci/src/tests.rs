@@ -16,6 +16,14 @@ const REFERENCE_INFO_SCITT_CWT_BASE64: &str =
 const REPORT_SCITT_CWT_HEX: &str = include_str!("../tests/fixtures/report-scitt-cwt.hex");
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
+const TRUSTED_ACI_DIDX509_PREFIX: &str =
+    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s";
+// The fixture leaf also lists this EKU, but the fixture issuer does not name it.
+const OTHER_EKU_ACI_DIDX509: &str =
+    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.1";
+const INTERMEDIATE_ACI_DIDX509: &str =
+    "did:x509:0:sha256:mxiU8iPZNMvWV1rzxuH2CWuSIafaEyGF9aXNySI1tdw::eku:1.3.6.1.4.1.311.76.59.1.2";
+const UNSUPPORTED_DIDX509: &str = "expected did:x509:0:sha256:<fingerprint>::eku:<oid>";
 const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
 const ACI_SVN: u64 = 104;
 const MILAN_CPUID: u32 = 0x00A00F11;
@@ -146,20 +154,37 @@ mod synchronous {
                     .unwrap();
             assert_verified_uvm_matches_fixture(&uvm, expected_report, fixture);
 
-            match crate::synchronous::verify_uvm_endorsement(&reference_info, "not-a-did") {
-                Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+            // A trusted DID without an eku predicate would trust every leaf under the root.
+            for unsupported in ["not-a-did", TRUSTED_ACI_DIDX509_PREFIX] {
+                match crate::synchronous::verify_uvm_endorsement(&reference_info, unsupported) {
+                    Err(AciError::DidX509(actual)) => assert_eq!(actual, UNSUPPORTED_DIDX509),
+                    other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
                 }
-                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
             match crate::synchronous::verify_uvm_endorsement(
                 &reference_info,
-                "did:x509:0:sha256:wrong",
+                OTHER_EKU_ACI_DIDX509,
             ) {
                 Err(AciError::DidX509(actual)) => assert_eq!(
                     actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+                    format!("issuer DID {TRUSTED_ACI_DIDX509} does not match trusted DID {OTHER_EKU_ACI_DIDX509}")
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
+
+            // An issuer naming an EKU the leaf lacks is rejected before the signature is checked.
+            let absent_eku_did =
+                format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.3");
+            let absent_eku_issuer = replace_bytes(
+                &reference_info,
+                TRUSTED_ACI_DIDX509.as_bytes(),
+                absent_eku_did.as_bytes(),
+            );
+            match crate::synchronous::verify_uvm_endorsement(&absent_eku_issuer, &absent_eku_did) {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    format!("x5chain leaf certificate does not have the extended key usage required by trusted DID {absent_eku_did}")
                 ),
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
@@ -195,6 +220,34 @@ mod synchronous {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
             other => panic!("expected Cose error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn didx509_pins_the_last_certificate_of_a_chain() {
+        for fixture in fixture_cases() {
+            let x5chain = x5chain_fixture(fixture);
+            let leaf = crypto::Crypto::from_der(&x5chain[0]).unwrap();
+            let verify = |did, x5chain| crate::didx509::verify_didx509(did, did, x5chain, &leaf);
+
+            // The intermediate CA is in the chain, but only the last certificate is pinned.
+            match verify(INTERMEDIATE_ACI_DIDX509, &x5chain[..]) {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    format!("x5chain root certificate fingerprint does not match trusted DID {INTERMEDIATE_ACI_DIDX509}")
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
+
+            // A one-certificate x5chain has no CA certificate to pin.
+            match verify(TRUSTED_ACI_DIDX509, &x5chain[..1]) {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    "x5chain must contain a CA certificate after the signing certificate"
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
         }
     }
 
@@ -539,22 +592,41 @@ mod asynchronous {
                     .unwrap();
             assert_verified_uvm_matches_fixture(&uvm, expected_report, fixture);
 
-            match crate::asynchronous::verify_uvm_endorsement(&reference_info, "not-a-did").await {
-                Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+            // A trusted DID without an eku predicate would trust every leaf under the root.
+            for unsupported in ["not-a-did", TRUSTED_ACI_DIDX509_PREFIX] {
+                match crate::asynchronous::verify_uvm_endorsement(&reference_info, unsupported)
+                    .await
+                {
+                    Err(AciError::DidX509(actual)) => assert_eq!(actual, UNSUPPORTED_DIDX509),
+                    other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
                 }
-                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
             match crate::asynchronous::verify_uvm_endorsement(
                 &reference_info,
-                "did:x509:0:sha256:wrong",
+                OTHER_EKU_ACI_DIDX509,
             )
             .await
             {
                 Err(AciError::DidX509(actual)) => assert_eq!(
                     actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+                    format!("issuer DID {TRUSTED_ACI_DIDX509} does not match trusted DID {OTHER_EKU_ACI_DIDX509}")
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
+
+            // An issuer naming an EKU the leaf lacks is rejected before the signature is checked.
+            let absent_eku_did =
+                format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.3");
+            let absent_eku_issuer = replace_bytes(
+                &reference_info,
+                TRUSTED_ACI_DIDX509.as_bytes(),
+                absent_eku_did.as_bytes(),
+            );
+            match crate::asynchronous::verify_uvm_endorsement(&absent_eku_issuer, &absent_eku_did).await {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    format!("x5chain leaf certificate does not have the extended key usage required by trusted DID {absent_eku_did}")
                 ),
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
@@ -592,6 +664,35 @@ mod asynchronous {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
             other => panic!("expected Cose error, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn didx509_pins_the_last_certificate_of_a_chain() {
+        for fixture in fixture_cases() {
+            let x5chain = x5chain_fixture(fixture);
+            let leaf = crypto::Crypto::from_der(&x5chain[0]).unwrap();
+            let verify =
+                |did, x5chain| crate::didx509::verify_didx509_async(did, did, x5chain, &leaf);
+
+            // The intermediate CA is in the chain, but only the last certificate is pinned.
+            match verify(INTERMEDIATE_ACI_DIDX509, &x5chain[..]).await {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    format!("x5chain root certificate fingerprint does not match trusted DID {INTERMEDIATE_ACI_DIDX509}")
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
+
+            // A one-certificate x5chain has no CA certificate to pin.
+            match verify(TRUSTED_ACI_DIDX509, &x5chain[..1]).await {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    "x5chain must contain a CA certificate after the signing certificate"
+                ),
+                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+            }
         }
     }
 
@@ -808,6 +909,72 @@ mod asynchronous {
             other => panic!("expected Measurement error, got {other:?}"),
         }
     }
+}
+
+#[cfg_attr(not(target_family = "wasm"), test)]
+#[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+fn didx509_requires_trusted_eku_in_leaf_certificate() {
+    for fixture in fixture_cases() {
+        let x5chain = x5chain_fixture(fixture);
+        let leaf = crypto::Crypto::from_der(&x5chain[0]).unwrap();
+        let root = crypto::Crypto::from_der(x5chain.last().unwrap()).unwrap();
+        let verify_eku =
+            |did: &str, leaf| crate::didx509::verify_didx509_eku(did, did, leaf).map(|_| ());
+
+        // The leaf lists both of these EKUs.
+        verify_eku(TRUSTED_ACI_DIDX509, &leaf).unwrap();
+        verify_eku(
+            &format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.1"),
+            &leaf,
+        )
+        .unwrap();
+
+        for absent in [
+            "1.3.6.1.4.1.311.76.59.1.3",
+            "1.3.6.1.4.1.311.76.59.1",
+            "1.3.6.1.4.1.311.76.59.1.2.0",
+        ] {
+            let did = format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:{absent}");
+            match verify_eku(&did, &leaf) {
+                Err(AciError::DidX509(actual)) => assert_eq!(
+                    actual,
+                    format!("x5chain leaf certificate does not have the extended key usage required by trusted DID {did}")
+                ),
+                _ => panic!("expected DidX509 error for {} {absent}", fixture.name),
+            }
+        }
+
+        // The root has no extended key usage extension at all.
+        match verify_eku(TRUSTED_ACI_DIDX509, &root) {
+            Err(AciError::DidX509(actual)) => {
+                assert_eq!(actual, "x5chain leaf certificate has no extended key usage")
+            }
+            _ => panic!("expected DidX509 error for {}", fixture.name),
+        }
+    }
+}
+
+/// Replaces the single occurrence of `from` with the equally long `to`.
+fn replace_bytes(bytes: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    assert_eq!(from.len(), to.len());
+    let mut matches = (0..=bytes.len() - from.len()).filter(|&at| bytes[at..].starts_with(from));
+    let at = matches.next().unwrap();
+    assert_eq!(matches.next(), None);
+    let mut replaced = bytes.to_vec();
+    replaced[at..at + to.len()].copy_from_slice(to);
+    replaced
+}
+
+fn x5chain_fixture(fixture: CaciFixture) -> Vec<Vec<u8>> {
+    let reference_info = reference_info_fixture(fixture);
+    let endorsement = CborValue::parse_nondet(&reference_info).unwrap();
+    let protected_header = endorsement_protected_header(&endorsement);
+    parse::parse_x5chain(
+        protected_header
+            .map_at_int(cose::COSE_HEADER_X5CHAIN)
+            .unwrap(),
+    )
+    .unwrap()
 }
 
 fn attestation_fixture(fixture: CaciFixture) -> Vec<u8> {
