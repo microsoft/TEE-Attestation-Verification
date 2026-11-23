@@ -120,11 +120,7 @@ public static class AttestationVerifier
     /// The encoded COSE UVM endorsement. Its size is unchecked: bound
     /// untrusted input before calling.
     /// </param>
-    /// <param name="trustedDidX509">
-    /// The trusted DID x509, of the form <c>did:x509:0:sha256:&lt;root fingerprint&gt;::eku:&lt;oid&gt;</c>.
-    /// It must equal the endorsement's issuer, the endorsement's root certificate must have
-    /// that fingerprint, and its signing certificate must list that extended key usage.
-    /// </param>
+    /// <param name="trustedDidX509">The trusted DID x509 policy string.</param>
     /// <returns>An owned verified CBOR endorsement. Dispose it after use.</returns>
     /// <exception cref="VerifyException">Native parsing or verification fails.</exception>
     public static CborValue VerifyUvmEndorsement(

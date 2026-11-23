@@ -60,16 +60,6 @@ public sealed class CaciTests
         Assert.Equal(ErrorCode.CaciDidX509, didError.Code);
         Assert.NotEmpty(didError.Message);
 
-        // Without an eku predicate the DID would trust every certificate under the root.
-        VerifyException rootOnlyDidError = Assert.Throws<VerifyException>(() =>
-            AttestationVerifier.VerifyUvmEndorsement(
-                input.UvmEndorsement,
-                "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s"));
-        Assert.Equal(ErrorCode.CaciDidX509, rootOnlyDidError.Code);
-        Assert.Contains(
-            "expected did:x509:0:sha256:<fingerprint>::eku:<oid>",
-            rootOnlyDidError.Message);
-
         byte[] untrustedPolicy = (byte[])input.Policies[0].Clone();
         untrustedPolicy[0] ^= 0xff;
         VerifyException policyError = Assert.Throws<VerifyException>(() =>

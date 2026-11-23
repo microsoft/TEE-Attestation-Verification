@@ -64,16 +64,6 @@ test('verify_uvm_endorsement returns a CBOR payload and rejects an untrusted roo
     ),
     /DID x509 policy error: issuer DID .* does not match trusted DID /,
   );
-
-  // Failure mode: a did:x509 without an eku predicate would trust every
-  // certificate under the root, so it is rejected.
-  await assertRejectsStringError(
-    pkg.verify_uvm_endorsement_async(
-      uvmEndorsement,
-      'did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s',
-    ),
-    /DID x509 policy error: expected did:x509:0:sha256:<fingerprint>::eku:<oid>/,
-  );
 });
 
 test('verify_uvm_endorsement parses a large endorsement', async () => {

@@ -41,13 +41,7 @@ extern "C" {
  */
 
 /*
- * Verify an ACI/UVM endorsement COSE blob against a caller-trusted did:x509.
- *
- * trusted_didx509 must have the form
- * did:x509:0:sha256:<root fingerprint>::eku:<oid> and equal the endorsement's
- * issuer. The endorsement's root certificate must have that fingerprint and its
- * signing certificate must list that extended key usage.
- *
+ * Verify an ACI/UVM endorsement COSE blob against a caller-pinned did:x509 root.
  * The endorsement size is unchecked: bound untrusted input before calling.
  *
  * trusted_didx509 is a UTF-8 byte slice and does not need to be NUL-terminated.
