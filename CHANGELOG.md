@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `get_extension_value_by_oid` and `extension_criticality` return an error for a certificate that repeats the extension, instead of using the first. (#188)
 - CACI `verify_uvm_endorsement` enforces the `eku` predicate of the trusted `did:x509`, which is now required. (#188)
 
 ## [2.0.1]

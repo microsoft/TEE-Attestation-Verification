@@ -10,6 +10,8 @@ use wasm_bindgen_test::wasm_bindgen_test;
 const MILAN_ARK: &[u8] = include_bytes!("test_data/milan_ark.pem");
 const MILAN_ASK: &[u8] = include_bytes!("test_data/milan_ask.pem");
 const EXTENDED_KEY_USAGE_LEAF: &[u8] = include_bytes!("test_data/extended_key_usage_leaf.pem");
+const DUPLICATE_EXTENDED_KEY_USAGE_LEAF: &[u8] =
+    include_bytes!("test_data/duplicate_extended_key_usage_leaf.pem");
 const MILAN_VCEK: &[u8] = include_bytes!("test_data/milan_vcek.pem");
 const GENOA_ARK: &[u8] = include_bytes!("test_data/genoa_ark.pem");
 const GENOA_ASK: &[u8] = include_bytes!("test_data/genoa_ask.pem");
@@ -347,6 +349,26 @@ fn basic_constraints_decode_from_a_certificate_authority() {
         Crypto::basic_constraints(&cert(MILAN_VCEK)).expect("Basic constraints should decode"),
         None
     );
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+fn extension_lookup_rejects_duplicate_extensions() {
+    // The extended key usage extension appears twice.
+    let cert = cert(DUPLICATE_EXTENDED_KEY_USAGE_LEAF);
+
+    for error in [
+        Crypto::get_extension_value_by_oid(&cert, "2.5.29.37").map(drop),
+        Crypto::extended_key_usage(&cert).map(drop),
+        Crypto::extension_criticality(&cert, "2.5.29.37").map(drop),
+    ] {
+        assert_eq!(
+            error
+                .expect_err("Duplicate extension should fail")
+                .to_string(),
+            "Certificate has a duplicate extension"
+        );
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

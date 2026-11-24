@@ -33,9 +33,9 @@ use crypto::{CryptoBackend, KeyBackend};
 use std::collections::BTreeSet;
 
 #[cfg(sync_crypto)]
-use didx509::verify_didx509_root;
+use didx509::verify_didx509;
 #[cfg(async_crypto)]
-use didx509::verify_didx509_root_async;
+use didx509::verify_didx509_async;
 use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
 
 pub use attestation::snp;
@@ -173,7 +173,7 @@ pub mod synchronous {
                     protected_header.map_at_str("iss").map_err(AciError::Cose)?,
                     "iss",
                 )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain, &leaf)?;
+                verify_didx509(trusted_didx509, &issuer, &x5chain)?;
 
                 let signing_time = protected_header
                     .map_at_str("signingtime")
@@ -202,7 +202,7 @@ pub mod synchronous {
                         .map_err(AciError::Cose)?,
                     "CWT iss",
                 )?;
-                verify_didx509_root(trusted_didx509, &issuer, &x5chain, &leaf)?;
+                verify_didx509(trusted_didx509, &issuer, &x5chain)?;
 
                 let signing_time = cwt_claims
                     .map_at_int(cose::CWT_CLAIMS_IAT)
@@ -403,7 +403,7 @@ pub mod asynchronous {
                     protected_header.map_at_str("iss").map_err(AciError::Cose)?,
                     "iss",
                 )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain, &leaf).await?;
+                verify_didx509_async(trusted_didx509, &issuer, &x5chain).await?;
 
                 let signing_time = protected_header
                     .map_at_str("signingtime")
@@ -433,7 +433,7 @@ pub mod asynchronous {
                         .map_err(AciError::Cose)?,
                     "CWT iss",
                 )?;
-                verify_didx509_root_async(trusted_didx509, &issuer, &x5chain, &leaf).await?;
+                verify_didx509_async(trusted_didx509, &issuer, &x5chain).await?;
 
                 let signing_time = cwt_claims
                     .map_at_int(cose::CWT_CLAIMS_IAT)

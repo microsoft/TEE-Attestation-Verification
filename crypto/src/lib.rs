@@ -25,6 +25,8 @@ mod x509_policy;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+const DUPLICATE_EXTENSION: &str = "Certificate has a duplicate extension";
+
 mod signature;
 
 pub use signature::{
@@ -92,6 +94,9 @@ pub trait CertificateBackend {
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>>;
 
     /// Extract an extension value by dotted-decimal OID.
+    ///
+    /// Fails if the certificate has more than one extension with this OID,
+    /// which RFC 5280 section 4.2 forbids.
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
 
     /// Return the certificate subject distinguished name for diagnostics.
