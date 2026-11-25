@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![forbid(unsafe_code)]
-#![doc(test(attr(deny(warnings), allow(unused))))]
+#![doc(test(attr(deny(warnings), allow(dead_code))))]
 
 //! ACI/UVM endorsement verification.
 //!

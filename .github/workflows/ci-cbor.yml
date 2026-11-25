@@ -41,6 +41,10 @@ jobs:
   miri:
     name: Undefined behaviour check for CBOR FFI
     runs-on: ubuntu-24.04
+    # Miri tracks floating nightly for UB checks; cap lints so new nightly-only
+    # warnings do not break Miri while pinned stable CI enforces warnings = "deny".
+    env:
+      RUSTFLAGS: --cap-lints=warn
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

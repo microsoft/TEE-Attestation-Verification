@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![deny(unsafe_op_in_unsafe_fn)]
-#![doc(test(attr(deny(warnings), allow(unused))))]
+#![doc(test(attr(deny(warnings), allow(dead_code))))]
 
 //! Cryptographic backend for certificate and signature verification.
 //!

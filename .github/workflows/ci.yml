@@ -93,5 +93,11 @@ jobs:
       - name: Native build docs
         run: cargo doc --workspace --no-deps
 
+      - name: Native doctests
+        run: cargo test --workspace --doc
+
       - name: WASM build docs
         run: cargo doc --workspace --no-deps --target wasm32-unknown-unknown
+
+      - name: WASM doctests
+        run: cargo test --workspace --doc --target wasm32-unknown-unknown
