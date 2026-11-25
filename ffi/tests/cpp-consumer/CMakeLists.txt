@@ -29,6 +29,7 @@ foreach(header IN ITEMS byte_buffer.h errors.h utils.h snp.h cbor.h cose.h caci.
         file(GENERATE OUTPUT "${source}" CONTENT "#include <tav/${header}>\n#include <tav/${header}>\n")
         add_library("header-${header}-${extension}" OBJECT "${source}")
         target_include_directories("header-${header}-${extension}" PRIVATE "${TAV_REPO_ROOT}/ffi/include")
+        target_compile_options("header-${header}-${extension}" PRIVATE -Wall -Wextra -Werror)
     endforeach()
 endforeach()
 
@@ -71,13 +72,14 @@ if(TAV_LINK_STATIC)
 endif()
 
 add_executable(tav-cpp-consumer-tests main.cpp snp.cpp moves.cpp)
+target_include_directories(tav-cpp-consumer-tests SYSTEM PRIVATE
+    "${TAV_REPO_ROOT}/ffi/tests/c-consumer/vendor")
 target_include_directories(tav-cpp-consumer-tests PRIVATE
-    "${TAV_REPO_ROOT}/ffi/tests/c-consumer/vendor"
     "${TAV_REPO_ROOT}/ffi/include")
 target_compile_definitions(tav-cpp-consumer-tests PRIVATE TAV_REPO_ROOT="${TAV_REPO_ROOT}")
 target_link_libraries(tav-cpp-consumer-tests PRIVATE tav_cpp)
 target_compile_options(tav-cpp-consumer-tests PRIVATE
-    -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer)
+    -Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer)
 target_link_options(tav-cpp-consumer-tests PRIVATE -fsanitize=address)
 
 if(NOT TAV_LINK_STATIC)

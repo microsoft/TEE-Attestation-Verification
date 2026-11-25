@@ -60,17 +60,18 @@ add_executable(tav-c-consumer-tests
     snp.cpp
     cose.cpp
     caci.cpp)
+target_include_directories(tav-c-consumer-tests SYSTEM PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 target_include_directories(tav-c-consumer-tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor"
     "${TAV_REPO_ROOT}/ffi/include")
 target_compile_definitions(tav-c-consumer-tests PRIVATE TAV_REPO_ROOT="${TAV_REPO_ROOT}")
 target_link_libraries(tav-c-consumer-tests PRIVATE tav)
-target_compile_options(tav-c-consumer-tests PRIVATE -Wall -Wextra)
+target_compile_options(tav-c-consumer-tests PRIVATE -Wall -Wextra -Werror)
 
 add_executable(tav-cbor-c-tests cbor.c)
 target_include_directories(tav-cbor-c-tests PRIVATE "${TAV_REPO_ROOT}/ffi/include")
 target_link_libraries(tav-cbor-c-tests PRIVATE tav)
-target_compile_options(tav-cbor-c-tests PRIVATE -Wall -Wextra)
+target_compile_options(tav-cbor-c-tests PRIVATE -Wall -Wextra -Werror)
 set_target_properties(tav-cbor-c-tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
 if(NOT TAV_LINK_STATIC)

@@ -47,6 +47,9 @@ jobs:
           rustup update stable
           rustup default stable
 
+      - name: Clippy workspace
+        run: cargo clippy --workspace --all-targets
+
       - name: Test with Windows CNG backend
         run: cargo test --manifest-path crypto/Cargo.toml --no-default-features --features crypto_windows -- --nocapture
 

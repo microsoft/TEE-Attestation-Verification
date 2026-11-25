@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![deny(unsafe_op_in_unsafe_fn)]
+#![doc(test(attr(deny(warnings), allow(unused))))]
 
 //! External C and WebAssembly bindings for TEE attestation verification.
 //!

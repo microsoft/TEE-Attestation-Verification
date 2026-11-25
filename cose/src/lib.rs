@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![forbid(unsafe_code)]
+#![doc(test(attr(deny(warnings), allow(unused))))]
 
 //! COSE_Sign1 verification backed by `tee-attestation-verification-crypto`.
 //!
