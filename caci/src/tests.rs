@@ -19,14 +19,23 @@ const TRUSTED_ACI_DIDX509: &str =
 const TRUSTED_ACI_DIDX509_PREFIX: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s";
 const UNSUPPORTED_DIDX509: &str = "expected did:x509:0:sha256:<fingerprint>::eku:<oid>";
-const TCB_INFO: &[u8] = include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.cose");
+const TCB_INFO_TEST: &[u8] = include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.cose");
 const TRUSTED_TEST_TCB_INFO_DIDX509: &str =
     "did:x509:0:sha256:wVkSM46SDpw4LuyEYoH6r5ym07whL5lWxNlGN-UPtf4::eku:1.3.6.1.4.1.311.10.3.13";
+const TCB_INFO_PROD: &[u8] =
+    include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.prod.cose");
+const TRUSTED_PROD_TCB_INFO_DIDX509: &str =
+    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.3";
 const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
 const ACI_SVN: u64 = 104;
-const TCB_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
+const TEST_TCB_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
     trusted_iss: TRUSTED_TEST_TCB_INFO_DIDX509,
     expected_sub: "acidevacr.azurecr.io/internal/aci/aci-cc-tcb-reference-info",
+    minimum_svn: 1,
+};
+const PROD_TCB_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
+    trusted_iss: TRUSTED_PROD_TCB_INFO_DIDX509,
+    expected_sub: "mcr.microsoft.com/aci/aci-cc-tcb-reference-info",
     minimum_svn: 1,
 };
 const UVM_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
@@ -36,6 +45,29 @@ const UVM_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
 };
 const MILAN_CPUID: u32 = 0x00A00F11;
 const GENOA_CPUID: u32 = 0x00A10F11;
+
+#[derive(Clone, Copy)]
+struct TcbInfoFixture {
+    name: &'static str,
+    bytes: &'static [u8],
+    policy: EndorsementPolicy<'static>,
+}
+
+const TEST_TCB_INFO_FIXTURE: TcbInfoFixture = TcbInfoFixture {
+    name: "test",
+    bytes: TCB_INFO_TEST,
+    policy: TEST_TCB_POLICY,
+};
+
+const PROD_TCB_INFO_FIXTURE: TcbInfoFixture = TcbInfoFixture {
+    name: "prod",
+    bytes: TCB_INFO_PROD,
+    policy: PROD_TCB_POLICY,
+};
+
+fn tcb_info_fixtures() -> [TcbInfoFixture; 2] {
+    [TEST_TCB_INFO_FIXTURE, PROD_TCB_INFO_FIXTURE]
+}
 
 #[derive(Clone, Copy)]
 struct CaciFixture {
@@ -89,8 +121,8 @@ fn assert_tcb_info_fixture(watermarks: &[AmdSevSnpWatermark]) {
     }
 }
 
-fn tcb_info_with_tampered_payload() -> Vec<u8> {
-    let cose = CborValue::parse_nondet(TCB_INFO).unwrap();
+fn tcb_info_with_tampered_payload(cose_bytes: &[u8]) -> Vec<u8> {
+    let cose = CborValue::parse_nondet(cose_bytes).unwrap();
     // Replace the signed payload with a different, valid (empty) manifest.
     replace_cose_payload(cose, vec![0xa0])
         .to_bytes_det()
@@ -154,78 +186,131 @@ mod synchronous {
             verify_caci_attestation, verify_tcb_endorsement, verify_uvm_endorsement,
         };
 
-        let tcb = verify_tcb_endorsement(TCB_INFO, &TCB_POLICY).unwrap();
-        assert_eq!(tcb.cose_bytes(), TCB_INFO);
-        assert_tcb_info_fixture(tcb.watermarks());
-        assert!(matches!(
-            verify_tcb_endorsement(
-                TCB_INFO,
-                &EndorsementPolicy {
-                    trusted_iss: TRUSTED_TEST_TCB_INFO_DIDX509.split_once("::").unwrap().0,
-                    ..TCB_POLICY
-                }
-            ),
-            Err(AciError::DidX509(_))
-        ));
-        assert!(matches!(
-            verify_tcb_endorsement(&tcb_info_with_tampered_payload(), &TCB_POLICY),
-            Err(AciError::Signature(_))
-        ));
-        assert!(matches!(
-            verify_tcb_endorsement(&reference_info_fixture(TRANSPARENT_FIXTURE), &TCB_POLICY),
-            Err(AciError::Cose(_))
-        ));
-        assert!(matches!(
-            verify_uvm_endorsement(TCB_INFO, &TCB_POLICY),
-            Err(AciError::Measurement(_))
-        ));
-        for policy in [
-            EndorsementPolicy {
-                expected_sub: ACI_FEED,
-                ..TCB_POLICY
-            },
-            EndorsementPolicy {
-                minimum_svn: 2,
-                ..TCB_POLICY
-            },
-        ] {
+        for tcb_fixture in tcb_info_fixtures() {
+            let tcb = verify_tcb_endorsement(tcb_fixture.bytes, &tcb_fixture.policy).unwrap();
+            assert_eq!(tcb.cose_bytes(), tcb_fixture.bytes, "{}", tcb_fixture.name);
+            assert_tcb_info_fixture(tcb.watermarks());
             assert!(matches!(
-                verify_tcb_endorsement(TCB_INFO, &policy),
-                Err(AciError::Policy(_))
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: tcb_fixture.policy.trusted_iss.split_once("::").unwrap().0,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(_))
             ));
-        }
-
-        for fixture in fixture_cases() {
-            let bytes = reference_info_fixture(fixture);
-            let uvm = verify_uvm_endorsement(&bytes, &UVM_POLICY).unwrap();
-            assert_eq!(uvm.cose_bytes(), bytes);
+            let unsupported = format!("{}::subject:CN:test", tcb_fixture.policy.trusted_iss);
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: &unsupported,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(actual)) if actual == UNSUPPORTED_DIDX509
+            ));
+            // Reject the UVM EKU (same root CA as the prod TCB manifest).
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: TRUSTED_ACI_DIDX509,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(_))
+            ));
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &tcb_info_with_tampered_payload(tcb_fixture.bytes),
+                    &tcb_fixture.policy
+                ),
+                Err(AciError::Signature(_))
+            ));
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &reference_info_fixture(TRANSPARENT_FIXTURE),
+                    &tcb_fixture.policy
+                ),
+                Err(AciError::Cose(_))
+            ));
+            assert!(matches!(
+                verify_uvm_endorsement(tcb_fixture.bytes, &tcb_fixture.policy),
+                Err(AciError::Measurement(_))
+            ));
             for policy in [
                 EndorsementPolicy {
-                    expected_sub: TCB_POLICY.expected_sub,
-                    ..UVM_POLICY
+                    expected_sub: ACI_FEED,
+                    ..tcb_fixture.policy
                 },
                 EndorsementPolicy {
-                    minimum_svn: ACI_SVN + 1,
-                    ..UVM_POLICY
+                    minimum_svn: 2,
+                    ..tcb_fixture.policy
                 },
             ] {
                 assert!(matches!(
-                    verify_uvm_endorsement(&bytes, &policy),
+                    verify_tcb_endorsement(tcb_fixture.bytes, &policy),
                     Err(AciError::Policy(_))
                 ));
             }
-            let report_bytes = attestation_fixture(fixture);
-            let endorsements = amd_endorsement_fixture(fixture);
-            let report = crate::synchronous::verify_attestation(
-                &report_bytes,
-                &endorsement_refs(&endorsements),
-            )
-            .unwrap();
-            let result = verify_caci_attestation(report, &tcb, vec![report.host_data], &uvm);
-            assert!(
-                matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
-            );
-            assert_caci_watermark_binding(report, &tcb, &uvm);
+
+            // Flip the issuer's last EKU digit so iss == trusted_iss, while the leaf lacks that EKU.
+            let mut wrong_eku_bytes = tcb_fixture.bytes.to_vec();
+            let issuer = tcb_fixture.policy.trusted_iss.as_bytes();
+            let at = wrong_eku_bytes
+                .windows(issuer.len())
+                .position(|w| w == issuer)
+                .unwrap();
+            let mut wrong_eku_did = tcb_fixture.policy.trusted_iss.to_string();
+            let last = wrong_eku_did.pop().unwrap();
+            let replacement = if last == '9' { '8' } else { '9' };
+            wrong_eku_did.push(replacement);
+            wrong_eku_bytes[at + issuer.len() - 1] = replacement as u8;
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &wrong_eku_bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: &wrong_eku_did,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(message)) if message.contains("extended key usage")
+            ));
+
+            for fixture in fixture_cases() {
+                let bytes = reference_info_fixture(fixture);
+                let uvm = verify_uvm_endorsement(&bytes, &UVM_POLICY).unwrap();
+                assert_eq!(uvm.cose_bytes(), bytes);
+                for policy in [
+                    EndorsementPolicy {
+                        expected_sub: tcb_fixture.policy.expected_sub,
+                        ..UVM_POLICY
+                    },
+                    EndorsementPolicy {
+                        minimum_svn: ACI_SVN + 1,
+                        ..UVM_POLICY
+                    },
+                ] {
+                    assert!(matches!(
+                        verify_uvm_endorsement(&bytes, &policy),
+                        Err(AciError::Policy(_))
+                    ));
+                }
+                let report_bytes = attestation_fixture(fixture);
+                let endorsements = amd_endorsement_fixture(fixture);
+                let report = crate::synchronous::verify_attestation(
+                    &report_bytes,
+                    &endorsement_refs(&endorsements),
+                )
+                .unwrap();
+                let result = verify_caci_attestation(report, &tcb, vec![report.host_data], &uvm);
+                assert!(
+                    matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
+                );
+                assert_caci_watermark_binding(report, &tcb, &uvm);
+            }
         }
     }
 
@@ -641,12 +726,6 @@ mod asynchronous {
     async fn verifies_endorsements_and_binds_tcb_policy() {
         use crate::asynchronous::{verify_tcb_endorsement, verify_uvm_endorsement};
 
-        let tcb = verify_tcb_endorsement(TCB_INFO, &TCB_POLICY).await.unwrap();
-        assert_tcb_info_fixture(tcb.watermarks());
-        assert!(matches!(
-            verify_tcb_endorsement(&tcb_info_with_tampered_payload(), &TCB_POLICY).await,
-            Err(AciError::Signature(_))
-        ));
         let fixture = TRANSPARENT_FIXTURE;
         let bytes = reference_info_fixture(fixture);
         let uvm = verify_uvm_endorsement(&bytes, &UVM_POLICY).await.unwrap();
@@ -658,17 +737,33 @@ mod asynchronous {
         )
         .await
         .unwrap();
-        let result = crate::asynchronous::verify_caci_attestation(
-            report,
-            &tcb,
-            vec![report.host_data],
-            &uvm,
-        )
-        .await;
-        assert!(
-            matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
-        );
-        assert_caci_watermark_binding(report, &tcb, &uvm);
+
+        for tcb_fixture in tcb_info_fixtures() {
+            let tcb = verify_tcb_endorsement(tcb_fixture.bytes, &tcb_fixture.policy)
+                .await
+                .unwrap();
+            assert_eq!(tcb.cose_bytes(), tcb_fixture.bytes, "{}", tcb_fixture.name);
+            assert_tcb_info_fixture(tcb.watermarks());
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &tcb_info_with_tampered_payload(tcb_fixture.bytes),
+                    &tcb_fixture.policy
+                )
+                .await,
+                Err(AciError::Signature(_))
+            ));
+            let result = crate::asynchronous::verify_caci_attestation(
+                report,
+                &tcb,
+                vec![report.host_data],
+                &uvm,
+            )
+            .await;
+            assert!(
+                matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
+            );
+            assert_caci_watermark_binding(report, &tcb, &uvm);
+        }
     }
 
     async fn verify_caci_attestation_with_minimum_tcb(
