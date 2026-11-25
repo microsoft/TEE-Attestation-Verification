@@ -9,7 +9,7 @@
 //!
 //! - [`CborValue`] (re-exported from `tee-attestation-verification-cbor`)
 //!   for parsing CBOR/COSE envelopes;
-//! - [`synchronous::cose_verify1`] for COSE_Sign1 signature verification when a
+//! - `synchronous::cose_verify1` for COSE_Sign1 signature verification when a
 //!   synchronous crypto backend is selected;
 //! - [`asynchronous::cose_verify1`] for COSE_Sign1 signature verification when
 //!   an asynchronous crypto backend is selected.
