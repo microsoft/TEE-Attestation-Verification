@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::ffi::{c_void, CString};
+use std::ffi::c_void;
 use std::mem::{align_of, size_of};
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -135,12 +135,16 @@ impl NativeCertificate {
         {
             return Err("Invalid dotted-decimal OID".into());
         }
-        let oid = CString::new(oid)?;
-        let extensions = self.extensions()?;
-        if extensions.is_empty() {
-            return Ok(None);
+        // CertFindExtension would return only the first match.
+        let mut matching = self
+            .extensions()?
+            .iter()
+            .filter(|ext| unsafe { ext.pszObjId.to_string() }.is_ok_and(|id| id == oid));
+        let extension = matching.next();
+        if matching.next().is_some() {
+            return Err(super::DUPLICATE_EXTENSION.into());
         }
-        Ok(unsafe { Crypto32::CertFindExtension(PCSTR(oid.as_ptr().cast()), extensions).as_ref() })
+        Ok(extension)
     }
 }
 

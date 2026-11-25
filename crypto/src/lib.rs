@@ -15,6 +15,7 @@ use std::time::Duration;
 pub mod base64;
 pub mod hex;
 // OpenSSL enforces its own path policy. Keep the shared policy tests on all backends.
+mod x509_extension;
 #[cfg(any(
     test,
     crypto_backend = "crypto_windows",
@@ -23,6 +24,8 @@ pub mod hex;
 mod x509_policy;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+const DUPLICATE_EXTENSION: &str = "Certificate has a duplicate extension";
 
 mod signature;
 
@@ -91,6 +94,9 @@ pub trait CertificateBackend {
     fn get_public_key(cert: &Self::Certificate) -> Result<Vec<u8>>;
 
     /// Extract an extension value by dotted-decimal OID.
+    ///
+    /// Fails if the certificate has more than one extension with this OID,
+    /// which RFC 5280 section 4.2 forbids.
     fn get_extension_value_by_oid(cert: &Self::Certificate, oid: &str) -> Result<Option<Vec<u8>>>;
 
     /// Return the certificate subject distinguished name for diagnostics.
@@ -124,6 +130,13 @@ pub trait CertificateBackend {
 
     /// Return decoded RFC 5280 keyUsage metadata if present.
     fn key_usage(cert: &Self::Certificate) -> Result<Option<KeyUsage>>;
+
+    /// Get the extended key usage OIDs in dotted-decimal form, if present.
+    fn extended_key_usage(cert: &Self::Certificate) -> Result<Option<Vec<String>>> {
+        Self::get_extension_value_by_oid(cert, x509_extension::EXTENDED_KEY_USAGE_OID)?
+            .map(|value| x509_extension::extended_key_usage(&value))
+            .transpose()
+    }
 
     /// Return the criticality of an extension by dotted-decimal OID if present.
     fn extension_criticality(cert: &Self::Certificate, oid: &str) -> Result<Option<bool>>;

@@ -43,11 +43,14 @@ let verified_report_data = tav::verify_caci_attestation(
 ```
 
 The `asynchronous` module exposes the same stages with async functions.
-Each endorsement has its own policy. The signed `iss` must exactly match the
-configured `did:x509`, and the signing leaf must contain the EKU(s) required by
-that DID. Only `eku` DID policy clauses are supported. The verifier checks the
-signed CWT `sub` and `svn`; for legacy UVM endorsements it uses the signed
-`feed` and numeric guest SVN instead. Bound untrusted input before parsing.
+Each endorsement has its own policy. `trusted_iss` must be
+`did:x509:0:sha256:<root fingerprint>::eku:<oid>`, equal the endorsement's
+signed `iss`, and match an extended key usage on the signing leaf certificate;
+other did:x509 forms are not supported yet. The verifier checks the signed CWT
+`sub` and `svn`; for legacy UVM endorsements it uses the signed `feed` and
+numeric guest SVN instead. Endorsements are parsed before anything
+authenticates them, and their size is unchecked: bound untrusted input before
+calling.
 
 ## Signed TCB info
 
@@ -60,6 +63,7 @@ within the library's CBOR limits. The verifier does not check SCITT receipts
 or maintain rollback state; configure the minimum acceptable endorsement SVN.
 
 The existing C, C++, C#, and WASM bindings still use the caller-supplied TCB
-minima and root-pinned UVM flow. The equivalent Rust compatibility calls are
+minima and UVM-only flow (still requiring a full `did:x509` with `::eku:<oid>`).
+The equivalent Rust compatibility calls are
 `verify_uvm_endorsement_with_root_pin` and
 `verify_caci_attestation_with_minimum_tcb`.

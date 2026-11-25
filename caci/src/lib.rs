@@ -34,9 +34,9 @@ use crypto::{CryptoBackend, KeyBackend};
 use std::collections::BTreeSet;
 
 #[cfg(sync_crypto)]
-use didx509::verify_didx509_root;
+use didx509::verify_didx509;
 #[cfg(async_crypto)]
-use didx509::verify_didx509_root_async;
+use didx509::verify_didx509_async;
 use parse::{parse_attestation, parse_x5chain_certs, required_bstr, required_int, required_text};
 
 pub use attestation::snp;
@@ -107,24 +107,6 @@ impl<'a> VerifiedTcbEndorsement<'a> {
 enum SignedDocument {
     UvmEndorsement,
     TcbInfo,
-}
-
-#[derive(Clone, Copy)]
-enum IssuerTrust<'a> {
-    FullIssuer(&'a str),
-    RootPin(&'a str),
-}
-
-impl<'a> IssuerTrust<'a> {
-    fn check(self, iss: &str, leaf: &crypto::Certificate) -> Result<&'a str, AciError> {
-        match self {
-            Self::FullIssuer(trusted_iss) => {
-                didx509::verify_issuer(trusted_iss, iss, leaf)?;
-                Ok(trusted_iss)
-            }
-            Self::RootPin(root_pin) => Ok(root_pin),
-        }
-    }
 }
 
 fn verified_tcb_endorsement<'a>(
@@ -318,7 +300,7 @@ pub mod synchronous {
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`. The endorsement size is
+    /// issuer, chain root, and leaf EKU match `trusted_didx509`. The endorsement size is
     /// unchecked: bound untrusted input before calling.
     pub fn verify_uvm_endorsement_with_root_pin<'a>(
         uvm_endorsement: &'a [u8],
@@ -326,7 +308,7 @@ pub mod synchronous {
     ) -> Result<CborValue<'a>, AciError> {
         verify_signed_document(
             uvm_endorsement,
-            IssuerTrust::RootPin(trusted_didx509),
+            trusted_didx509,
             SignedDocument::UvmEndorsement,
         )
         .map(|(document, _)| document)
@@ -338,11 +320,8 @@ pub mod synchronous {
         cose: &'a [u8],
         policy: &EndorsementPolicy<'_>,
     ) -> Result<VerifiedUvmEndorsement<'a>, AciError> {
-        let (document, _) = verify_signed_document(
-            cose,
-            IssuerTrust::FullIssuer(policy.trusted_iss),
-            SignedDocument::UvmEndorsement,
-        )?;
+        let (document, _) =
+            verify_signed_document(cose, policy.trusted_iss, SignedDocument::UvmEndorsement)?;
         let measurement = uvm_measurement(&document, policy.expected_sub, policy.minimum_svn)?;
         Ok(VerifiedUvmEndorsement { cose, measurement })
     }
@@ -353,17 +332,14 @@ pub mod synchronous {
         cose: &'a [u8],
         policy: &EndorsementPolicy<'_>,
     ) -> Result<VerifiedTcbEndorsement<'a>, AciError> {
-        let (document, payload) = verify_signed_document(
-            cose,
-            IssuerTrust::FullIssuer(policy.trusted_iss),
-            SignedDocument::TcbInfo,
-        )?;
+        let (document, payload) =
+            verify_signed_document(cose, policy.trusted_iss, SignedDocument::TcbInfo)?;
         verified_tcb_endorsement(cose, &document, &payload, policy)
     }
 
     fn verify_signed_document<'a>(
         bytes: &'a [u8],
-        trust: IssuerTrust<'_>,
+        trusted_didx509: &str,
         document: SignedDocument,
     ) -> Result<(CborValue<'a>, Vec<u8>), AciError> {
         let parsed = CborValue::parse_nondet(bytes).map_err(AciError::Cose)?;
@@ -384,7 +360,7 @@ pub mod synchronous {
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
         let (issuer, signing_time) = signer_claims(&protected_header, document)?;
-        verify_didx509_root(trust.check(&issuer, &leaf)?, &issuer, &x5chain)?;
+        verify_didx509(trusted_didx509, &issuer, &x5chain)?;
         <crypto::Crypto as CryptoBackend>::verify_chain(
             &root,
             &intermediate_refs,
@@ -532,7 +508,7 @@ pub mod asynchronous {
     /// Verify an ACI/UVM endorsement independently of the attestation report.
     ///
     /// This verifies the COSE_Sign1 signature, the `x5chain`, and that the
-    /// chain root matches `trusted_didx509`. This is stage 2 of the ACI flow;
+    /// issuer, chain root, and leaf EKU match `trusted_didx509`. This is stage 2 of the ACI flow;
     /// call [`verify_caci_attestation`] afterwards to bind the UVM
     /// endorsement to the verified attestation report and relying-party policy.
     /// The endorsement size is unchecked: bound untrusted input before
@@ -543,7 +519,7 @@ pub mod asynchronous {
     ) -> Result<CborValue<'a>, AciError> {
         verify_signed_document(
             uvm_endorsement,
-            IssuerTrust::RootPin(trusted_didx509),
+            trusted_didx509,
             SignedDocument::UvmEndorsement,
         )
         .await
@@ -556,12 +532,9 @@ pub mod asynchronous {
         cose: &'a [u8],
         policy: &EndorsementPolicy<'_>,
     ) -> Result<VerifiedUvmEndorsement<'a>, AciError> {
-        let (document, _) = verify_signed_document(
-            cose,
-            IssuerTrust::FullIssuer(policy.trusted_iss),
-            SignedDocument::UvmEndorsement,
-        )
-        .await?;
+        let (document, _) =
+            verify_signed_document(cose, policy.trusted_iss, SignedDocument::UvmEndorsement)
+                .await?;
         let measurement = uvm_measurement(&document, policy.expected_sub, policy.minimum_svn)?;
         Ok(VerifiedUvmEndorsement { cose, measurement })
     }
@@ -572,18 +545,14 @@ pub mod asynchronous {
         cose: &'a [u8],
         policy: &EndorsementPolicy<'_>,
     ) -> Result<VerifiedTcbEndorsement<'a>, AciError> {
-        let (document, payload) = verify_signed_document(
-            cose,
-            IssuerTrust::FullIssuer(policy.trusted_iss),
-            SignedDocument::TcbInfo,
-        )
-        .await?;
+        let (document, payload) =
+            verify_signed_document(cose, policy.trusted_iss, SignedDocument::TcbInfo).await?;
         verified_tcb_endorsement(cose, &document, &payload, policy)
     }
 
     async fn verify_signed_document<'a>(
         bytes: &'a [u8],
-        trust: IssuerTrust<'_>,
+        trusted_didx509: &str,
         document: SignedDocument,
     ) -> Result<(CborValue<'a>, Vec<u8>), AciError> {
         let parsed = CborValue::parse_nondet(bytes).map_err(AciError::Cose)?;
@@ -603,7 +572,7 @@ pub mod asynchronous {
         let (root, intermediates, leaf) = parse_x5chain_certs(&x5chain)?;
         let intermediate_refs = intermediates.iter().collect::<Vec<_>>();
         let (issuer, signing_time) = signer_claims(&protected_header, document)?;
-        verify_didx509_root_async(trust.check(&issuer, &leaf)?, &issuer, &x5chain).await?;
+        verify_didx509_async(trusted_didx509, &issuer, &x5chain).await?;
         <crypto::Crypto as AsyncCryptoBackend>::verify_chain(
             &root,
             &intermediate_refs,

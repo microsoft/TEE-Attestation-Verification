@@ -16,6 +16,9 @@ const REFERENCE_INFO_SCITT_CWT_BASE64: &str =
 const REPORT_SCITT_CWT_HEX: &str = include_str!("../tests/fixtures/report-scitt-cwt.hex");
 const TRUSTED_ACI_DIDX509: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.2";
+const TRUSTED_ACI_DIDX509_PREFIX: &str =
+    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s";
+const UNSUPPORTED_DIDX509: &str = "expected did:x509:0:sha256:<fingerprint>::eku:<oid>";
 const TCB_INFO: &[u8] = include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.cose");
 const TRUSTED_TEST_TCB_INFO_DIDX509: &str =
     "did:x509:0:sha256:wVkSM46SDpw4LuyEYoH6r5ym07whL5lWxNlGN-UPtf4::eku:1.3.6.1.4.1.311.10.3.13";
@@ -134,30 +137,6 @@ fn assert_caci_watermark_binding(
     assert!(matches!(
         verify_endorsed_caci_attestation(report, &no_match, &[report.host_data], uvm),
         Err(AciError::Policy(message)) if message.contains("no watermark")
-    ));
-}
-
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_test::wasm_bindgen_test;
-
-#[cfg_attr(not(target_family = "wasm"), test)]
-#[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
-fn issuer_policy_checks_the_leaf_eku_and_rejects_unsupported_clauses() {
-    let document = CborValue::parse_nondet(TCB_INFO).unwrap();
-    let header = endorsement_protected_header(&document);
-    let chain =
-        parse::parse_x5chain(header.map_at_int(cose::COSE_HEADER_X5CHAIN).unwrap()).unwrap();
-    let (_, _, leaf) = parse::parse_x5chain_certs(&chain).unwrap();
-    let prefix = TRUSTED_TEST_TCB_INFO_DIDX509.split_once("::").unwrap().0;
-    let incorrect_eku = format!("{prefix}::eku:1.3.6.1.5.5.7.3.1");
-    assert!(matches!(
-        didx509::verify_issuer(&incorrect_eku, &incorrect_eku, &leaf),
-        Err(AciError::DidX509(message)) if message.contains("required EKU")
-    ));
-    let unsupported = format!("{TRUSTED_TEST_TCB_INFO_DIDX509}::subject:CN:test");
-    assert!(matches!(
-        didx509::verify_issuer(&unsupported, &unsupported, &leaf),
-        Err(AciError::DidX509(message)) if message.contains("unsupported")
     ));
 }
 
@@ -348,20 +327,49 @@ mod synchronous {
                 "not-a-did",
             ) {
                 Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+                    assert_eq!(actual, UNSUPPORTED_DIDX509)
                 }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
-            match crate::synchronous::verify_uvm_endorsement_with_root_pin(
-                &reference_info,
-                "did:x509:0:sha256:wrong",
-            ) {
-                Err(AciError::DidX509(actual)) => assert_eq!(
-                    actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+            // The fixture leaf has EKUs .1 and .2; its issuer names .2.
+            let did = |eku: u8| {
+                format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.{eku}")
+            };
+            for (issuer_eku, trusted, expected) in [
+                (
+                    2,
+                    TRUSTED_ACI_DIDX509_PREFIX.to_string(),
+                    UNSUPPORTED_DIDX509.to_string(),
                 ),
-                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+                (
+                    2,
+                    did(1),
+                    format!("issuer DID {} does not match trusted DID {}", did(2), did(1)),
+                ),
+                (
+                    3,
+                    did(3),
+                    format!(
+                        "x5chain leaf certificate does not have the extended key usage required by trusted DID {}",
+                        did(3)
+                    ),
+                ),
+            ] {
+                let mut reference_info = reference_info.clone();
+                let issuer = TRUSTED_ACI_DIDX509.as_bytes();
+                let at = reference_info
+                    .windows(issuer.len())
+                    .position(|w| w == issuer)
+                    .unwrap();
+                reference_info[at + issuer.len() - 1] = b'0' + issuer_eku;
+                match crate::synchronous::verify_uvm_endorsement_with_root_pin(
+                    &reference_info,
+                    &trusted,
+                ) {
+                    Err(AciError::DidX509(actual)) => assert_eq!(actual, expected),
+                    other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+                }
             }
 
             let mut tampered_signature = reference_info;
@@ -789,22 +797,51 @@ mod asynchronous {
             .await
             {
                 Err(AciError::DidX509(actual)) => {
-                    assert_eq!(actual, "expected did:x509:0:sha256:<fingerprint>")
+                    assert_eq!(actual, UNSUPPORTED_DIDX509)
                 }
                 other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
             }
 
-            match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
-                &reference_info,
-                "did:x509:0:sha256:wrong",
-            )
-            .await
-            {
-                Err(AciError::DidX509(actual)) => assert_eq!(
-                    actual,
-                    "issuer DID prefix did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s does not match trusted DID prefix did:x509:0:sha256:wrong"
+            // The fixture leaf has EKUs .1 and .2; its issuer names .2.
+            let did = |eku: u8| {
+                format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.{eku}")
+            };
+            for (issuer_eku, trusted, expected) in [
+                (
+                    2,
+                    TRUSTED_ACI_DIDX509_PREFIX.to_string(),
+                    UNSUPPORTED_DIDX509.to_string(),
                 ),
-                other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+                (
+                    2,
+                    did(1),
+                    format!("issuer DID {} does not match trusted DID {}", did(2), did(1)),
+                ),
+                (
+                    3,
+                    did(3),
+                    format!(
+                        "x5chain leaf certificate does not have the extended key usage required by trusted DID {}",
+                        did(3)
+                    ),
+                ),
+            ] {
+                let mut reference_info = reference_info.clone();
+                let issuer = TRUSTED_ACI_DIDX509.as_bytes();
+                let at = reference_info
+                    .windows(issuer.len())
+                    .position(|w| w == issuer)
+                    .unwrap();
+                reference_info[at + issuer.len() - 1] = b'0' + issuer_eku;
+                match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+                    &reference_info,
+                    &trusted,
+                )
+                .await
+                {
+                    Err(AciError::DidX509(actual)) => assert_eq!(actual, expected),
+                    other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
+                }
             }
 
             let mut tampered_signature = reference_info;
