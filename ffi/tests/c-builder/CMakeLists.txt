@@ -58,11 +58,12 @@ if(TAV_LINK_STATIC)
 endif()
 
 add_executable(tav-cbor-builder-tests main.cpp cbor_builder.cpp)
+target_include_directories(tav-cbor-builder-tests SYSTEM PRIVATE
+    "${TAV_REPO_ROOT}/ffi/tests/c-consumer/vendor")
 target_include_directories(tav-cbor-builder-tests PRIVATE
-    "${TAV_REPO_ROOT}/ffi/tests/c-consumer/vendor"
     "${TAV_REPO_ROOT}/ffi/include")
 target_link_libraries(tav-cbor-builder-tests PRIVATE tav_cbor)
-target_compile_options(tav-cbor-builder-tests PRIVATE -Wall -Wextra)
+target_compile_options(tav-cbor-builder-tests PRIVATE -Wall -Wextra -Werror)
 
 if(NOT TAV_LINK_STATIC)
     set_target_properties(tav-cbor-builder-tests PROPERTIES

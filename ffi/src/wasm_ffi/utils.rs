@@ -65,7 +65,6 @@ impl VerifyError {
         }
     }
 
-    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
     pub(crate) fn invalid_argument(message: String) -> Self {
         Self::new(TavErrorCode::InvalidArgument, message)
     }

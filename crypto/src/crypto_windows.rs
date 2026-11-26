@@ -268,9 +268,9 @@ impl CertificateBackend for Crypto {
             .map(|(start, end)| &pem[start..end])
             .filter(|record| record.contains(PEM_BEGIN) || record.contains(X509_PEM_BEGIN))
             .map(|record| {
-                if record.contains(PEM_BEGIN) && !record.ends_with(PEM_END) {
-                    Err("Mismatched certificate PEM boundaries".into())
-                } else if record.contains(X509_PEM_BEGIN) && !record.ends_with(X509_PEM_END) {
+                if (record.contains(PEM_BEGIN) && !record.ends_with(PEM_END))
+                    || (record.contains(X509_PEM_BEGIN) && !record.ends_with(X509_PEM_END))
+                {
                     Err("Mismatched certificate PEM boundaries".into())
                 } else {
                     Certificate::from_der(&decode_pem(record.as_bytes())?)
@@ -732,8 +732,8 @@ fn native_len(input: &[u8]) -> Result<u32> {
 
 /// # Safety
 /// `pointer` must reference `len` initialized elements in one allocation kept
-/// alive and immutable by `_owner` for `'a`.
-unsafe fn native_slice<'a, T, O>(pointer: *const T, len: u32, _owner: &'a O) -> Result<&'a [T]> {
+/// alive and immutable by `_owner` for the lifetime of the returned slice.
+unsafe fn native_slice<T, O>(pointer: *const T, len: u32, _owner: &O) -> Result<&[T]> {
     if len == 0 {
         return Ok(&[]);
     }
