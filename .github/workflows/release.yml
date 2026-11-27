@@ -243,6 +243,7 @@ jobs:
           gh release create \
             --verify-tag \
             --draft \
+            --title "${RELEASE_TAG}" \
             --notes-file "${RUNNER_TEMP}/release-notes.md" \
             "${RELEASE_TAG}" \
             dist/*
