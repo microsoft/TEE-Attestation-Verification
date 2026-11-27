@@ -73,6 +73,9 @@ See `demos/web-verify-kernel` for a runnable browser demo.
 
 ## CACI verification
 
+The WASM bindings use caller-supplied TCB minima and root-pinned UVM
+verification. The Rust API for signed TCB endorsements is not exposed here.
+
 CACI verification is staged: verify the SNP attestation and the UVM
 endorsement independently, then check the relying-party policy over both
 verified handles.

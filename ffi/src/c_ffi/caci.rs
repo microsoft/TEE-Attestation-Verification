@@ -147,7 +147,7 @@ pub unsafe extern "C" fn tav_verify_caci_uvm_endorsement(
                 false,
             )
         }?;
-        synchronous::verify_uvm_endorsement(uvm_endorsement, trusted_didx509)
+        synchronous::verify_uvm_endorsement_with_root_pin(uvm_endorsement, trusted_didx509)
             .map_err(TavError::from)?;
         let value = ::cbor::CborValue::parse_nondet(uvm_endorsement).map_err(|message| {
             TavError::new(
@@ -185,7 +185,7 @@ pub unsafe extern "C" fn tav_verify_caci_attestation(
         }?;
         let uvm_endorsement = unsafe { uvm_endorsement_handle(uvm_endorsement) }?;
         let uvm_feed = unsafe { input_text(uvm_feed, uvm_feed_len, "uvm_feed", false) }?;
-        let report_data = synchronous::verify_caci_attestation(
+        let report_data = synchronous::verify_caci_attestation_with_minimum_tcb(
             *attestation,
             minimum_tcb,
             trusted_policy_digests,

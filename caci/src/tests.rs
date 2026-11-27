@@ -19,10 +19,55 @@ const TRUSTED_ACI_DIDX509: &str =
 const TRUSTED_ACI_DIDX509_PREFIX: &str =
     "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s";
 const UNSUPPORTED_DIDX509: &str = "expected did:x509:0:sha256:<fingerprint>::eku:<oid>";
+const TCB_INFO_TEST: &[u8] = include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.cose");
+const TRUSTED_TEST_TCB_INFO_DIDX509: &str =
+    "did:x509:0:sha256:wVkSM46SDpw4LuyEYoH6r5ym07whL5lWxNlGN-UPtf4::eku:1.3.6.1.4.1.311.10.3.13";
+const TCB_INFO_PROD: &[u8] =
+    include_bytes!("../tests/fixtures/aci-cc-tcb-reference-info.prod.cose");
+const TRUSTED_PROD_TCB_INFO_DIDX509: &str =
+    "did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s::eku:1.3.6.1.4.1.311.76.59.1.3";
 const ACI_FEED: &str = "ContainerPlat-AMD-UVM";
 const ACI_SVN: u64 = 104;
+const TEST_TCB_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
+    trusted_iss: TRUSTED_TEST_TCB_INFO_DIDX509,
+    expected_sub: "acidevacr.azurecr.io/internal/aci/aci-cc-tcb-reference-info",
+    minimum_svn: 1,
+};
+const PROD_TCB_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
+    trusted_iss: TRUSTED_PROD_TCB_INFO_DIDX509,
+    expected_sub: "mcr.microsoft.com/aci/aci-cc-tcb-reference-info",
+    minimum_svn: 1,
+};
+const UVM_POLICY: EndorsementPolicy<'_> = EndorsementPolicy {
+    trusted_iss: TRUSTED_ACI_DIDX509,
+    expected_sub: ACI_FEED,
+    minimum_svn: ACI_SVN,
+};
 const MILAN_CPUID: u32 = 0x00A00F11;
 const GENOA_CPUID: u32 = 0x00A10F11;
+
+#[derive(Clone, Copy)]
+struct TcbInfoFixture {
+    name: &'static str,
+    bytes: &'static [u8],
+    policy: EndorsementPolicy<'static>,
+}
+
+const TEST_TCB_INFO_FIXTURE: TcbInfoFixture = TcbInfoFixture {
+    name: "test",
+    bytes: TCB_INFO_TEST,
+    policy: TEST_TCB_POLICY,
+};
+
+const PROD_TCB_INFO_FIXTURE: TcbInfoFixture = TcbInfoFixture {
+    name: "prod",
+    bytes: TCB_INFO_PROD,
+    policy: PROD_TCB_POLICY,
+};
+
+fn tcb_info_fixtures() -> [TcbInfoFixture; 2] {
+    [TEST_TCB_INFO_FIXTURE, PROD_TCB_INFO_FIXTURE]
+}
 
 #[derive(Clone, Copy)]
 struct CaciFixture {
@@ -53,12 +98,221 @@ fn fixture_cases() -> [CaciFixture; 2] {
     [LEGACY_FIXTURE, TRANSPARENT_FIXTURE]
 }
 
+fn assert_tcb_info_fixture(watermarks: &[AmdSevSnpWatermark]) {
+    assert_eq!(watermarks.len(), 2);
+    for (cpuid, description, tcb) in [
+        (
+            MILAN_CPUID,
+            "AMD EPYC 7763 64-Core Processor",
+            [0xdb, 0x18, 0, 0, 0, 0, 0, 4],
+        ),
+        (
+            GENOA_CPUID,
+            "AMD EPYC 9V74 80-Core Processor",
+            [0x54, 0x17, 0, 0, 0, 0, 0, 10],
+        ),
+    ] {
+        let entry = watermarks
+            .iter()
+            .find(|watermark| watermark.cpuid == snp::Cpuid::from(cpuid))
+            .unwrap();
+        assert_eq!(entry.description, description);
+        assert_eq!(entry.tcb.raw, tcb);
+    }
+}
+
+fn tcb_info_with_tampered_payload(cose_bytes: &[u8]) -> Vec<u8> {
+    let cose = CborValue::parse_nondet(cose_bytes).unwrap();
+    // Replace the signed payload with a different, valid (empty) manifest.
+    replace_cose_payload(cose, vec![0xa0])
+        .to_bytes_det()
+        .unwrap()
+}
+
+fn assert_caci_watermark_binding(
+    mut report: AttestationReport,
+    tcb: &VerifiedTcbEndorsement<'_>,
+    uvm: &VerifiedUvmEndorsement<'_>,
+) {
+    let generation = report.cpu_generation().unwrap();
+    let watermark = tcb
+        .watermarks()
+        .iter()
+        .find(|w| Generation::from_cpuid(&w.cpuid).unwrap() == generation)
+        .unwrap();
+    // Exercise the exact threshold with a synthetic report value; the real
+    // fixture pair does not satisfy the signed minimums.
+    report.reported_tcb = watermark.tcb;
+    assert_eq!(
+        verify_endorsed_caci_attestation(report, tcb, &[report.host_data], uvm).unwrap(),
+        report.report_data,
+    );
+    assert!(matches!(
+        verify_endorsed_caci_attestation(report, tcb, &[], uvm),
+        Err(AciError::Policy(message)) if message.contains("HOST_DATA")
+    ));
+    let mut wrong_measurement = report;
+    wrong_measurement.measurement[0] ^= 1;
+    assert!(matches!(
+        verify_endorsed_caci_attestation(wrong_measurement, tcb, &[report.host_data], uvm),
+        Err(AciError::Measurement(_))
+    ));
+    let no_match = VerifiedTcbEndorsement {
+        cose: tcb.cose,
+        watermarks: tcb
+            .watermarks()
+            .iter()
+            .filter(|w| w.cpuid != watermark.cpuid)
+            .cloned()
+            .collect(),
+    };
+    assert!(matches!(
+        verify_endorsed_caci_attestation(report, &no_match, &[report.host_data], uvm),
+        Err(AciError::Policy(message)) if message.contains("no watermark")
+    ));
+}
+
 #[cfg(sync_crypto)]
 mod synchronous {
     use super::*;
 
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    fn verifies_endorsements_and_binds_tcb_policy() {
+        use crate::synchronous::{
+            verify_caci_attestation, verify_tcb_endorsement, verify_uvm_endorsement,
+        };
+
+        for tcb_fixture in tcb_info_fixtures() {
+            let tcb = verify_tcb_endorsement(tcb_fixture.bytes, &tcb_fixture.policy).unwrap();
+            assert_eq!(tcb.cose_bytes(), tcb_fixture.bytes, "{}", tcb_fixture.name);
+            assert_tcb_info_fixture(tcb.watermarks());
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: tcb_fixture.policy.trusted_iss.split_once("::").unwrap().0,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(_))
+            ));
+            let unsupported = format!("{}::subject:CN:test", tcb_fixture.policy.trusted_iss);
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: &unsupported,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(actual)) if actual == UNSUPPORTED_DIDX509
+            ));
+            // Reject the UVM EKU (same root CA as the prod TCB manifest).
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    tcb_fixture.bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: TRUSTED_ACI_DIDX509,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(_))
+            ));
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &tcb_info_with_tampered_payload(tcb_fixture.bytes),
+                    &tcb_fixture.policy
+                ),
+                Err(AciError::Signature(_))
+            ));
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &reference_info_fixture(TRANSPARENT_FIXTURE),
+                    &tcb_fixture.policy
+                ),
+                Err(AciError::Cose(_))
+            ));
+            assert!(matches!(
+                verify_uvm_endorsement(tcb_fixture.bytes, &tcb_fixture.policy),
+                Err(AciError::Measurement(_))
+            ));
+            for policy in [
+                EndorsementPolicy {
+                    expected_sub: ACI_FEED,
+                    ..tcb_fixture.policy
+                },
+                EndorsementPolicy {
+                    minimum_svn: 2,
+                    ..tcb_fixture.policy
+                },
+            ] {
+                assert!(matches!(
+                    verify_tcb_endorsement(tcb_fixture.bytes, &policy),
+                    Err(AciError::Policy(_))
+                ));
+            }
+
+            // Flip the issuer's last EKU digit so iss == trusted_iss, while the leaf lacks that EKU.
+            let mut wrong_eku_bytes = tcb_fixture.bytes.to_vec();
+            let issuer = tcb_fixture.policy.trusted_iss.as_bytes();
+            let at = wrong_eku_bytes
+                .windows(issuer.len())
+                .position(|w| w == issuer)
+                .unwrap();
+            let mut wrong_eku_did = tcb_fixture.policy.trusted_iss.to_string();
+            let last = wrong_eku_did.pop().unwrap();
+            let replacement = if last == '9' { '8' } else { '9' };
+            wrong_eku_did.push(replacement);
+            wrong_eku_bytes[at + issuer.len() - 1] = replacement as u8;
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &wrong_eku_bytes,
+                    &EndorsementPolicy {
+                        trusted_iss: &wrong_eku_did,
+                        ..tcb_fixture.policy
+                    }
+                ),
+                Err(AciError::DidX509(message)) if message.contains("extended key usage")
+            ));
+
+            for fixture in fixture_cases() {
+                let bytes = reference_info_fixture(fixture);
+                let uvm = verify_uvm_endorsement(&bytes, &UVM_POLICY).unwrap();
+                assert_eq!(uvm.cose_bytes(), bytes);
+                for policy in [
+                    EndorsementPolicy {
+                        expected_sub: tcb_fixture.policy.expected_sub,
+                        ..UVM_POLICY
+                    },
+                    EndorsementPolicy {
+                        minimum_svn: ACI_SVN + 1,
+                        ..UVM_POLICY
+                    },
+                ] {
+                    assert!(matches!(
+                        verify_uvm_endorsement(&bytes, &policy),
+                        Err(AciError::Policy(_))
+                    ));
+                }
+                let report_bytes = attestation_fixture(fixture);
+                let endorsements = amd_endorsement_fixture(fixture);
+                let report = crate::synchronous::verify_attestation(
+                    &report_bytes,
+                    &endorsement_refs(&endorsements),
+                )
+                .unwrap();
+                let result = verify_caci_attestation(report, &tcb, vec![report.host_data], &uvm);
+                assert!(
+                    matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
+                );
+                assert_caci_watermark_binding(report, &tcb, &uvm);
+            }
+        }
+    }
 
     #[cfg_attr(not(target_family = "wasm"), test)]
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
@@ -71,11 +325,13 @@ mod synchronous {
 
             let report =
                 crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
-            let uvm =
-                crate::synchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
-                    .unwrap();
+            let uvm = crate::synchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                TRUSTED_ACI_DIDX509,
+            )
+            .unwrap();
 
-            let report_data = crate::synchronous::verify_caci_attestation(
+            let report_data = crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -144,12 +400,17 @@ mod synchronous {
             let reference_info = reference_info_fixture(fixture);
             let expected_report = parse_attestation(&attestation_fixture(fixture)).unwrap();
 
-            let uvm =
-                crate::synchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
-                    .unwrap();
+            let uvm = crate::synchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                TRUSTED_ACI_DIDX509,
+            )
+            .unwrap();
             assert_verified_uvm_matches_fixture(&uvm, expected_report, fixture);
 
-            match crate::synchronous::verify_uvm_endorsement(&reference_info, "not-a-did") {
+            match crate::synchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                "not-a-did",
+            ) {
                 Err(AciError::DidX509(actual)) => {
                     assert_eq!(actual, UNSUPPORTED_DIDX509)
                 }
@@ -161,15 +422,36 @@ mod synchronous {
                 format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.{eku}")
             };
             for (issuer_eku, trusted, expected) in [
-                (2, TRUSTED_ACI_DIDX509_PREFIX.to_string(), UNSUPPORTED_DIDX509.to_string()),
-                (2, did(1), format!("issuer DID {} does not match trusted DID {}", did(2), did(1))),
-                (3, did(3), format!("x5chain leaf certificate does not have the extended key usage required by trusted DID {}", did(3))),
+                (
+                    2,
+                    TRUSTED_ACI_DIDX509_PREFIX.to_string(),
+                    UNSUPPORTED_DIDX509.to_string(),
+                ),
+                (
+                    2,
+                    did(1),
+                    format!("issuer DID {} does not match trusted DID {}", did(2), did(1)),
+                ),
+                (
+                    3,
+                    did(3),
+                    format!(
+                        "x5chain leaf certificate does not have the extended key usage required by trusted DID {}",
+                        did(3)
+                    ),
+                ),
             ] {
                 let mut reference_info = reference_info.clone();
                 let issuer = TRUSTED_ACI_DIDX509.as_bytes();
-                let at = reference_info.windows(issuer.len()).position(|w| w == issuer).unwrap();
+                let at = reference_info
+                    .windows(issuer.len())
+                    .position(|w| w == issuer)
+                    .unwrap();
                 reference_info[at + issuer.len() - 1] = b'0' + issuer_eku;
-                match crate::synchronous::verify_uvm_endorsement(&reference_info, &trusted) {
+                match crate::synchronous::verify_uvm_endorsement_with_root_pin(
+                    &reference_info,
+                    &trusted,
+                ) {
                     Err(AciError::DidX509(actual)) => assert_eq!(actual, expected),
                     other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
                 }
@@ -177,7 +459,7 @@ mod synchronous {
 
             let mut tampered_signature = reference_info;
             *tampered_signature.last_mut().unwrap() ^= 1;
-            match crate::synchronous::verify_uvm_endorsement(
+            match crate::synchronous::verify_uvm_endorsement_with_root_pin(
                 &tampered_signature,
                 TRUSTED_ACI_DIDX509,
             ) {
@@ -192,7 +474,10 @@ mod synchronous {
             }
         }
 
-        match crate::synchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509) {
+        match crate::synchronous::verify_uvm_endorsement_with_root_pin(
+            b"not cose",
+            TRUSTED_ACI_DIDX509,
+        ) {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
         }
@@ -201,7 +486,8 @@ mod synchronous {
         // byte string where a COSE_Sign1 belongs.
         let mut large = vec![0x5a, 0x00, 0x10, 0x00, 0x00];
         large.resize(large.len() + (1 << 20), 0);
-        match crate::synchronous::verify_uvm_endorsement(&large, TRUSTED_ACI_DIDX509) {
+        match crate::synchronous::verify_uvm_endorsement_with_root_pin(&large, TRUSTED_ACI_DIDX509)
+        {
             Err(AciError::Cose(actual)) => {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
@@ -219,14 +505,14 @@ mod synchronous {
             let endorsement_refs = endorsement_refs(&endorsements);
             let report =
                 crate::synchronous::verify_attestation(&attestation, &endorsement_refs).unwrap();
-            let uvm = crate::synchronous::verify_uvm_endorsement(
+            let uvm = crate::synchronous::verify_uvm_endorsement_with_root_pin(
                 &reference_info_fixture(fixture),
                 TRUSTED_ACI_DIDX509,
             )
             .unwrap()
             .into_owned();
 
-            let report_data = crate::synchronous::verify_caci_attestation(
+            let report_data = crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -237,7 +523,7 @@ mod synchronous {
             .unwrap();
             assert_eq!(report_data, report.report_data, "{}", fixture.name);
 
-            let report_data = crate::synchronous::verify_caci_attestation(
+            let report_data = crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -248,7 +534,7 @@ mod synchronous {
             .unwrap();
             assert_eq!(report_data, report.report_data, "{}", fixture.name);
 
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -264,7 +550,7 @@ mod synchronous {
 
             let mut policy = report.host_data;
             policy[0] ^= 1;
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![policy],
@@ -279,7 +565,7 @@ mod synchronous {
             }
 
             let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -297,7 +583,7 @@ mod synchronous {
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
             let mut minimum_tcb = report.reported_tcb;
             minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 vec![
                     (matching_cpuid, report.reported_tcb),
@@ -318,7 +604,7 @@ mod synchronous {
                 ),
             }
 
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 report,
                 vec![(matching_cpuid, minimum_tcb)],
                 vec![report.host_data],
@@ -332,7 +618,7 @@ mod synchronous {
 
             let mut wrong_measurement = report;
             wrong_measurement.measurement[0] ^= 1;
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 wrong_measurement,
                 Vec::new(),
                 vec![wrong_measurement.host_data],
@@ -351,7 +637,7 @@ mod synchronous {
             }
 
             let debug_report = report_with_debug_enabled(fixture);
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 debug_report,
                 Vec::new(),
                 vec![debug_report.host_data],
@@ -366,7 +652,7 @@ mod synchronous {
             }
 
             let host_report = report_with_vmpl(fixture, 4);
-            match crate::synchronous::verify_caci_attestation(
+            match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
                 host_report,
                 Vec::new(),
                 vec![host_report.host_data],
@@ -395,7 +681,7 @@ mod synchronous {
 
         let missing_svn_int =
             replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
-        match crate::synchronous::verify_caci_attestation(
+        match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -411,7 +697,7 @@ mod synchronous {
 
         let uppercase_measurement =
             replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
-        match crate::synchronous::verify_caci_attestation(
+        match crate::synchronous::verify_caci_attestation_with_minimum_tcb(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -435,7 +721,52 @@ mod asynchronous {
     #[cfg(target_family = "wasm")]
     use wasm_bindgen_test::wasm_bindgen_test;
 
-    async fn verify_caci_attestation(
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test)]
+    async fn verifies_endorsements_and_binds_tcb_policy() {
+        use crate::asynchronous::{verify_tcb_endorsement, verify_uvm_endorsement};
+
+        let fixture = TRANSPARENT_FIXTURE;
+        let bytes = reference_info_fixture(fixture);
+        let uvm = verify_uvm_endorsement(&bytes, &UVM_POLICY).await.unwrap();
+        let report_bytes = attestation_fixture(fixture);
+        let endorsements = amd_endorsement_fixture(fixture);
+        let report = crate::asynchronous::verify_attestation(
+            &report_bytes,
+            &endorsement_refs(&endorsements),
+        )
+        .await
+        .unwrap();
+
+        for tcb_fixture in tcb_info_fixtures() {
+            let tcb = verify_tcb_endorsement(tcb_fixture.bytes, &tcb_fixture.policy)
+                .await
+                .unwrap();
+            assert_eq!(tcb.cose_bytes(), tcb_fixture.bytes, "{}", tcb_fixture.name);
+            assert_tcb_info_fixture(tcb.watermarks());
+            assert!(matches!(
+                verify_tcb_endorsement(
+                    &tcb_info_with_tampered_payload(tcb_fixture.bytes),
+                    &tcb_fixture.policy
+                )
+                .await,
+                Err(AciError::Signature(_))
+            ));
+            let result = crate::asynchronous::verify_caci_attestation(
+                report,
+                &tcb,
+                vec![report.host_data],
+                &uvm,
+            )
+            .await;
+            assert!(
+                matches!(result, Err(AciError::Policy(message)) if message.contains("SNP reported TCB"))
+            );
+            assert_caci_watermark_binding(report, &tcb, &uvm);
+        }
+    }
+
+    async fn verify_caci_attestation_with_minimum_tcb(
         attestation: AttestationReport,
         minimum_tcb: Vec<(snp::Cpuid, TcbVersionRaw)>,
         trusted_caci_execution_policy: Vec<[u8; SNP_HOST_DATA_LEN]>,
@@ -443,7 +774,7 @@ mod asynchronous {
         uvm_feed: &str,
         minimum_svn: u64,
     ) -> Result<[u8; SNP_REPORT_DATA_LEN], AciError> {
-        crate::asynchronous::verify_caci_attestation(
+        crate::asynchronous::verify_caci_attestation_with_minimum_tcb(
             attestation,
             minimum_tcb,
             trusted_caci_execution_policy,
@@ -466,12 +797,14 @@ mod asynchronous {
             let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
                 .await
                 .unwrap();
-            let uvm =
-                crate::asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
-                    .await
-                    .unwrap();
+            let uvm = crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                TRUSTED_ACI_DIDX509,
+            )
+            .await
+            .unwrap();
 
-            let report_data = verify_caci_attestation(
+            let report_data = verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -544,13 +877,20 @@ mod asynchronous {
             let reference_info = reference_info_fixture(fixture);
             let expected_report = parse_attestation(&attestation_fixture(fixture)).unwrap();
 
-            let uvm =
-                crate::asynchronous::verify_uvm_endorsement(&reference_info, TRUSTED_ACI_DIDX509)
-                    .await
-                    .unwrap();
+            let uvm = crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                TRUSTED_ACI_DIDX509,
+            )
+            .await
+            .unwrap();
             assert_verified_uvm_matches_fixture(&uvm, expected_report, fixture);
 
-            match crate::asynchronous::verify_uvm_endorsement(&reference_info, "not-a-did").await {
+            match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+                &reference_info,
+                "not-a-did",
+            )
+            .await
+            {
                 Err(AciError::DidX509(actual)) => {
                     assert_eq!(actual, UNSUPPORTED_DIDX509)
                 }
@@ -562,15 +902,38 @@ mod asynchronous {
                 format!("{TRUSTED_ACI_DIDX509_PREFIX}::eku:1.3.6.1.4.1.311.76.59.1.{eku}")
             };
             for (issuer_eku, trusted, expected) in [
-                (2, TRUSTED_ACI_DIDX509_PREFIX.to_string(), UNSUPPORTED_DIDX509.to_string()),
-                (2, did(1), format!("issuer DID {} does not match trusted DID {}", did(2), did(1))),
-                (3, did(3), format!("x5chain leaf certificate does not have the extended key usage required by trusted DID {}", did(3))),
+                (
+                    2,
+                    TRUSTED_ACI_DIDX509_PREFIX.to_string(),
+                    UNSUPPORTED_DIDX509.to_string(),
+                ),
+                (
+                    2,
+                    did(1),
+                    format!("issuer DID {} does not match trusted DID {}", did(2), did(1)),
+                ),
+                (
+                    3,
+                    did(3),
+                    format!(
+                        "x5chain leaf certificate does not have the extended key usage required by trusted DID {}",
+                        did(3)
+                    ),
+                ),
             ] {
                 let mut reference_info = reference_info.clone();
                 let issuer = TRUSTED_ACI_DIDX509.as_bytes();
-                let at = reference_info.windows(issuer.len()).position(|w| w == issuer).unwrap();
+                let at = reference_info
+                    .windows(issuer.len())
+                    .position(|w| w == issuer)
+                    .unwrap();
                 reference_info[at + issuer.len() - 1] = b'0' + issuer_eku;
-                match crate::asynchronous::verify_uvm_endorsement(&reference_info, &trusted).await {
+                match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+                    &reference_info,
+                    &trusted,
+                )
+                .await
+                {
                     Err(AciError::DidX509(actual)) => assert_eq!(actual, expected),
                     other => panic!("expected DidX509 error for {}, got {other:?}", fixture.name),
                 }
@@ -578,7 +941,7 @@ mod asynchronous {
 
             let mut tampered_signature = reference_info;
             *tampered_signature.last_mut().unwrap() ^= 1;
-            match crate::asynchronous::verify_uvm_endorsement(
+            match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
                 &tampered_signature,
                 TRUSTED_ACI_DIDX509,
             )
@@ -595,7 +958,12 @@ mod asynchronous {
             }
         }
 
-        match crate::asynchronous::verify_uvm_endorsement(b"not cose", TRUSTED_ACI_DIDX509).await {
+        match crate::asynchronous::verify_uvm_endorsement_with_root_pin(
+            b"not cose",
+            TRUSTED_ACI_DIDX509,
+        )
+        .await
+        {
             Err(AciError::Cose(actual)) => assert_eq!(actual, "Failed to parse CBOR bytes"),
             other => panic!("expected Cose error, got {other:?}"),
         }
@@ -604,7 +972,9 @@ mod asynchronous {
         // byte string where a COSE_Sign1 belongs.
         let mut large = vec![0x5a, 0x00, 0x10, 0x00, 0x00];
         large.resize(large.len() + (1 << 20), 0);
-        match crate::asynchronous::verify_uvm_endorsement(&large, TRUSTED_ACI_DIDX509).await {
+        match crate::asynchronous::verify_uvm_endorsement_with_root_pin(&large, TRUSTED_ACI_DIDX509)
+            .await
+        {
             Err(AciError::Cose(actual)) => {
                 assert_eq!(actual, "expected tagged COSE_Sign1 envelope")
             }
@@ -623,7 +993,7 @@ mod asynchronous {
             let report = crate::asynchronous::verify_attestation(&attestation, &endorsement_refs)
                 .await
                 .unwrap();
-            let uvm = crate::asynchronous::verify_uvm_endorsement(
+            let uvm = crate::asynchronous::verify_uvm_endorsement_with_root_pin(
                 &reference_info_fixture(fixture),
                 TRUSTED_ACI_DIDX509,
             )
@@ -631,7 +1001,7 @@ mod asynchronous {
             .unwrap()
             .into_owned();
 
-            let report_data = verify_caci_attestation(
+            let report_data = verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -643,7 +1013,7 @@ mod asynchronous {
             .unwrap();
             assert_eq!(report_data, report.report_data, "{}", fixture.name);
 
-            let report_data = verify_caci_attestation(
+            let report_data = verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -655,7 +1025,7 @@ mod asynchronous {
             .unwrap();
             assert_eq!(report_data, report.report_data, "{}", fixture.name);
 
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -673,8 +1043,15 @@ mod asynchronous {
 
             let mut policy = report.host_data;
             policy[0] ^= 1;
-            match verify_caci_attestation(report, Vec::new(), vec![policy], &uvm, ACI_FEED, ACI_SVN)
-                .await
+            match verify_caci_attestation_with_minimum_tcb(
+                report,
+                Vec::new(),
+                vec![policy],
+                &uvm,
+                ACI_FEED,
+                ACI_SVN,
+            )
+            .await
             {
                 Err(AciError::Policy(actual)) => {
                     assert_eq!(actual, "SNP HOST_DATA does not match trusted policy")
@@ -683,7 +1060,7 @@ mod asynchronous {
             }
 
             let wrong_feed = replace_cose_feed(uvm.clone(), "not-confidential-aci");
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 report,
                 Vec::new(),
                 vec![report.host_data],
@@ -703,7 +1080,7 @@ mod asynchronous {
             let matching_cpuid = snp::Cpuid::from(fixture.cpuid);
             let mut minimum_tcb = report.reported_tcb;
             minimum_tcb.raw[0] = minimum_tcb.raw[0].saturating_add(1);
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 report,
                 vec![(matching_cpuid, minimum_tcb)],
                 vec![report.host_data],
@@ -719,7 +1096,7 @@ mod asynchronous {
 
             let mut wrong_measurement = report;
             wrong_measurement.measurement[0] ^= 1;
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 wrong_measurement,
                 Vec::new(),
                 vec![wrong_measurement.host_data],
@@ -740,7 +1117,7 @@ mod asynchronous {
             }
 
             let debug_report = report_with_debug_enabled(fixture);
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 debug_report,
                 Vec::new(),
                 vec![debug_report.host_data],
@@ -757,7 +1134,7 @@ mod asynchronous {
             }
 
             let host_report = report_with_vmpl(fixture, 4);
-            match verify_caci_attestation(
+            match verify_caci_attestation_with_minimum_tcb(
                 host_report,
                 Vec::new(),
                 vec![host_report.host_data],
@@ -790,7 +1167,7 @@ mod asynchronous {
 
         let missing_svn_int =
             replace_cose_payload(uvm.clone(), reference_payload_without_guestsvn_int(report));
-        match verify_caci_attestation(
+        match verify_caci_attestation_with_minimum_tcb(
             report,
             Vec::new(),
             vec![report.host_data],
@@ -808,7 +1185,7 @@ mod asynchronous {
 
         let uppercase_measurement =
             replace_cose_payload(uvm, reference_payload_with_uppercase_measurement(report));
-        match verify_caci_attestation(
+        match verify_caci_attestation_with_minimum_tcb(
             report,
             Vec::new(),
             vec![report.host_data],

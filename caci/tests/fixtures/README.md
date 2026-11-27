@@ -30,3 +30,12 @@ The transparent/SCITT files in this directory are:
   information from the CACI security context.
 - `report-scitt-cwt.hex`: SNP attestation report generated with
   `/tools/get-snp-report`.
+
+`aci-cc-tcb-reference-info.cose` is a signed TCB manifest supplied for regression
+testing. It contains two AMD SEV-SNP watermarks and was signed with a test
+certificate chain (ES256). Do not use the fixture's trust anchor in production.
+
+`aci-cc-tcb-reference-info.prod.cose` is a production-signed TCB manifest
+containing the same two AMD SEV-SNP watermarks, signed under the production
+Microsoft Supply Chain RSA Root CA 2022 chain (PS256) with EKU
+`1.3.6.1.4.1.311.76.59.1.3`.
