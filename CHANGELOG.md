@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2]
+
+[2.0.2]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-2.0.2
+
+### Fixed
+
+- Remove build time warnings. (#190)
+
 ## [2.0.1]
 
 [2.0.1]: https://github.com/microsoft/TEE-Attestation-Verification/releases/tag/tav-2.0.1
